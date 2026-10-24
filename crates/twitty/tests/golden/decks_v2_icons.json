@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "decks": [
+    {
+      "name": "Main",
+      "icon": "rocket",
+      "columns": [
+        { "id": 1, "source": { "type": "home", "mode": "following" }, "width": 350 }
+      ]
+    },
+    {
+      "name": "Chill",
+      "icon": "coffee",
+      "columns": [
+        { "id": 2, "source": { "type": "bookmarks" }, "width": 350 }
+      ]
+    },
+    { "name": "Empty", "icon": "grid", "columns": [] }
+  ],
+  "active": 1,
+  "next_column_id": 3
+}

@@ -15,6 +15,7 @@ use twitty_model::{FeedSource, HomeMode, NotificationFilter, SearchSort};
 ///
 /// - v1: widths were presets (`"narrow"`, `"medium"`, `"wide"`).
 /// - v2: widths are pixels; columns gained a name and alert settings.
+///   Decks later gained an optional icon (added without a version bump).
 pub const SCHEMA_VERSION: u32 = 2;
 
 /// Stable identifier of a column within a deck file.
@@ -171,11 +172,114 @@ impl ColumnConfig {
     }
 }
 
+/// The icon a deck shows in the sidebar, picked by the user.
+///
+/// Stored by name; a name this version doesn't know loads as the default, so
+/// a file from a newer app never fails to load over an icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum DeckIcon {
+    #[default]
+    Grid,
+    House,
+    Star,
+    Bell,
+    Globe,
+    Zap,
+    Flame,
+    Heart,
+    Bookmark,
+    Briefcase,
+    Code,
+    Gamepad,
+    Music,
+    Film,
+    Newspaper,
+    Trophy,
+    Rocket,
+    Coffee,
+    Lightbulb,
+    Camera,
+}
+
+impl DeckIcon {
+    /// Every icon, in the order the picker shows them.
+    pub const ALL: [DeckIcon; 20] = [
+        Self::Grid,
+        Self::House,
+        Self::Star,
+        Self::Bell,
+        Self::Globe,
+        Self::Zap,
+        Self::Flame,
+        Self::Heart,
+        Self::Bookmark,
+        Self::Briefcase,
+        Self::Code,
+        Self::Gamepad,
+        Self::Music,
+        Self::Film,
+        Self::Newspaper,
+        Self::Trophy,
+        Self::Rocket,
+        Self::Coffee,
+        Self::Lightbulb,
+        Self::Camera,
+    ];
+
+    /// The name it is stored under.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Grid => "grid",
+            Self::House => "house",
+            Self::Star => "star",
+            Self::Bell => "bell",
+            Self::Globe => "globe",
+            Self::Zap => "zap",
+            Self::Flame => "flame",
+            Self::Heart => "heart",
+            Self::Bookmark => "bookmark",
+            Self::Briefcase => "briefcase",
+            Self::Code => "code",
+            Self::Gamepad => "gamepad",
+            Self::Music => "music",
+            Self::Film => "film",
+            Self::Newspaper => "newspaper",
+            Self::Trophy => "trophy",
+            Self::Rocket => "rocket",
+            Self::Coffee => "coffee",
+            Self::Lightbulb => "lightbulb",
+            Self::Camera => "camera",
+        }
+    }
+}
+
+impl From<String> for DeckIcon {
+    fn from(key: String) -> Self {
+        Self::ALL.into_iter().find(|icon| icon.key() == key).unwrap_or_default()
+    }
+}
+
+impl From<DeckIcon> for String {
+    fn from(icon: DeckIcon) -> Self {
+        icon.key().to_owned()
+    }
+}
+
 /// A named set of columns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Deck {
     pub name: String,
+    #[serde(default)]
+    pub icon: DeckIcon,
     pub columns: Vec<ColumnConfig>,
+}
+
+impl Deck {
+    /// An empty deck with the default icon.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into(), icon: DeckIcon::default(), columns: Vec::new() }
+    }
 }
 
 /// Everything stored in `decks.json`.
@@ -204,7 +308,7 @@ impl Default for DeckFile {
     fn default() -> Self {
         let mut file = DeckFile {
             schema_version: SCHEMA_VERSION,
-            decks: vec![Deck { name: "Main".into(), columns: Vec::new() }],
+            decks: vec![Deck::new("Main")],
             active: 0,
             next_column_id: 1,
         };
@@ -307,13 +411,26 @@ impl DeckFile {
         self.active.min(self.decks.len().saturating_sub(1))
     }
 
-    /// Adds an empty deck named "Deck N" and makes it active. Returns its index.
-    pub fn add_deck(&mut self) -> usize {
-        // The lowest free number; "Main" counts as deck 1.
+    /// The name a new deck gets by default: "Deck N", N the lowest free number.
+    pub fn next_deck_name(&self) -> String {
+        // "Main" counts as deck 1.
         let n = (2..)
             .find(|n| !self.decks.iter().any(|d| d.name == format!("Deck {n}")))
             .unwrap_or(self.decks.len() + 1);
-        self.decks.push(Deck { name: format!("Deck {n}"), columns: Vec::new() });
+        format!("Deck {n}")
+    }
+
+    /// Adds an empty deck named "Deck N" and makes it active. Returns its index.
+    pub fn add_deck(&mut self) -> usize {
+        self.add_named_deck("", DeckIcon::default())
+    }
+
+    /// Adds an empty deck called `name` (trimmed; blank gets
+    /// [`Self::next_deck_name`]) with `icon`, and makes it active. Returns its index.
+    pub fn add_named_deck(&mut self, name: &str, icon: DeckIcon) -> usize {
+        let name = name.trim();
+        let name = if name.is_empty() { self.next_deck_name() } else { name.to_owned() };
+        self.decks.push(Deck { icon, ..Deck::new(name) });
         self.active = self.decks.len() - 1;
         self.active
     }
@@ -342,6 +459,29 @@ impl DeckFile {
         true
     }
 
+    /// Renames deck `index`. The name is trimmed; blank text keeps the old
+    /// name, since a deck always has one. Returns whether the name changed.
+    pub fn rename_deck(&mut self, index: usize, name: &str) -> bool {
+        let name = name.trim();
+        match self.decks.get_mut(index) {
+            Some(deck) if !name.is_empty() && deck.name != name => {
+                deck.name = name.to_owned();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Sets the icon of deck `index`. Returns whether the deck exists.
+    pub fn set_deck_icon(&mut self, index: usize, icon: DeckIcon) -> bool {
+        let deck = self.decks.get_mut(index);
+        let exists = deck.is_some();
+        if let Some(deck) = deck {
+            deck.icon = icon;
+        }
+        exists
+    }
+
     /// Mutable access to one column's settings.
     pub fn column_mut(&mut self, id: ColumnId) -> Option<&mut ColumnConfig> {
         self.active_mut().columns.iter_mut().find(|c| c.id == id)
@@ -350,7 +490,7 @@ impl DeckFile {
     /// Fixes inconsistencies a hand-edited or partially written file may contain.
     fn repair(&mut self) {
         if self.decks.is_empty() {
-            self.decks.push(Deck { name: "Main".into(), columns: Vec::new() });
+            self.decks.push(Deck::new("Main"));
         }
         if self.active >= self.decks.len() {
             self.active = 0;
@@ -446,6 +586,7 @@ mod tests {
         assert_eq!(cols[2].settings.width, ColumnWidth::default());
         assert!(cols.iter().all(|c| c.settings.name.is_none()));
         assert!(cols.iter().all(|c| c.settings.alerts == ColumnAlerts::default()));
+        assert_eq!(file.active().icon, DeckIcon::default(), "v1 decks get the default icon");
     }
 
     #[test]
@@ -471,11 +612,82 @@ mod tests {
         );
         assert_eq!(cols[2].settings, ColumnSettings::default(), "every field is optional");
         assert_eq!(cols[2].settings.title(&cols[2].source), "Notifications");
+        assert_eq!(file.active().icon, DeckIcon::default(), "v2 decks get the default icon");
 
         // Saving writes the same shape back.
         let saved: serde_json::Value = serde_json::from_str(&file.to_json().unwrap()).unwrap();
         let golden: serde_json::Value = serde_json::from_str(json).unwrap();
         assert_eq!(saved["decks"][0]["columns"][1], golden["decks"][0]["columns"][1]);
+    }
+
+    #[test]
+    fn golden_v2_with_icons_loads() {
+        let json = include_str!("../../tests/golden/decks_v2_icons.json");
+        let file = DeckFile::from_json(json).unwrap();
+        assert_eq!(file.schema_version, SCHEMA_VERSION);
+        let icons: Vec<_> = file.decks.iter().map(|d| d.icon).collect();
+        assert_eq!(icons, [DeckIcon::Rocket, DeckIcon::Coffee, DeckIcon::Grid]);
+        assert_eq!(file.active().name, "Chill");
+        assert_eq!(file.active().columns.len(), 1);
+
+        // Saving writes the icons back under the same names.
+        let saved: serde_json::Value = serde_json::from_str(&file.to_json().unwrap()).unwrap();
+        let golden: serde_json::Value = serde_json::from_str(json).unwrap();
+        for ix in 0..3 {
+            assert_eq!(saved["decks"][ix]["icon"], golden["decks"][ix]["icon"], "deck {ix}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_deck_icon_loads_as_the_default() {
+        let json = r#"{"schema_version":2,"decks":[{"name":"A","icon":"unicorn","columns":[]}],"next_column_id":1}"#;
+        let file = DeckFile::from_json(json).unwrap();
+        assert_eq!(file.active().icon, DeckIcon::default());
+    }
+
+    #[test]
+    fn every_deck_icon_round_trips_by_its_key() {
+        for icon in DeckIcon::ALL {
+            assert_eq!(DeckIcon::from(String::from(icon)), icon, "{}", icon.key());
+        }
+        let mut keys: Vec<_> = DeckIcon::ALL.iter().map(|i| i.key()).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), DeckIcon::ALL.len(), "keys are unique");
+    }
+
+    #[test]
+    fn a_new_deck_can_be_named_and_given_an_icon() {
+        let mut file = DeckFile::default();
+        assert_eq!(file.next_deck_name(), "Deck 2");
+        assert_eq!(file.add_named_deck("  News ", DeckIcon::Newspaper), 1);
+        assert_eq!(
+            (file.active().name.as_str(), file.active().icon),
+            ("News", DeckIcon::Newspaper)
+        );
+        assert!(file.active().columns.is_empty());
+        file.add_named_deck(" ", DeckIcon::Star);
+        assert_eq!(file.active().name, "Deck 2", "blank gets the default name");
+    }
+
+    #[test]
+    fn decks_can_be_renamed_and_given_an_icon() {
+        let mut file = DeckFile::default();
+        file.add_deck();
+        assert!(file.rename_deck(1, "  Work  "));
+        assert_eq!(file.decks[1].name, "Work", "trimmed");
+        assert!(!file.rename_deck(1, "   "), "blank keeps the name");
+        assert_eq!(file.decks[1].name, "Work");
+        assert!(!file.rename_deck(1, "Work"), "same name is no change");
+        assert!(!file.rename_deck(9, "Nope"));
+
+        assert!(file.set_deck_icon(1, DeckIcon::Briefcase));
+        assert_eq!(file.decks[1].icon, DeckIcon::Briefcase);
+        assert_eq!(file.decks[0].icon, DeckIcon::default(), "only that deck");
+        assert!(!file.set_deck_icon(9, DeckIcon::Star));
+
+        let back = DeckFile::from_json(&file.to_json().unwrap()).unwrap();
+        assert_eq!(back, file);
     }
 
     #[test]

@@ -41,6 +41,29 @@ gpui_kit::assets::icon_assets!(
         LogIn,
         LogOut,
         UsersRound,
+        // The sidebar.
+        PanelLeftOpen,
+        PanelLeftClose,
+        Pencil,
+        Trash,
+        ListPlus,
+        // Deck icons (`ui::deck_settings::icon`).
+        LayoutGrid,
+        Star,
+        Globe,
+        Zap,
+        Flame,
+        Briefcase,
+        Code,
+        Gamepad2,
+        Music,
+        Film,
+        Newspaper,
+        Trophy,
+        Rocket,
+        Coffee,
+        Lightbulb,
+        Camera,
     ]
 );
 
@@ -116,6 +139,11 @@ mod tests {
             IconName::LogIn,
             IconName::LogOut,
             IconName::UsersRound,
+            IconName::PanelLeftOpen,
+            IconName::PanelLeftClose,
+            IconName::Pencil,
+            IconName::Trash,
+            IconName::ListPlus,
             // The title bar's window buttons.
             IconName::WindowMinimize,
             IconName::WindowMaximize,
@@ -123,6 +151,14 @@ mod tests {
             IconName::WindowClose,
         ] {
             let path = name.path();
+            assert!(Assets.load(&path).unwrap().is_some(), "missing icon {path}");
+        }
+    }
+
+    #[test]
+    fn every_deck_icon_resolves() {
+        for icon in crate::state::deck::DeckIcon::ALL {
+            let path = crate::ui::deck_settings::icon(icon).path();
             assert!(Assets.load(&path).unwrap().is_some(), "missing icon {path}");
         }
     }

@@ -8,6 +8,7 @@ pub mod button;
 pub mod column;
 pub mod column_settings;
 pub mod compose;
+pub mod deck_settings;
 pub mod gif;
 pub mod hub;
 pub mod keys;

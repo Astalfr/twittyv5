@@ -54,8 +54,8 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `search_users` (one 
 ## Persistence and versioning
 
 Saved files:
-- `decks.json`: decks, columns, `FeedSource`, and each column's name, width (px) and alerts (sound, volume, system notification). v1 → v2 turned the width presets into pixels (narrow 310, medium 350, wide 400).
-- `settings.json`: theme, `polling` and `animations` (optional, added without a version bump; absent = on)
+- `decks.json`: decks (name, icon), columns, `FeedSource`, and each column's name, width (px) and alerts (sound, volume, system notification). v1 → v2 turned the width presets into pixels (narrow 310, medium 350, wide 400). The deck `icon` was added later without a bump (absent or unknown = the grid icon).
+- `settings.json`: theme, `polling` and `animations` (optional, added without a version bump; absent = on), `gif_autoplay` and `sidebar_expanded` (same; absent = off)
 - the keyring entry holding the session (`{schema_version, auth_token, ct0}`, see `twitty::account`)
 - the optional post cache
 

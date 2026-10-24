@@ -3,10 +3,10 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, AnyView, AnyWindowHandle, Context, Entity, FocusHandle,
-    FontWeight, ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render, Resource,
-    ScrollHandle, SharedUri, Styled, StyledImage, Subscription, Task, Window, assets::IconName,
-    canvas, component::button::*, component::checkbox::Checkbox,
+    Animation, AnimationExt, AnyElement, AnyView, AnyWindowHandle, Context, ElementId, Entity,
+    FocusHandle, FontWeight, ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render,
+    Resource, ScrollHandle, SharedString, SharedUri, Styled, StyledImage, Subscription, Task,
+    Window, assets::IconName, canvas, component::button::*, component::checkbox::Checkbox,
     component::scroll::ScrollableElement, component::*, div, img, prelude::*, px,
 };
 use twitty_model::{
@@ -17,7 +17,7 @@ use crate::{
     account::{AccountServices, SessionSource},
     runtime::Runtime,
     state::{
-        deck::{ColumnConfig, ColumnId, ColumnSettings, DeckFile},
+        deck::{ColumnConfig, ColumnId, ColumnSettings, DeckFile, DeckIcon},
         interactions::Toggle,
         media_layout::{self, viewer},
         motion,
@@ -29,9 +29,10 @@ use crate::{
     ui::button::TextButton,
     ui::{
         add_column::{AddColumnEvent, AddColumnView},
-        column::{ColumnEvent, ColumnView, source_icon},
+        column::{ColumnEvent, ColumnView},
         column_settings::{ColumnSettingsEvent, ColumnSettingsView},
         compose::{ComposeEvent, ComposeView},
+        deck_settings::{self, DeckSettingsEvent, DeckSettingsView, DeckTarget},
         gif::GifAutoplay,
         hub::{InteractionsHub, Navigate},
         keys,
@@ -53,8 +54,14 @@ const BACKDROP_ALPHA: f32 = 0.7;
 /// Height of the strip under the deck reserved for its horizontal scrollbar.
 const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
 /// Radius of the deck area's top-left corner, where the title bar and the
-/// rail meet. At most the deck bar's padding, so a hovered tab stays inside it.
+/// rail meet.
 const CHROME_RADIUS: f32 = 8.0;
+
+/// Width of the sidebar with icons only, and expanded (with labels).
+const RAIL_WIDTH: f32 = 68.0;
+const RAIL_EXPANDED_WIDTH: f32 = 220.0;
+/// Height of a sidebar entry.
+const RAIL_ENTRY_HEIGHT: f32 = 48.0;
 
 /// The signed-in account's avatar in the sidebar, in logical pixels.
 const ACCOUNT_AVATAR: f32 = 30.0;
@@ -75,7 +82,8 @@ struct Leaving<T> {
 /// An overlay that just closed (see [`Leaving`]).
 enum LeavingOverlay {
     Media(Arc<twitty_model::Post>, usize),
-    /// A dialog view: sign-in, add column, column settings, compose, people search.
+    /// A dialog view: sign-in, add column, column or deck settings, compose,
+    /// people search.
     View(AnyView),
     Account,
     Settings,
@@ -135,6 +143,7 @@ pub struct TwittyApp {
     login: Option<Entity<LoginView>>,
     add_column: Option<Entity<AddColumnView>>,
     column_settings: Option<Entity<ColumnSettingsView>>,
+    deck_settings: Option<Entity<DeckSettingsView>>,
     compose: Option<Entity<ComposeView>>,
     user_search: Option<Entity<UserSearchView>>,
     /// The side sheet: a conversation or a profile.
@@ -168,6 +177,7 @@ pub struct TwittyApp {
     _login_sub: Option<Subscription>,
     _add_sub: Option<Subscription>,
     _column_settings_sub: Option<Subscription>,
+    _deck_settings_sub: Option<Subscription>,
     _compose_sub: Option<Subscription>,
     _user_search_sub: Option<Subscription>,
     _sheet_sub: Option<Subscription>,
@@ -213,6 +223,7 @@ impl TwittyApp {
             login: None,
             add_column: None,
             column_settings: None,
+            deck_settings: None,
             compose: None,
             user_search: None,
             sheet: None,
@@ -234,6 +245,7 @@ impl TwittyApp {
             _login_sub: None,
             _add_sub: None,
             _column_settings_sub: None,
+            _deck_settings_sub: None,
             _compose_sub: None,
             _user_search_sub: None,
             _sheet_sub: None,
@@ -448,6 +460,7 @@ impl TwittyApp {
         self.login.is_some()
             || self.add_column.is_some()
             || self.column_settings.is_some()
+            || self.deck_settings.is_some()
             || self.compose.is_some()
             || self.user_search.is_some()
             || self.account_panel
@@ -911,6 +924,8 @@ impl TwittyApp {
             Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.column_settings {
             Some(LeavingOverlay::View(view.clone().into()))
+        } else if let Some(view) = &self.deck_settings {
+            Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.compose {
             Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.user_search {
@@ -935,6 +950,8 @@ impl TwittyApp {
             self.persist(cx);
         }
         self._column_settings_sub = None;
+        self.deck_settings = None;
+        self._deck_settings_sub = None;
         self.compose = None;
         self._compose_sub = None;
         self.user_search = None;
@@ -993,9 +1010,10 @@ impl TwittyApp {
         self.persist(cx);
     }
 
-    /// Adds an empty deck and switches to it.
-    pub fn add_deck(&mut self, cx: &mut Context<Self>) {
-        self.deck.add_deck();
+    /// Adds an empty deck called `name` (blank: "Deck N") with `icon`, and
+    /// switches to it.
+    pub fn add_deck(&mut self, name: &str, icon: DeckIcon, cx: &mut Context<Self>) {
+        self.deck.add_named_deck(name, icon);
         self.deck_scroll.set_offset(gpui_kit::point(px(0.), px(0.)));
         self.build_columns(cx);
         self.persist(cx);
@@ -1011,6 +1029,71 @@ impl TwittyApp {
             self.persist(cx);
             cx.notify();
         }
+    }
+
+    pub fn deck_settings_dialog(&self) -> Option<&Entity<DeckSettingsView>> {
+        self.deck_settings.as_ref()
+    }
+
+    /// Shows the deck dialog: name and icon of a new deck, or of deck
+    /// `index` (which it can also remove).
+    pub fn open_deck_settings(
+        &mut self,
+        index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (target, name, icon) = match index {
+            None => (DeckTarget::New, self.deck.next_deck_name(), DeckIcon::default()),
+            Some(index) => {
+                let Some(deck) = self.deck.decks.get(index) else {
+                    return;
+                };
+                let removable = self.deck.decks.len() > 1;
+                (DeckTarget::Existing { index, removable }, deck.name.clone(), deck.icon)
+            }
+        };
+        self.close_overlays(cx);
+        let view = cx.new(|cx| DeckSettingsView::new(target, &name, icon, window, cx));
+        self._deck_settings_sub =
+            Some(cx.subscribe(&view, |this, _, e: &DeckSettingsEvent, cx| match e {
+                DeckSettingsEvent::Renamed(ix, name) => {
+                    if this.deck.rename_deck(*ix, name) {
+                        this.persist(cx);
+                        cx.notify();
+                    }
+                }
+                DeckSettingsEvent::IconChanged(ix, icon) => {
+                    if this.deck.set_deck_icon(*ix, *icon) {
+                        this.persist(cx);
+                        cx.notify();
+                    }
+                }
+                DeckSettingsEvent::Remove(ix) => {
+                    let ix = *ix;
+                    this.close_overlays(cx);
+                    this.remove_deck(ix, cx);
+                }
+                DeckSettingsEvent::Create(name, icon) => {
+                    let (name, icon) = (name.clone(), *icon);
+                    this.close_overlays(cx);
+                    this.add_deck(&name, icon, cx);
+                }
+                DeckSettingsEvent::Dismissed => this.close_overlays(cx),
+            }));
+        self.deck_settings = Some(view);
+        cx.notify();
+    }
+
+    /// Whether the sidebar shows labels and the decks' edit buttons.
+    pub fn sidebar_expanded(&self) -> bool {
+        self.settings.sidebar_expanded()
+    }
+
+    /// Expands or collapses the sidebar, and saves the choice.
+    pub fn set_sidebar_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
+        self.settings.sidebar_expanded = Some(expanded);
+        self.save_settings(cx);
     }
 
     /// Switches to a session that signed in through the dialog.
@@ -1399,59 +1482,6 @@ impl TwittyApp {
             .into_any_element()
     }
 
-    fn render_deck_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let active = self.deck.active_index();
-        let removable = self.deck.decks.len() > 1;
-        let tabs = self.deck.decks.iter().enumerate().map(|(ix, deck)| {
-            let is_active = ix == active;
-            h_flex()
-                .id(("deck-tab", ix))
-                .h_full()
-                .px_3()
-                .gap_1()
-                .items_center()
-                .cursor_pointer()
-                .border_b_2()
-                .border_color(if is_active { theme.primary } else { theme.transparent })
-                .text_color(if is_active { theme.foreground } else { theme.muted_foreground })
-                .font_weight(if is_active { FontWeight::BOLD } else { FontWeight::MEDIUM })
-                .hover(|s| s.bg(theme.list_hover))
-                .on_click(cx.listener(move |this, _, _, cx| this.switch_deck(ix, cx)))
-                .child(deck.name.clone())
-                .when(is_active && removable, |d| {
-                    d.child(
-                        Button::new(("deck-remove", ix))
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::X)
-                            .tooltip("Remove deck")
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.remove_deck(ix, cx);
-                            })),
-                    )
-                })
-        });
-        h_flex()
-            .flex_none()
-            .h(px(36.))
-            .px_2()
-            .gap_1()
-            .border_b_1()
-            .border_color(theme.border)
-            .text_sm()
-            .children(tabs)
-            .child(
-                Button::new("deck-add")
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::Plus)
-                    .tooltip("New deck")
-                    .on_click(cx.listener(|this, _, _, cx| this.add_deck(cx))),
-            )
-    }
-
     fn render_account_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.options.account.as_ref()?;
         let button = Button::new("account")
@@ -1550,75 +1580,179 @@ impl TwittyApp {
             .into_any_element()
     }
 
-    fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let rail_button = |name: &'static str, icon: IconName, tip: &'static str| {
-            Button::new(name)
+    /// One sidebar entry: an icon button with its label as tooltip, or, in
+    /// the expanded sidebar, a row with the icon, the label and `trailing`.
+    fn render_rail_entry(
+        &self,
+        entry: RailEntry,
+        trailing: Option<AnyElement>,
+        on_click: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let RailEntry { id, selector, icon, label, selected } = entry;
+        let on_click = cx.listener(move |this, _, window, cx| on_click(this, window, cx));
+        if !self.sidebar_expanded() {
+            return Button::new(id)
+                .debug_selector(move || selector)
                 .ghost()
                 .large()
-                .icon(Icon::new(icon).size(px(26.)))
-                .tooltip(tip)
+                .icon(Icon::new(icon).size(px(24.)))
+                .tooltip(label)
+                .selected(selected)
                 .w(px(52.))
-                .h(px(52.))
+                .h(px(RAIL_ENTRY_HEIGHT))
+                .on_click(on_click)
+                .into_any_element();
+        }
+        let theme = cx.theme();
+        h_flex()
+            .id(id)
+            .debug_selector(move || selector)
+            .w_full()
+            .h(px(RAIL_ENTRY_HEIGHT))
+            .pl(px(14.))
+            .pr_2()
+            .gap_3()
+            .items_center()
+            .rounded_lg()
+            .cursor_pointer()
+            .when(selected, |d| d.bg(theme.list_active).font_weight(FontWeight::BOLD))
+            .hover(|s| s.bg(theme.list_hover))
+            .child(Icon::new(icon).size(px(24.)))
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .children(trailing)
+            .on_click(on_click)
+            .into_any_element()
+    }
+
+    fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let expanded = self.sidebar_expanded();
+        let action = |name: &'static str, icon: IconName, label: &'static str| RailEntry {
+            id: name.into(),
+            selector: format!("rail-{name}"),
+            icon,
+            label: label.into(),
+            selected: false,
+        };
+        let compose = Button::new("compose")
+            .debug_selector(|| "rail-compose".into())
+            .primary()
+            .icon(Icon::new(IconName::PenLine).size(px(22.)))
+            .rounded_full()
+            .h(px(52.))
+            .on_click(cx.listener(|this, _, window, cx| this.open_compose(None, window, cx)));
+        let compose = if expanded {
+            compose.text_button(Size::Large).label("Post").w_full().h(px(48.))
+        } else {
+            compose.tooltip("Post").w(px(52.))
+        };
+        let active = self.deck.active_index();
+        let decks: Vec<_> = self
+            .deck
+            .decks
+            .iter()
+            .enumerate()
+            .map(|(ix, deck)| {
+                let entry = RailEntry {
+                    id: ("rail-deck", ix).into(),
+                    selector: format!("rail-deck-{ix}"),
+                    icon: deck_settings::icon(deck.icon),
+                    label: deck.name.clone().into(),
+                    selected: ix == active,
+                };
+                let edit = expanded.then(|| {
+                    Button::new(("deck-edit", ix))
+                        .debug_selector(move || format!("deck-edit-{ix}"))
+                        .ghost()
+                        .small()
+                        .icon(IconName::Pencil)
+                        .tooltip("Edit deck")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            // Editing a deck doesn't switch to it.
+                            cx.stop_propagation();
+                            this.open_deck_settings(Some(ix), window, cx);
+                        }))
+                        .into_any_element()
+                });
+                self.render_rail_entry(entry, edit, move |this, _, cx| this.switch_deck(ix, cx), cx)
+            })
+            .collect();
+        let toggle = if expanded {
+            action("toggle", IconName::PanelLeftClose, "Collapse menu")
+        } else {
+            action("toggle", IconName::PanelLeftOpen, "Expand menu")
         };
         v_flex()
             .flex_none()
-            .w(px(68.))
+            .w(px(if expanded { RAIL_EXPANDED_WIDTH } else { RAIL_WIDTH }))
             .h_full()
-            .items_center()
             .py_2()
             .gap_1()
-            // One button per column; clicking scrolls the deck until the whole
-            // column is visible. Scrolls itself when the deck is taller than the rail.
+            .map(|d| if expanded { d.px_2() } else { d.items_center() })
+            .child(compose)
+            .child(self.render_rail_entry(
+                action("search-people", IconName::Search, "Search people"),
+                None,
+                |this, window, cx| this.open_user_search(window, cx),
+                cx,
+            ))
+            .child(self.render_rail_entry(
+                action("add-column", IconName::ListPlus, "Add column"),
+                None,
+                |this, window, cx| this.open_add_column(window, cx),
+                cx,
+            ))
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(1.))
+                    .my_1()
+                    .map(|d| if expanded { d.w_full() } else { d.w(px(36.)) })
+                    .bg(theme.border),
+            )
+            // One entry per deck; clicking one switches to it. Scrolls itself
+            // when there are more decks than fit.
             .child(
                 v_flex()
-                    .id("rail-columns")
+                    .id("rail-decks")
                     .min_h_0()
-                    .items_center()
                     .gap_1()
                     .overflow_y_scroll()
-                    .children(self.columns.iter().enumerate().map(|(ix, (_, view))| {
-                        let column = view.read(cx);
-                        Button::new(("rail-column", ix))
-                            .ghost()
-                            .large()
-                            .icon(Icon::new(source_icon(column.model().source())).size(px(22.)))
-                            .tooltip(column.title())
-                            .selected(ix == self.active_column)
-                            .w(px(52.))
-                            .h(px(44.))
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.set_active_column(ix, cx)),
-                            )
-                    })),
+                    .map(|d| if expanded { d.w_full() } else { d.items_center() })
+                    .children(decks),
             )
-            .child(
-                rail_button("add-column", IconName::Plus, "Add column")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_add_column(window, cx))),
-            )
-            .child(
-                rail_button("search-people", IconName::Search, "Search people")
-                    .debug_selector(|| "rail-search-people".into())
-                    .on_click(cx.listener(|this, _, window, cx| this.open_user_search(window, cx))),
-            )
+            .child(self.render_rail_entry(
+                action("deck-add", IconName::Plus, "New deck"),
+                None,
+                |this, window, cx| this.open_deck_settings(None, window, cx),
+                cx,
+            ))
             .child(div().flex_1())
             .children(self.render_account_button(cx))
-            .child(
-                rail_button("settings", IconName::Settings, "Settings")
-                    .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
-            )
-            .child(
-                Button::new("compose")
-                    .primary()
-                    .icon(Icon::new(IconName::PenLine).size(px(22.)))
-                    .tooltip("Post")
-                    .rounded_full()
-                    .w(px(52.))
-                    .h(px(52.))
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_compose(None, window, cx)),
-                    ),
-            )
+            .child(self.render_rail_entry(
+                action("settings", IconName::Settings, "Settings"),
+                None,
+                |this, _, cx| this.open_settings(cx),
+                cx,
+            ))
+            .child(self.render_rail_entry(
+                toggle,
+                None,
+                move |this, _, cx| this.set_sidebar_expanded(!expanded, cx),
+                cx,
+            ))
     }
+}
+
+/// What a sidebar entry shows (see `TwittyApp::render_rail_entry`).
+struct RailEntry {
+    id: ElementId,
+    /// For tests (`debug_bounds`).
+    selector: String,
+    icon: IconName,
+    label: SharedString,
+    selected: bool,
 }
 
 impl Render for TwittyApp {
@@ -1694,6 +1828,8 @@ impl Render for TwittyApp {
             Some(("add-column", true, add.clone().into_any_element()))
         } else if let Some(view) = &self.column_settings {
             Some(("column-settings", true, view.clone().into_any_element()))
+        } else if let Some(view) = &self.deck_settings {
+            Some(("deck-settings", true, view.clone().into_any_element()))
         } else if let Some(compose) = &self.compose {
             Some(("compose", true, compose.clone().into_any_element()))
         } else if let Some(view) = &self.user_search {
@@ -1819,7 +1955,6 @@ impl Render for TwittyApp {
                             .border_color(theme.border)
                             .rounded_tl(px(CHROME_RADIUS))
                             .children(banner)
-                            .child(self.render_deck_bar(cx))
                             .child(div().flex_1().min_h_0().flex().child(body)),
                     )
                     .when_some(self.sheet.as_ref().map(Sheet::view), |d, panel| {
@@ -2199,7 +2334,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn rail_column_button_scrolls_the_whole_column_into_view(cx: &mut TestAppContext) {
+    fn the_active_column_scrolls_fully_into_view(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             cx.set_global(crate::runtime::Runtime::inline());
@@ -2222,7 +2357,7 @@ mod tests {
         };
         assert!(!fully_visible(7, cx), "the last column starts off screen");
 
-        // The rail button's click handler.
+        // What the column keys (h/l, arrows) end up calling.
         app.update(cx, |app, cx| app.set_active_column(7, cx));
         cx.run_until_parked();
         assert!(fully_visible(7, cx), "the last column is scrolled fully into view");
@@ -2391,7 +2526,7 @@ mod tests {
         let store = MemoryStore::default();
         let (app, cx) = start(cx, MockBackend::new(), None, &store);
         let main_columns = column_entities(&app, cx);
-        app.update(cx, |app, cx| app.add_deck(cx));
+        app.update(cx, |app, cx| app.add_deck("", DeckIcon::default(), cx));
         assert_eq!(app.read_with(cx, |app, _| app.columns().count()), 0, "new deck is empty");
         app.update(cx, |app, cx| app.add_column(FeedSource::Bookmarks, cx));
         app.update(cx, |app, cx| app.switch_deck(0, cx));
@@ -2402,6 +2537,138 @@ mod tests {
             assert_eq!(app.deck().decks.len(), 1);
             assert_eq!(app.columns().count(), main_columns.len());
         });
+    }
+
+    #[gpui_kit::test]
+    fn the_sidebar_has_post_search_and_add_column_then_the_decks(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let top = |cx: &mut VisualTestContext, selector: &'static str| {
+            cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} drawn")).top()
+        };
+        let order = ["rail-compose", "rail-search-people", "rail-add-column", "rail-deck-0"];
+        let tops: Vec<_> = order.into_iter().map(|selector| top(cx, selector)).collect();
+        assert!(
+            tops.windows(2).all(|pair| pair[0] < pair[1]),
+            "Post, Search people, Add column, then the decks"
+        );
+        assert!(top(cx, "rail-deck-0") < top(cx, "rail-deck-add"), "New deck under the list");
+        assert!(cx.debug_bounds("deck-edit-0").is_none(), "no edit buttons while collapsed");
+
+        // + asks for the new deck's name and icon first.
+        click(cx, "rail-deck-add");
+        let dialog = app.read_with(cx, |app, _| app.deck_settings_dialog().cloned());
+        let dialog = dialog.expect("the deck dialog opened");
+        assert_eq!(dialog.read_with(cx, |d, _| d.target()), DeckTarget::New);
+        assert_eq!(app.read_with(cx, |app, _| app.deck().decks.len()), 1, "no deck yet");
+        cx.simulate_input("News");
+        click(cx, "deck-icon-newspaper");
+        click(cx, "deck-settings-confirm");
+        app.read_with(cx, |app, _| {
+            assert!(app.deck_settings_dialog().is_none(), "closed");
+            assert_eq!(app.deck().decks.len(), 2);
+            assert_eq!(app.deck().active_index(), 1, "the new deck is shown");
+            assert_eq!(app.deck().active().name, "News");
+            assert_eq!(app.deck().active().icon, DeckIcon::Newspaper);
+            assert_eq!(app.columns().count(), 0);
+        });
+        click(cx, "rail-deck-0");
+        app.read_with(cx, |app, _| {
+            assert_eq!(app.deck().active_index(), 0);
+            assert_eq!(app.columns().count(), app.deck().active().columns.len());
+        });
+    }
+
+    #[gpui_kit::test]
+    fn the_expanded_sidebar_edits_decks_and_is_remembered(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            keys::bind(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let (deck_path, settings_path) =
+            (dir.path().join("decks.json"), dir.path().join("settings.json"));
+        let options = AppOptions {
+            deck_path: Some(deck_path.clone()),
+            settings_path: Some(settings_path.clone()),
+            ..AppOptions::default()
+        };
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(DeckFile::default(), Settings::default(), backend, options, window, cx)
+        });
+        cx.run_until_parked();
+        app.update(cx, |app, cx| app.add_deck("", DeckIcon::default(), cx));
+
+        click(cx, "rail-toggle");
+        assert!(app.read_with(cx, |app, _| app.sidebar_expanded()));
+        assert_eq!(Settings::load(&settings_path).unwrap().sidebar_expanded, Some(true), "saved");
+        assert!(cx.debug_bounds("deck-edit-1").is_some(), "one edit button per deck");
+
+        // The pencil opens the dialog without switching deck.
+        click(cx, "deck-edit-0");
+        let dialog = app.read_with(cx, |app, _| app.deck_settings_dialog().cloned());
+        let dialog = dialog.expect("the dialog opened");
+        assert_eq!(
+            dialog.read_with(cx, |d, _| d.target()),
+            DeckTarget::Existing { index: 0, removable: true }
+        );
+        assert_eq!(app.read_with(cx, |app, _| app.deck().active_index()), 1);
+
+        dialog.update(cx, |d, cx| {
+            d.set_name("  Work ", cx);
+            d.set_icon(DeckIcon::Briefcase, cx);
+        });
+        cx.run_until_parked();
+        let saved = DeckFile::load(&deck_path).unwrap();
+        assert_eq!(
+            (saved.decks[0].name.as_str(), saved.decks[0].icon),
+            ("Work", DeckIcon::Briefcase)
+        );
+        dialog.update(cx, |d, cx| d.set_name("", cx));
+        cx.run_until_parked();
+        assert_eq!(
+            app.read_with(cx, |app, _| app.deck().decks[0].name.clone()),
+            "Work",
+            "never blank"
+        );
+
+        // Remove closes the dialog; the deck that was shown stays shown.
+        click(cx, "deck-remove");
+        app.read_with(cx, |app, _| {
+            assert!(app.deck_settings_dialog().is_none());
+            assert_eq!(app.deck().decks.len(), 1);
+            assert_eq!(app.deck().active().name, "Deck 2");
+        });
+        assert_eq!(DeckFile::load(&deck_path).unwrap().decks.len(), 1);
+
+        click(cx, "rail-toggle");
+        assert!(cx.debug_bounds("deck-edit-0").is_none(), "collapsed again");
+        assert_eq!(Settings::load(&settings_path).unwrap().sidebar_expanded, Some(false));
+    }
+
+    #[gpui_kit::test]
+    fn the_sidebar_opens_expanded_when_it_was_left_so(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let settings = Settings { sidebar_expanded: Some(true), ..Settings::default() };
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(
+                DeckFile::default(),
+                settings,
+                backend,
+                AppOptions::default(),
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        let rail = cx.debug_bounds("rail-deck-0").expect("deck entry drawn");
+        assert!(rail.size.width > px(RAIL_WIDTH), "a full-width row");
+        assert!(cx.debug_bounds("deck-edit-0").is_some());
     }
 
     fn first_post(app: &Entity<TwittyApp>, cx: &mut VisualTestContext) -> Arc<twitty_model::Post> {
@@ -3126,7 +3393,7 @@ mod tests {
     fn clicking_outside_the_thread_panel_closes_it(cx: &mut TestAppContext) {
         let (app, cx) = keyboard_app(cx);
         // An empty deck, so the click lands on nothing but the background.
-        app.update(cx, |app, cx| app.add_deck(cx));
+        app.update(cx, |app, cx| app.add_deck("", DeckIcon::default(), cx));
         open_panel(&app, "1", cx);
         let viewport = cx.update(|window, _| window.viewport_size());
         assert!(viewport.width > OUTSIDE.x + px(crate::ui::thread::PANEL_WIDTH));
@@ -3149,7 +3416,7 @@ mod tests {
             c.model().items().iter().flat_map(|i| i.posts()).find(|p| !p.media.is_empty()).cloned()
         });
         let post = Arc::new(post.expect("the mock has a post with media"));
-        app.update(cx, |app, cx| app.add_deck(cx));
+        app.update(cx, |app, cx| app.add_deck("", DeckIcon::default(), cx));
         open_panel(&app, "1", cx);
         // e.g. an image opened from a post in the panel.
         let hub = app.read_with(cx, |app, _| app.hub.clone());

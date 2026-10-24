@@ -33,6 +33,10 @@ pub struct Settings {
     /// off: they play when clicked).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gif_autoplay: Option<bool>,
+    /// Whether the sidebar shows labels and the decks' edit buttons (default
+    /// off: icons only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_expanded: Option<bool>,
 }
 
 impl Default for Settings {
@@ -43,6 +47,7 @@ impl Default for Settings {
             polling: None,
             animations: None,
             gif_autoplay: None,
+            sidebar_expanded: None,
         }
     }
 }
@@ -101,6 +106,10 @@ impl Settings {
         self.animations.unwrap_or(true)
     }
 
+    pub fn sidebar_expanded(&self) -> bool {
+        self.sidebar_expanded.unwrap_or(false)
+    }
+
     pub fn gif_autoplay(&self) -> Autoplay {
         if self.gif_autoplay.unwrap_or(false) { Autoplay::On } else { Autoplay::Off }
     }
@@ -132,6 +141,7 @@ mod tests {
         assert!(s.polling_enabled(), "v1 files predate the setting: polling on");
         assert!(s.animations_enabled(), "and animations on");
         assert_eq!(s.gif_autoplay(), Autoplay::Off, "and GIFs wait for a click");
+        assert!(!s.sidebar_expanded(), "and the sidebar shows icons only");
     }
 
     #[test]
@@ -158,6 +168,7 @@ mod tests {
             theme: Some("Light".into()),
             animations: Some(false),
             gif_autoplay: Some(true),
+            sidebar_expanded: Some(true),
             ..Settings::default()
         };
         s.save(&path).unwrap();
