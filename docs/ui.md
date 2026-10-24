@@ -35,7 +35,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 
 | Element | Spec |
 |---|---|
-| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: Twitty logo (`ui::assets::LOGO`), **+ Add column**. Bottom: account button, settings, Compose (accent). |
+| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: Twitty logo (`ui::assets::LOGO`), one button per column (its source icon, title as tooltip, the active column selected; this list scrolls when there are many columns). Clicking one makes that column active and scrolls the deck just far enough to show the whole column. Then **+ Add column**. Bottom: account button, settings, Compose (accent). |
 | Deck bar | 36px strip above the columns: one tab per deck (active one underlined, with × when more than one deck exists) and **+** for a new empty deck ("Deck N"). Switching rebuilds the columns of that deck; the hub (likes etc.) is kept. |
 | Add column | Overlay dialog: a button per kind (Home, Notifications, Search, User, List, Post, Bookmarks). Kinds without input are added at once; others take a query, `@handle`/profile link, list link/id or post link/id (parsed in `state::add_column`). Handles are resolved with `Backend::profile` ("Looking up…"), unknown ones show an error. |
 | Column tabs | Under the header, from `state::sources::tabs`: Home For you/Following · Notifications All/Verified/Mentions · Search Top/Latest/Media · User Posts/Replies/Media/Likes. A tab switches the column's source and is saved in the deck. |

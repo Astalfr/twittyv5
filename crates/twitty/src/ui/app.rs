@@ -22,7 +22,7 @@ use crate::{
     },
     ui::{
         add_column::{AddColumnEvent, AddColumnView},
-        column::{ColumnEvent, ColumnView},
+        column::{ColumnEvent, ColumnView, source_icon},
         compose::{ComposeEvent, ComposeView},
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
@@ -1179,6 +1179,30 @@ impl TwittyApp {
                     .justify_center()
                     .child(img(crate::ui::assets::LOGO).size(px(30.))),
             )
+            // One button per column; clicking scrolls the deck until the whole
+            // column is visible. Scrolls itself when the deck is taller than the rail.
+            .child(
+                v_flex()
+                    .id("rail-columns")
+                    .min_h_0()
+                    .items_center()
+                    .gap_1()
+                    .overflow_y_scroll()
+                    .children(self.columns.iter().enumerate().map(|(ix, (_, view))| {
+                        let source = view.read(cx).model().source();
+                        Button::new(("rail-column", ix))
+                            .ghost()
+                            .large()
+                            .icon(Icon::new(source_icon(source)).size(px(22.)))
+                            .tooltip(source.title())
+                            .selected(ix == self.active_column)
+                            .w(px(52.))
+                            .h(px(44.))
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.set_active_column(ix, cx)),
+                            )
+                    })),
+            )
             .child(
                 rail_button("add-column", IconName::Plus, "Add column")
                     .on_click(cx.listener(|this, _, window, cx| this.open_add_column(window, cx))),
@@ -1611,6 +1635,41 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(deck_x(cx) < px(0.), "horizontal wheel still scrolls the deck");
+    }
+
+    #[gpui_kit::test]
+    fn rail_column_button_scrolls_the_whole_column_into_view(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(crate::runtime::Runtime::inline());
+        });
+        let mut deck = DeckFile::default();
+        for _ in 0..8 {
+            deck.add_column(FeedSource::Bookmarks);
+        }
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(deck, Settings::default(), backend, AppOptions::default(), window, cx)
+        });
+        cx.run_until_parked();
+        let fully_visible = |ix: usize, cx: &mut VisualTestContext| {
+            app.read_with(cx, |app, _| {
+                let (view, offset) = (app.deck_scroll.bounds(), app.deck_scroll.offset());
+                let item = app.deck_scroll.bounds_for_item(ix).unwrap();
+                item.left() + offset.x >= view.left() && item.right() + offset.x <= view.right()
+            })
+        };
+        assert!(!fully_visible(7, cx), "the last column starts off screen");
+
+        // The rail button's click handler.
+        app.update(cx, |app, cx| app.set_active_column(7, cx));
+        cx.run_until_parked();
+        assert!(fully_visible(7, cx), "the last column is scrolled fully into view");
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 7);
+
+        app.update(cx, |app, cx| app.set_active_column(0, cx));
+        cx.run_until_parked();
+        assert!(fully_visible(0, cx), "and back to the first");
     }
 
     fn services(store: &MemoryStore, signed_in: &MockBackend) -> AccountServices {
