@@ -168,6 +168,6 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Consequences**: A post opened from a profile replaces the profile; going back means clicking the author again. A back stack can be added in `TwittyApp::show_sheet` if that becomes annoying.
 
 ### 2026-10-24: Shared post links point at vxtwitter
-- **Decision**: Clicking a post's time and **Copy tweet link** use the post's canonical `Post.url` with its host swapped for `vxtwitter.com` (`state::links::vx_link`). The share button in the action bar still opens the canonical x.com link.
+- **Decision**: Clicking a post's time and **Copy tweet link** use the post's canonical `Post.url` with its host swapped for `vxtwitter.com` (`state::links::vx_link`). (The action bar's share button, which opened the x.com link, was removed on 2026-10-24.)
 - **Why**: vxtwitter links embed properly (video, full text) when pasted into Discord and other chat apps. Swapping the host of `Post.url` keeps the UI from building X URLs out of opaque IDs.
 - **Consequences**: The links depend on a third-party mirror being up. If it goes away, change `VX_HOST` in one place.

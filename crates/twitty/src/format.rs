@@ -47,6 +47,19 @@ pub fn compact_count(n: u64) -> String {
     }
 }
 
+/// Full counter with its noun and grouped thousands: `1 Like`, `12,345 Likes`.
+pub fn exact_count(n: u64, one: &str, many: &str) -> String {
+    let digits = n.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (ix, digit) in digits.chars().enumerate() {
+        if ix > 0 && (digits.len() - ix).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    format!("{grouped} {}", if n == 1 { one } else { many })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +115,22 @@ mod tests {
         ];
         for (n, expected) in cases {
             assert_eq!(compact_count(n), expected, "for {n}");
+        }
+    }
+
+    #[test]
+    fn exact_count_groups_thousands() {
+        let cases = [
+            (0, "0 Likes"),
+            (1, "1 Like"),
+            (999, "999 Likes"),
+            (1_000, "1,000 Likes"),
+            (12_345, "12,345 Likes"),
+            (1_234_567, "1,234,567 Likes"),
+            (u64::MAX, "18,446,744,073,709,551,615 Likes"),
+        ];
+        for (n, expected) in cases {
+            assert_eq!(exact_count(n, "Like", "Likes"), expected, "for {n}");
         }
     }
 }

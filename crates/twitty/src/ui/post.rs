@@ -25,7 +25,7 @@ use twitty_model::{
 };
 
 use crate::{
-    format::{compact_count, exact_time, relative_time},
+    format::{compact_count, exact_count, exact_time, relative_time},
     state::{interactions::Toggle, links, media_layout, motion},
     ui::{
         hub::{InteractionsHub, Navigate},
@@ -816,7 +816,6 @@ impl IfEmpty for String {
 enum Click {
     Toggle(Toggle),
     Reply,
-    OpenInBrowser,
     Nothing,
 }
 
@@ -844,6 +843,9 @@ fn hover_color(on: Click, theme: &gpui_kit::component::Theme) -> Hsla {
     }
 }
 
+/// Singular and plural noun for a counter's tooltip.
+type Noun = (&'static str, &'static str);
+
 fn action_bar(
     key: usize,
     post: &Post,
@@ -855,7 +857,7 @@ fn action_bar(
     let muted = theme.muted_foreground;
     let action = |name: &'static str,
                   icon: IconName,
-                  count: Option<u64>,
+                  count: Option<(u64, Noun)>,
                   active: Option<Hsla>,
                   on: Click| {
         let color = active.unwrap_or(muted);
@@ -863,8 +865,9 @@ fn action_bar(
         let post = Arc::new(post.clone());
         h_flex()
             .id((name, key))
-            .gap_1()
-            // Six actions must fit the narrowest column (310px).
+            .debug_selector(move || format!("action-{name}-{key}"))
+            .gap_1p5()
+            // Five actions must fit the narrowest column (310px).
             .min_w(px(36.))
             .text_sm()
             .text_color(color)
@@ -879,33 +882,55 @@ fn action_bar(
                         let to = Navigate::Reply(Arc::clone(&post));
                         hub.update(cx, |hub, cx| hub.navigate(to, cx));
                     }
-                    Click::OpenInBrowser => cx.open_url(post.url.as_str()),
                     Click::Nothing => {}
                 }
             })
             .child(action_icon(icon, matches!(on, Click::Toggle(t) if pops.contains(&t))))
-            .child(count.map(compact_count).unwrap_or_default())
+            .when_some(count, |d, (n, (one, many))| {
+                let full: SharedString = exact_count(n, one, many).into();
+                d.tooltip(move |window, cx| {
+                    let full = full.clone();
+                    Tooltip::element(move |_, _| {
+                        div().debug_selector(|| "count-tooltip".into()).child(full.clone())
+                    })
+                    .build(window, cx)
+                })
+            })
+            .child(count.map(|(n, _)| compact_count(n)).unwrap_or_default())
     };
     let m = eff.metrics;
     h_flex()
-        .mt_1()
+        .mt_2()
+        .gap_2()
         .justify_between()
-        .child(action("reply", IconName::MessageCircle, Some(m.replies), None, Click::Reply))
+        .child(action(
+            "reply",
+            IconName::MessageCircle,
+            Some((m.replies, ("Reply", "Replies"))),
+            None,
+            Click::Reply,
+        ))
         .child(action(
             "repost",
             IconName::Repeat2,
-            Some(m.reposts + m.quotes),
+            Some((m.reposts + m.quotes, ("Repost", "Reposts"))),
             eff.viewer.reposted.then_some(theme.green),
             Click::Toggle(Toggle::Repost),
         ))
         .child(action(
             "like",
             IconName::Heart,
-            Some(m.likes),
+            Some((m.likes, ("Like", "Likes"))),
             eff.viewer.liked.then_some(theme.red),
             Click::Toggle(Toggle::Like),
         ))
-        .child(action("views", IconName::ChartNoAxesColumn, m.views, None, Click::Nothing))
+        .child(action(
+            "views",
+            IconName::ChartNoAxesColumn,
+            m.views.map(|n| (n, ("View", "Views"))),
+            None,
+            Click::Nothing,
+        ))
         .child(action(
             "bookmark",
             IconName::Bookmark,
@@ -913,7 +938,6 @@ fn action_bar(
             eff.viewer.bookmarked.then_some(theme.blue),
             Click::Toggle(Toggle::Bookmark),
         ))
-        .child(action("share", IconName::Share, None, None, Click::OpenInBrowser))
 }
 
 #[cfg(test)]
@@ -1025,6 +1049,52 @@ mod tests {
         let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
         assert!(time.size.width > px(10.), "the time keeps its width: {time:?}");
         assert!(time.right() <= px(310.), "the time is inside the row: {time:?}");
+    }
+
+    #[gpui_kit::test]
+    fn the_action_bar_has_no_share_and_spaces_its_actions(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, backend) = mock_post();
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+
+        assert!(cx.debug_bounds("action-share-0").is_none(), "no share button");
+        let names = [
+            "action-reply-0",
+            "action-repost-0",
+            "action-like-0",
+            "action-views-0",
+            "action-bookmark-0",
+        ];
+        let bounds: Vec<_> = names
+            .into_iter()
+            .map(|n| cx.debug_bounds(n))
+            .collect::<Option<_>>()
+            .expect("every action is rendered");
+        for pair in bounds.windows(2) {
+            let gap = pair[1].left() - pair[0].right();
+            assert!(gap >= px(8.), "actions are at least 8px apart: {pair:?}");
+        }
+        let last = bounds.last().map(|b| b.right()).unwrap_or_default();
+        assert!(last <= px(310. - PAD_X), "the bar fits the narrowest column: {last:?}");
+    }
+
+    #[gpui_kit::test]
+    fn hovering_a_count_shows_its_full_value(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, backend) = mock_post();
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("count-tooltip").is_none(), "no tooltip before hovering");
+
+        let like = cx.debug_bounds("action-like-0").expect("the like action is rendered");
+        cx.simulate_mouse_move(like.center(), None, Default::default());
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("count-tooltip").is_some(), "the full count shows on hover");
     }
 
     /// A box like a media tile, holding one rounded image.
