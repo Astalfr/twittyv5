@@ -13,6 +13,7 @@ pub mod image_scale;
 pub mod interactions;
 pub mod links;
 pub mod login;
+pub mod long_text;
 pub mod media_layout;
 pub mod motion;
 pub mod playback;

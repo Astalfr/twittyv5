@@ -1,6 +1,7 @@
 //! Rendering of feed rows: tweets, retweets, threads and their embeds.
 
 use std::{
+    borrow::Cow,
     hash::{DefaultHasher, Hash as _, Hasher as _},
     rc::Rc,
     sync::Arc,
@@ -33,7 +34,7 @@ use crate::{
     state::{
         community_note::{self, NoteDisplay},
         interactions::Toggle,
-        links, media_layout, motion,
+        links, long_text, media_layout, motion,
         toasts::Notice,
         translation::{self, Note},
     },
@@ -473,9 +474,17 @@ fn post_row(
         content =
             content.child(translation_note(("translation", key), &post.id, note, &rcx.hub, &theme));
     }
-    if !shown.body.is_empty() {
+    // The thread panel shows a long tweet whole; elsewhere it is folded.
+    let folded = match rcx.focus {
+        Some(_) => long_text::Folded { body: Cow::Borrowed(shown.body), action: None },
+        None => long_text::fold(shown.body, hub.is_unfolded(&post.id)),
+    };
+    if !folded.body.is_empty() {
         content =
-            content.child(rich_text(("body", key), shown.body, &rcx.hub, theme.link, window, cx));
+            content.child(rich_text(("body", key), &folded.body, &rcx.hub, theme.link, window, cx));
+    }
+    if let Some(action) = folded.action {
+        content = content.child(fold_toggle(("fold", key), &post.id, action, &rcx.hub, &theme));
     }
     if note == NoteDisplay::Marker {
         content = content.child(note_marker(("note-marker", key), &theme));
@@ -596,6 +605,31 @@ fn translation_note(
                 })
                 .child(note.action),
         )
+}
+
+/// "Show more" / "Show less" under a long tweet's text.
+fn fold_toggle(
+    id: (&'static str, usize),
+    post: &PostId,
+    action: &'static str,
+    hub: &Entity<InteractionsHub>,
+    theme: &gpui_kit::component::Theme,
+) -> impl IntoElement {
+    let hub = hub.clone();
+    let post = post.clone();
+    div()
+        .id(id)
+        .debug_selector(move || format!("{}-{}", id.0, id.1))
+        .self_start()
+        .text_color(theme.link)
+        .cursor_pointer()
+        .hover(|s| s.underline())
+        .on_click(move |_, _, cx| {
+            // Unfolding the text must not also open the tweet's thread.
+            cx.stop_propagation();
+            hub.update(cx, |hub, cx| hub.toggle_unfolded(&post, cx));
+        })
+        .child(action)
 }
 
 /// The alert under a tweet's text saying it has a Community Note. Clicking it
@@ -1988,6 +2022,94 @@ mod tests {
         post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted)) });
         let seen = navigations(cx, FeedItem::Post(post), "quote-note-marker-0");
         assert_eq!(seen, vec![Navigate::Thread(id)]);
+    }
+
+    /// The mock's first tweet with a Twitter Blue-length text.
+    fn long_post() -> Post {
+        let (mut post, _) = mock_post();
+        post.body = RichText::plain("A long paragraph of words. ".repeat(14));
+        post.translation = None;
+        post
+    }
+
+    #[gpui_kit::test]
+    fn in_a_column_a_long_post_is_folded_and_unfolds_in_place(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let post = long_post();
+        let id = post.id.clone();
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let seen = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = std::rc::Rc::clone(&seen);
+        cx.update(|cx| {
+            cx.subscribe(&hub, move |_, _: &Navigate, _| count.set(count.get() + 1)).detach();
+        });
+        let row_hub = hub.clone();
+        let (_view, cx) =
+            cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub: row_hub });
+        cx.run_until_parked();
+
+        let folded = cx.debug_bounds("body-text-0").expect("the body is rendered");
+        let more = cx.debug_bounds("fold-0").expect("Show more is rendered");
+        assert!(more.top() >= folded.bottom(), "under the text: {more:?} {folded:?}");
+        cx.simulate_click(more.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert!(hub.read_with(cx, |hub, _| hub.is_unfolded(&id)));
+        assert_eq!(seen.get(), 0, "unfolding doesn't open the thread");
+
+        redraw(cx);
+        let whole = cx.debug_bounds("body-text-0").expect("the body is rendered");
+        assert!(whole.size.height > folded.size.height, "{whole:?} vs {folded:?}");
+        let less = cx.debug_bounds("fold-0").expect("Show less is rendered");
+        cx.simulate_click(less.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert!(!hub.read_with(cx, |hub, _| hub.is_unfolded(&id)), "folded again");
+    }
+
+    #[gpui_kit::test]
+    fn a_short_post_has_no_fold_link(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, _) = mock_post();
+        let cx = one_post(post, cx);
+        assert!(cx.debug_bounds("body-text-0").is_some());
+        assert!(cx.debug_bounds("fold-0").is_none());
+    }
+
+    /// Renders one tweet as the thread panel does, about that tweet.
+    struct PanelPost {
+        post: Post,
+        hub: Entity<InteractionsHub>,
+    }
+
+    impl gpui_kit::Render for PanelPost {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl IntoElement {
+            let rcx = RowCtx {
+                ix: 0,
+                column_width: 310.,
+                hub: self.hub.clone(),
+                scope: "test".into(),
+                focus: Some(self.post.id.clone()),
+            };
+            let item = FeedItem::Post(self.post.clone());
+            div().w(px(310.)).child(render_item(&item, &rcx, window, cx))
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_thread_panel_shows_a_long_post_whole(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| PanelPost { post: long_post(), hub });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("body-text-0").is_some());
+        assert!(cx.debug_bounds("fold-0").is_none(), "nothing to unfold in the panel");
     }
 
     fn mock_items(source: twitty_model::FeedSource) -> Vec<FeedItem> {

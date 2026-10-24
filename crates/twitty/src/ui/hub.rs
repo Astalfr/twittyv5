@@ -11,6 +11,7 @@ use crate::{
     runtime::Runtime,
     state::{
         interactions::{Effective, Interactions, Toggle},
+        long_text::Unfolded,
         motion::{self, Recent},
         toasts::Notice,
         translation::Originals,
@@ -45,6 +46,8 @@ pub struct InteractionsHub {
     pops: Recent<(PostId, Toggle), ()>,
     /// Translated tweets the viewer switched back to their original text.
     originals: Originals,
+    /// Long tweets the viewer unfolded.
+    unfolded: Unfolded,
 }
 
 impl std::fmt::Debug for InteractionsHub {
@@ -63,6 +66,7 @@ impl InteractionsHub {
             backend,
             pops: Recent::default(),
             originals: Originals::default(),
+            unfolded: Unfolded::default(),
         }
     }
 
@@ -85,6 +89,17 @@ impl InteractionsHub {
     /// Switches translated tweet `id` between its translation and original.
     pub fn toggle_original(&mut self, id: &PostId, cx: &mut Context<Self>) {
         self.originals.toggle(id);
+        cx.notify();
+    }
+
+    /// Whether long tweet `id` is unfolded to its whole text.
+    pub fn is_unfolded(&self, id: &PostId) -> bool {
+        self.unfolded.is_unfolded(id)
+    }
+
+    /// Unfolds long tweet `id`, or folds it again.
+    pub fn toggle_unfolded(&mut self, id: &PostId, cx: &mut Context<Self>) {
+        self.unfolded.toggle(id);
         cx.notify();
     }
 
