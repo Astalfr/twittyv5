@@ -23,11 +23,15 @@ pub struct Settings {
     /// Whether columns check for new posts on their own (default on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub polling: Option<bool>,
+    /// Whether the UI animates (default on); off renders every animation at
+    /// rest (GPUI's reduce motion).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animations: Option<bool>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { schema_version: SCHEMA_VERSION, theme: None, polling: None }
+        Self { schema_version: SCHEMA_VERSION, theme: None, polling: None, animations: None }
     }
 }
 
@@ -81,6 +85,10 @@ impl Settings {
         self.polling.unwrap_or(true)
     }
 
+    pub fn animations_enabled(&self) -> bool {
+        self.animations.unwrap_or(true)
+    }
+
     /// The saved theme if it is one of `known`, else the first of `known`.
     pub fn theme_or_default<'a>(&self, known: &[&'a str]) -> Option<&'a str> {
         let saved = self.theme.as_deref();
@@ -106,6 +114,7 @@ mod tests {
         assert_eq!(s.theme.as_deref(), Some("Dim"));
         assert_eq!(s.theme_or_default(&KNOWN), Some("Dim"));
         assert!(s.polling_enabled(), "v1 files predate the setting: polling on");
+        assert!(s.animations_enabled(), "and animations on");
     }
 
     #[test]
@@ -128,7 +137,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sub").join("settings.json");
         assert_eq!(Settings::load(&path).unwrap(), Settings::default(), "missing file");
-        let s = Settings { theme: Some("Light".into()), ..Settings::default() };
+        let s = Settings {
+            theme: Some("Light".into()),
+            animations: Some(false),
+            ..Settings::default()
+        };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path).unwrap(), s);
     }

@@ -47,9 +47,9 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 | Sign-in | Demo banner with **Sign in** · rail account button (log-in icon in demo, account icon when signed in) · centred overlay dialog with how-to steps, masked `auth_token`/`ct0` inputs, Enter submits, "Checking…" while `viewer()` runs, error text from `LoginForm` · account panel: `@handle`, session source, **Sign out** for keyring sessions |
 | Feedback | "↑ N new posts" pill when scrolled down · skeleton rows while loading · inline error with Retry (a full refresh after a session error, see `ColumnModel::retry_kind`) · footer row: spinner, Retry, "You're all caught up", or "Nothing to show here yet" for an empty feed · a rate-limited load shows "rate limited until <time>" and the column waits for that time |
 | Image viewer | Clicking a media tile opens it full-window with `n / count · @handle`, ‹ › (and ←/→) for multi-image posts (wrapping), alt text, and **Play on x.com** for videos and GIFs. Esc, × or a click on the backdrop closes it (buttons and the image stop their clicks); the backdrop is the shared overlay backdrop (see Backdrop). The image box is computed from the window size (`media_layout::viewer_box`, with fixed-height header and footer and the alt text clamped to two lines) so nothing is pushed off screen; the `img` has no explicit size, so GPUI uses the decoded bitmap's size capped by that box: images shrink to fit but are never scaled up past their own resolution. |
-| Settings | Rail ⚙ opens a page: theme (Lights out / Dim / Light), "Check for new posts automatically", the keyboard shortcuts, and where data is saved. Saved to `settings.json` right away. |
+| Settings | Rail ⚙ opens a page: theme (Lights out / Dim / Light), "Check for new posts automatically", "Animations", the keyboard shortcuts, and where data is saved. Saved to `settings.json` right away. |
 | Active column | The column keyboard shortcuts act on has a tinted header; its selected row has the `list.active.background` tint (the primary blue at ~12–19% opacity, per theme) and a 3px `list.active.border` accent bar on the left, which stays visible while the row's hover background covers the tint. |
-| Backdrop | Every overlay (image viewer, dialogs, settings, account panel) and the thread panel sits on the theme's `overlay` colour at 70% opacity (`BACKDROP_ALPHA` in `ui/app.rs`). |
+| Backdrop | Every overlay (image viewer, dialogs, settings, account panel) and the thread panel sits on the theme's `overlay` colour at 70% opacity (`BACKDROP_ALPHA` in `ui/app.rs`). It fades in and out with them (see Animations); over the thread panel it doesn't, so the deck never flashes lighter or darker. |
 | Thread | Clicking a post (or a quoted post) opens `ThreadPanel`, as a 600px sheet over the right side of the deck, on the backdrop: ancestors and the focused post as one connected thread, then replies (`state::thread::rows`). Clicking a post inside it switches the panel; × or a click on the backdrop closes it. The backdrop is occluding and takes the whole click, so it doesn't also open the post, image or link under it. While an overlay (image viewer, compose) is open over the panel, the panel's backdrop isn't drawn, so the overlay's darkens everything once. A reply published from compose reloads the panel showing its parent. |
 | Links | Mentions, hashtags, cashtags and links use the theme's `link` colour; the one under the mouse is underlined (`post::span_at` maps the hovered byte to a span; the hover is kept in `window.use_keyed_state` and cleared when the mouse leaves the text). A click opens it on x.com / in the browser. |
 | Action bar | Reply (opens compose) · Repost · Like · Views (no action) · Bookmark · Share (opens the post on x.com). Toggles are optimistic and roll back on error. Clicks on links, media, cards and actions stop propagation so they don't also open the thread. |
@@ -73,6 +73,26 @@ These are gpui-kit theme JSON files in `crates/twitty/themes/`, following gpui-c
 Views read colours from `cx.theme()` only. Never hard-code hex in a view.
 
 Font: Segoe UI / system UI. Chirp, X's own font, isn't bundled.
+
+## Animations
+
+Durations and easing come from the theme's `MotionTokens` (`theme.motion`: enter = `duration_normal` + `easing_enter`, exit = `duration_fast` + `easing_exit`); row and pop timings and curves are in `state::motion` (unit and property tested).
+
+| What | Motion |
+|---|---|
+| Rows arriving | A fresh page (first load, refresh, tab switch) cascades in: each of the first rows fades and rises 8px, 35ms after the one above. Newer posts at the top drop in from above with a primary tint that fades over 1.4s; older rows at the bottom fade in. Only paint moves (`opacity`, relative `top`), never the measured height, so `ListState` and scroll anchoring are unaffected. |
+| "New posts" pill | Drops in from the column's top edge. |
+| Like / repost / bookmark | Turning one on makes its icon "pop" (grow ~35% and settle) inside a fixed 17px slot. |
+| Dialogs, settings, account | Backdrop fades in; the card fades and rises 8px. On close it fades and sinks while the backdrop fades out. |
+| Image viewer | Fades in and out; stepping to another image fades it in. It doesn't move, so its buttons are where they end up from the first frame. |
+| Thread panel | Fades in while sliding 48px from the right edge (short, so its hitbox is nearly in place at once); the backdrop fades in only when the panel opens, not when it switches posts or an overlay over it closes. Closing reverses it. |
+
+Rules:
+- **Entering** uses `with_animation` on the element as it mounts. GPUI animations run on the wall clock, so in tests they sit at their first frame: only fades and short offsets for anything tests click on.
+- **Leaving**: GPUI has no unmount animation. Closing clears the state at once (`thread_panel()`, `compose()`, `media_viewer()` … are `None` immediately) and moves what was shown into a `leaving` slot on `TwittyApp`, drawn only to animate out and cleared by a timer task. The leaving layer is inert: no key context, no handlers, no occluding backdrop, and a transparent occluding cover over its card / panel (the image viewer is re-rendered without handlers), so clicks beside it reach the deck but nothing inside it reacts. Opening the same kind of thing again drops the leaving copy.
+- **Rows**: a virtualised `list()` drops element state when a row scrolls out, so a plain `with_animation` would replay every time. `ColumnView` remembers arrivals in a `motion::Recent` keyed by item key with an expiry; a row animates only while its entry is live.
+- **Off switch**: Settings → "Animations" sets GPUI's `reduce_motion` (GPUI never sets it from Windows' own setting). `with_animation` then renders end states, and the app skips its leaving layers, arrivals and pops. It is app-wide, so gpui-component's spinners and skeleton shimmer stand still too.
+- A leaving copy is wrapped in a different animation id than the live view, so state keyed by element id inside it starts over. Anything visible that depends on such state (a scroll offset) lives in a handle instead (`settings_scroll`; the thread panel's `ScrollHandle`), and inner enter animations are skipped in the copy (the viewer's image fade).
 
 ## Polling
 

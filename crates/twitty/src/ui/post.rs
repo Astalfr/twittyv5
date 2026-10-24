@@ -5,10 +5,11 @@ use std::sync::Arc;
 use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
-    AnyElement, App, ElementId, Entity, FontWeight, HighlightStyle, Hsla, InteractiveText,
-    IntoElement, ObjectFit, ParentElement, SharedString, StatefulInteractiveElement, Styled,
-    StyledImage, StyledText, UnderlineStyle, Window, component::avatar::Avatar,
-    component::button::*, component::hover_card::HoverCard, component::*, div, img, prelude::*, px,
+    Animation, AnimationExt, AnyElement, App, ElementId, Entity, FontWeight, HighlightStyle, Hsla,
+    InteractiveText, IntoElement, ObjectFit, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, StyledImage, StyledText, UnderlineStyle, Window,
+    component::avatar::Avatar, component::button::*, component::hover_card::HoverCard,
+    component::*, div, img, prelude::*, px,
 };
 use twitty_model::{
     Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostOrGone, Profile, RichText,
@@ -17,7 +18,7 @@ use twitty_model::{
 
 use crate::{
     format::{compact_count, relative_time},
-    state::{interactions::Toggle, media_layout},
+    state::{interactions::Toggle, media_layout, motion},
     ui::hub::{InteractionsHub, Navigate},
 };
 
@@ -206,7 +207,12 @@ fn post_row(
     cx: &mut App,
 ) -> AnyElement {
     let theme = cx.theme().clone();
-    let eff = rcx.hub.read(cx).effective(post);
+    let hub = rcx.hub.read(cx);
+    let eff = hub.effective(post);
+    let pops: Vec<Toggle> = [Toggle::Like, Toggle::Repost, Toggle::Bookmark]
+        .into_iter()
+        .filter(|&t| hub.popping(&post.id, t))
+        .collect();
     let width = content_width(rcx.column_width);
     let key = rcx.ix * 16 + sub;
 
@@ -253,7 +259,7 @@ fn post_row(
     if let Some(embed) = &post.embed {
         content = content.child(render_embed(("embed", key), embed, width, &rcx.hub, window, cx));
     }
-    content = content.child(action_bar(key, post, eff, rcx, &theme));
+    content = content.child(action_bar(key, post, eff, &pops, rcx, &theme));
 
     let avatar_col = v_flex()
         .items_center()
@@ -665,10 +671,26 @@ enum Click {
     Nothing,
 }
 
+/// An action's icon, popping (growing and settling back) right after the
+/// viewer turned it on. The fixed-size slot keeps the bar's layout still.
+fn action_icon(icon: IconName, popping: bool) -> impl IntoElement {
+    const SIZE: f32 = 17.;
+    let icon = Icon::new(icon).size(px(SIZE));
+    div().flex_none().size(px(SIZE)).flex().items_center().justify_center().child(if popping {
+        icon.with_animation("pop", Animation::new(motion::POP), |icon, t| {
+            icon.size(px(SIZE * motion::pop_scale(t)))
+        })
+        .into_any_element()
+    } else {
+        icon.into_any_element()
+    })
+}
+
 fn action_bar(
     key: usize,
     post: &Post,
     eff: crate::state::interactions::Effective,
+    pops: &[Toggle],
     rcx: &RowCtx,
     theme: &gpui_kit::component::Theme,
 ) -> impl IntoElement {
@@ -703,7 +725,7 @@ fn action_bar(
                     Click::Nothing => {}
                 }
             })
-            .child(Icon::new(icon).size(px(17.)))
+            .child(action_icon(icon, matches!(on, Click::Toggle(t) if pops.contains(&t))))
             .child(count.map(compact_count).unwrap_or_default())
     };
     let m = eff.metrics;

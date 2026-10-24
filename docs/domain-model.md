@@ -51,7 +51,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`, an
 
 Saved files:
 - `decks.json`: decks, columns, `FeedSource`, widths
-- `settings.json`: theme, `polling` (optional, added without a version bump; absent = on)
+- `settings.json`: theme, `polling` and `animations` (optional, added without a version bump; absent = on)
 - the keyring entry holding the session (`{schema_version, auth_token, ct0}`, see `twitty::account`)
 - the optional post cache
 

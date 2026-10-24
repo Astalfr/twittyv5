@@ -1,14 +1,17 @@
 //! Shared, observable wrapper around [`Interactions`] that also sends the
 //! actions to the backend and rolls back on failure.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use gpui_kit::{Context, EventEmitter};
 use twitty_model::{Backend, BackendError, Post, PostId, Profile};
 
 use crate::{
     runtime::Runtime,
-    state::interactions::{Effective, Interactions, Toggle},
+    state::{
+        interactions::{Effective, Interactions, Toggle},
+        motion::{self, Recent},
+    },
 };
 
 /// Emitted when an optimistic action had to be undone.
@@ -32,6 +35,8 @@ pub enum Navigate {
 pub struct InteractionsHub {
     state: Interactions,
     backend: Arc<dyn Backend>,
+    /// Toggles the viewer just turned on, whose icon "pops".
+    pops: Recent<(PostId, Toggle), ()>,
 }
 
 impl std::fmt::Debug for InteractionsHub {
@@ -45,12 +50,18 @@ impl EventEmitter<Navigate> for InteractionsHub {}
 
 impl InteractionsHub {
     pub fn new(backend: Arc<dyn Backend>) -> Self {
-        Self { state: Interactions::default(), backend }
+        Self { state: Interactions::default(), backend, pops: Recent::default() }
     }
 
     /// State to render for `post`.
     pub fn effective(&self, post: &Post) -> Effective {
         self.state.effective(post)
+    }
+
+    /// Whether `toggle`'s icon on post `id` is in its "pop", i.e. the viewer
+    /// just turned it on.
+    pub fn popping(&self, id: &PostId, toggle: Toggle) -> bool {
+        self.pops.get(&(id.clone(), toggle), Instant::now()).is_some()
     }
 
     /// Asks the app to open something (see [`Navigate`]).
@@ -61,6 +72,12 @@ impl InteractionsHub {
     /// Optimistically flips `toggle`, then confirms with the backend.
     pub fn toggle(&mut self, post: &Post, toggle: Toggle, cx: &mut Context<Self>) {
         let pending = self.state.toggle(post, toggle);
+        let key = (post.id.clone(), toggle);
+        if self.state.effective(post).is_on(toggle) && !cx.reduce_motion() {
+            self.pops.mark(key, (), Instant::now(), motion::POP);
+        } else {
+            self.pops.remove(&key);
+        }
         cx.notify();
         let backend = Arc::clone(&self.backend);
         let action = pending.action.clone();
@@ -109,6 +126,29 @@ mod tests {
 
         assert!(hub.read_with(cx, |hub, _| hub.effective(&post).viewer.liked));
         assert_eq!(backend.actions(), vec![PostAction::Like(post.id.clone())]);
+    }
+
+    #[gpui_kit::test]
+    async fn turning_a_toggle_on_pops_its_icon(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_global(Runtime::inline()));
+        let backend = MockBackend::new();
+        let post = first_post(&backend).await;
+        assert!(!post.viewer.liked, "the mock's first post starts unliked");
+        let hub = cx.new(|_| InteractionsHub::new(Arc::new(backend.clone())));
+        let popping = |cx: &mut TestAppContext| {
+            hub.read_with(cx, |hub, _| hub.popping(&post.id, Toggle::Like))
+        };
+
+        hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Like, cx));
+        assert!(popping(cx), "liking pops");
+        assert!(!hub.read_with(cx, |hub, _| hub.popping(&post.id, Toggle::Bookmark)));
+        hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Like, cx));
+        assert!(!popping(cx), "unliking doesn't");
+
+        cx.update(|cx| cx.set_reduce_motion(true));
+        hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Like, cx));
+        assert!(!popping(cx), "no pop with reduced motion");
+        cx.run_until_parked();
     }
 
     #[gpui_kit::test]

@@ -1,12 +1,12 @@
 //! The window's root view: navigation rail + horizontally scrolling deck.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use gpui_kit::{
-    AnyElement, Context, Entity, FocusHandle, FontWeight, IntoElement, ObjectFit, ParentElement,
-    Render, ScrollHandle, Styled, StyledImage, Subscription, Task, Window, assets::IconName,
-    component::button::*, component::checkbox::Checkbox, component::scroll::ScrollableElement,
-    component::*, div, img, prelude::*, px,
+    Animation, AnimationExt, AnyElement, AnyView, Context, Entity, FocusHandle, FontWeight,
+    IntoElement, ObjectFit, ParentElement, Render, ScrollHandle, Styled, StyledImage, Subscription,
+    Task, Window, assets::IconName, component::button::*, component::checkbox::Checkbox,
+    component::scroll::ScrollableElement, component::*, div, img, prelude::*, px,
 };
 use twitty_model::{Backend, BackendError, FeedSource, Profile, mock::MockBackend};
 
@@ -17,7 +17,7 @@ use crate::{
         deck::{ColumnConfig, ColumnId, DeckFile},
         interactions::Toggle,
         media_layout::{self, viewer},
-        poll,
+        motion, poll,
         settings::Settings,
     },
     ui::{
@@ -44,6 +44,22 @@ const BUDGET_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Shown when the session check at startup gets `Unauthorized`.
 pub const EXPIRED_NOTICE: &str = "Your X session expired or was revoked. Sign in again.";
+
+/// Something that just closed, still drawn while it animates out. The
+/// slot is cleared by `_clear` when the exit animation is over.
+struct Leaving<T> {
+    what: T,
+    _clear: Task<()>,
+}
+
+/// An overlay that just closed (see [`Leaving`]).
+enum LeavingOverlay {
+    Media(Arc<twitty_model::Post>, usize),
+    /// A dialog view: sign-in, add column, compose.
+    View(AnyView),
+    Account,
+    Settings,
+}
 
 /// Options decided at startup.
 #[derive(Debug, Clone, Default)]
@@ -72,6 +88,9 @@ pub struct TwittyApp {
     columns: Vec<(ColumnId, Entity<ColumnView>)>,
     theme_name: &'static str,
     deck_scroll: ScrollHandle,
+    /// The settings page's scroll position, kept in a handle so the copy that
+    /// animates out after "Done" doesn't jump back to the top.
+    settings_scroll: ScrollHandle,
     /// The signed-in account, once the session check answered.
     viewer: Option<Profile>,
     login: Option<Entity<LoginView>>,
@@ -85,6 +104,12 @@ pub struct TwittyApp {
     settings_save: Option<Task<()>>,
     /// The image viewer: a post and the index of the media shown.
     media: Option<(Arc<twitty_model::Post>, usize)>,
+    /// The overlay animating out after it closed. Inert: it gets no input.
+    leaving: Option<Leaving<LeavingOverlay>>,
+    /// The thread panel animating out after it closed. Inert too.
+    leaving_thread: Option<Leaving<Entity<ThreadPanel>>>,
+    /// When the thread panel opened (not switched), so its backdrop fades in once.
+    thread_opened: Option<Instant>,
     /// Index of the column keyboard shortcuts act on.
     active_column: usize,
     focus: FocusHandle,
@@ -127,6 +152,7 @@ impl TwittyApp {
             columns: Vec::new(),
             theme_name,
             deck_scroll: ScrollHandle::new(),
+            settings_scroll: ScrollHandle::new(),
             viewer: None,
             login: None,
             add_column: None,
@@ -136,6 +162,9 @@ impl TwittyApp {
             settings_panel: false,
             settings_save: None,
             media: None,
+            leaving: None,
+            leaving_thread: None,
+            thread_opened: None,
             active_column: 0,
             focus: cx.focus_handle(),
             session_check: None,
@@ -147,6 +176,10 @@ impl TwittyApp {
             _hub_subs: Vec::new(),
             _subs: Vec::new(),
         };
+        // GPUI never sets this from the OS; only the setting turns motion off.
+        if !this.settings.animations_enabled() {
+            cx.set_reduce_motion(true);
+        }
         this.build_hub(window, cx);
         this.build_columns(cx);
         if this.options.session.is_some() {
@@ -293,7 +326,8 @@ impl TwittyApp {
 
     /// Closes the topmost thing: image viewer, dialog, then thread panel.
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
-        if self.media.take().is_some() {
+        if let Some((post, index)) = self.media.take() {
+            self.leave(LeavingOverlay::Media(post, index), cx);
         } else if self.has_dialog() {
             self.close_overlays(cx);
         } else {
@@ -303,15 +337,45 @@ impl TwittyApp {
     }
 
     fn close_thread(&mut self, cx: &mut Context<Self>) {
-        self.thread = None;
+        if let Some(panel) = self.thread.take()
+            && !cx.reduce_motion()
+        {
+            let clear = Self::after_exit(cx, |this| this.leaving_thread = None);
+            self.leaving_thread = Some(Leaving { what: panel, _clear: clear });
+        }
         self._thread_sub = None;
         cx.notify();
+    }
+
+    /// Keeps `what` drawn while it animates out.
+    fn leave(&mut self, what: LeavingOverlay, cx: &mut Context<Self>) {
+        self.leaving = (!cx.reduce_motion())
+            .then(|| Leaving { what, _clear: Self::after_exit(cx, |this| this.leaving = None) });
+    }
+
+    /// Runs `clear` once an exit animation is over.
+    fn after_exit(cx: &mut Context<Self>, clear: fn(&mut Self)) -> Task<()> {
+        let wait = cx.theme().motion.duration_fast;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            this.update(cx, |this, cx| {
+                clear(this);
+                cx.notify();
+            })
+            .ok();
+        })
+    }
+
+    /// Whether something is still animating out.
+    pub fn is_leaving(&self) -> bool {
+        self.leaving.is_some() || self.leaving_thread.is_some()
     }
 
     fn render_media_viewer(
         &self,
         post: &twitty_model::Post,
         index: usize,
+        interactive: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -328,11 +392,13 @@ impl TwittyApp {
                 .large()
                 .w(px(viewer::NAV))
                 .icon(Icon::new(icon).size(px(28.)))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    // Not a click on the backdrop.
-                    cx.stop_propagation();
-                    this.step_left_right(delta, cx)
-                }))
+                .when(interactive, |b| {
+                    b.on_click(cx.listener(move |this, _, _, cx| {
+                        // Not a click on the backdrop.
+                        cx.stop_propagation();
+                        this.step_left_right(delta, cx)
+                    }))
+                })
         };
         let viewport = window.viewport_size();
         let (box_w, box_h) =
@@ -342,7 +408,7 @@ impl TwittyApp {
             .size_full()
             .p(px(viewer::PADDING))
             // Buttons and the image stop their clicks; anything else is backdrop.
-            .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx)))
+            .when(interactive, |d| d.on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))))
             .gap(px(viewer::GAP))
             .child(
                 h_flex()
@@ -357,7 +423,9 @@ impl TwittyApp {
                             .ghost()
                             .icon(IconName::X)
                             .tooltip("Close (Esc)")
-                            .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
+                            .when(interactive, |b| {
+                                b.on_click(cx.listener(|this, _, _, cx| this.dismiss(cx)))
+                            }),
                     ),
             )
             .child(
@@ -382,10 +450,26 @@ impl TwittyApp {
                             .child(
                                 img(media.preview().url.as_str().to_owned())
                                     .id("media-image")
-                                    .on_click(|_, _, cx| cx.stop_propagation())
+                                    .when(interactive, |i| {
+                                        i.on_click(|_, _, cx| cx.stop_propagation())
+                                    })
                                     .max_w(px(box_w))
                                     .max_h(px(box_h))
-                                    .object_fit(ObjectFit::Contain),
+                                    .object_fit(ObjectFit::Contain)
+                                    .map(|i| {
+                                        // Stepping to another image fades it in (not
+                                        // the leaving copy: it would restart at 0).
+                                        if interactive {
+                                            i.with_animation(
+                                                ("media-image-in", index),
+                                                Animation::new(theme.motion.duration_normal),
+                                                |i, t| i.opacity(t),
+                                            )
+                                            .into_any_element()
+                                        } else {
+                                            i.into_any_element()
+                                        }
+                                    }),
                             ),
                     )
                     .when(count > 1, |d| d.child(nav("media-next", IconName::ChevronRight, 1))),
@@ -410,9 +494,11 @@ impl TwittyApp {
                                 .primary()
                                 .icon(IconName::Play)
                                 .label("Play on x.com")
-                                .on_click(move |_, _, cx| {
-                                    cx.stop_propagation();
-                                    cx.open_url(&url);
+                                .when(interactive, |b| {
+                                    b.on_click(move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        cx.open_url(&url);
+                                    })
                                 }),
                         )
                     }),
@@ -425,6 +511,10 @@ impl TwittyApp {
         let backend = Arc::clone(&self.backend);
         let hub = self.hub.clone();
         let panel = cx.new(|cx| ThreadPanel::new(id, backend, hub, cx));
+        if self.thread.is_none() {
+            self.thread_opened = Some(Instant::now());
+        }
+        self.leaving_thread = None;
         self._thread_sub =
             Some(cx.subscribe(&panel, |this, _, _: &CloseThread, cx| this.close_thread(cx)));
         self.thread = Some(panel);
@@ -545,6 +635,25 @@ impl TwittyApp {
     }
 
     fn close_overlays(&mut self, cx: &mut Context<Self>) {
+        // The image viewer draws over a dialog, so then nothing visible closes.
+        let closing = if self.media.is_some() {
+            None
+        } else if let Some(view) = &self.login {
+            Some(LeavingOverlay::View(view.clone().into()))
+        } else if let Some(view) = &self.add_column {
+            Some(LeavingOverlay::View(view.clone().into()))
+        } else if let Some(view) = &self.compose {
+            Some(LeavingOverlay::View(view.clone().into()))
+        } else if self.account_panel {
+            Some(LeavingOverlay::Account)
+        } else if self.settings_panel {
+            Some(LeavingOverlay::Settings)
+        } else {
+            None
+        };
+        if let Some(closing) = closing {
+            self.leave(closing, cx);
+        }
         self.login = None;
         self._login_sub = None;
         self.add_column = None;
@@ -737,6 +846,7 @@ impl TwittyApp {
     /// Shows the settings page.
     pub fn open_settings(&mut self, cx: &mut Context<Self>) {
         self.close_overlays(cx);
+        self.settings_scroll = ScrollHandle::new();
         self.settings_panel = true;
         cx.notify();
     }
@@ -753,6 +863,13 @@ impl TwittyApp {
     pub fn set_polling(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.settings.polling = Some(enabled);
         self.update_polling(cx);
+        self.save_settings(cx);
+    }
+
+    /// Turns the UI's animations on or off (GPUI's reduce motion).
+    pub fn set_animations(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.animations = Some(enabled);
+        cx.set_reduce_motion(!enabled);
         self.save_settings(cx);
     }
 
@@ -803,6 +920,7 @@ impl TwittyApp {
             .w(px(520.))
             .max_h(px(840.))
             .overflow_y_scroll()
+            .track_scroll(&self.settings_scroll)
             .gap_2()
             .p_6()
             .rounded_2xl()
@@ -818,8 +936,20 @@ impl TwittyApp {
                 Checkbox::new("polling")
                     .checked(self.settings.polling_enabled())
                     .label("Check for new posts automatically (within X's rate limits)")
+                    .on_click({
+                        let weak = weak.clone();
+                        move |checked, _, cx| {
+                            weak.update(cx, |this, cx| this.set_polling(*checked, cx)).ok();
+                        }
+                    }),
+            )
+            .child(section("Appearance"))
+            .child(
+                Checkbox::new("animations")
+                    .checked(self.settings.animations_enabled())
+                    .label("Animations (off also stills loading spinners and placeholders)")
                     .on_click(move |checked, _, cx| {
-                        weak.update(cx, |this, cx| this.set_polling(*checked, cx)).ok();
+                        weak.update(cx, |this, cx| this.set_animations(*checked, cx)).ok();
                     }),
             )
             .child(section("Keyboard shortcuts"))
@@ -1117,22 +1247,45 @@ impl Render for TwittyApp {
                 .into_any_element()
         };
         let backdrop = theme.overlay.alpha(BACKDROP_ALPHA);
+        // (name for the enter animation, whether it is a card, content)
         let overlay = if let Some((post, index)) = &self.media {
-            Some(self.render_media_viewer(post, *index, window, cx))
+            Some(("media", false, self.render_media_viewer(post, *index, true, window, cx)))
         } else if let Some(login) = &self.login {
-            Some(login.clone().into_any_element())
+            Some(("login", true, login.clone().into_any_element()))
         } else if let Some(add) = &self.add_column {
-            Some(add.clone().into_any_element())
+            Some(("add-column", true, add.clone().into_any_element()))
         } else if let Some(compose) = &self.compose {
-            Some(compose.clone().into_any_element())
+            Some(("compose", true, compose.clone().into_any_element()))
         } else if self.account_panel {
-            Some(self.render_account_panel(cx))
+            Some(("account", true, self.render_account_panel(cx)))
         } else if self.settings_panel {
-            Some(self.render_settings_panel(cx))
+            Some(("settings", true, self.render_settings_panel(cx)))
         } else {
             None
         };
         let has_overlay = overlay.is_some();
+        let thread_open = self.thread.is_some();
+        let leaving = if has_overlay { None } else { self.render_leaving(backdrop, window, cx) };
+        let leaving_thread =
+            if thread_open { None } else { self.leaving_thread.as_ref().map(|l| l.what.clone()) };
+        // The thread's backdrop fades in when the panel opens, not each time
+        // an overlay over it closes.
+        let thread_fresh =
+            self.thread_opened.is_some_and(|at| at.elapsed() < theme.motion.duration_normal);
+        let tokens = theme.motion.clone();
+        let enter = move || {
+            let easing = tokens.easing_enter.clone();
+            Animation::new(tokens.duration_normal)
+                .with_easing(move |t| easing.sample(t).clamp(0., 1.))
+        };
+        let exit = {
+            let tokens = theme.motion.clone();
+            move || {
+                let easing = tokens.easing_exit.clone();
+                Animation::new(tokens.duration_fast)
+                    .with_easing(move |t| easing.sample(t).clamp(0., 1.))
+            }
+        };
         let demo = self.options.session.is_none();
         let can_sign_in = self.options.account.is_some();
         v_flex()
@@ -1225,25 +1378,95 @@ impl Render for TwittyApp {
                         // (a post, an image, a link) reacts. With an overlay
                         // open, that overlay's backdrop darkens everything.
                         d.when(!has_overlay, |d| {
+                            let shade = div()
+                                .id("thread-backdrop")
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full()
+                                .occlude()
+                                .bg(backdrop)
+                                .on_any_mouse_down(cx.listener(|this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.close_thread(cx);
+                                }));
+                            if thread_fresh {
+                                d.child(shade.with_animation(
+                                    "thread-backdrop-in",
+                                    enter(),
+                                    |d, t| d.opacity(t),
+                                ))
+                            } else {
+                                d.child(shade)
+                            }
+                        })
+                        // Slides in a short way from the right edge, so its hitbox
+                        // is about where it ends up from the first frame.
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .right_0()
+                                .h_full()
+                                .occlude()
+                                .child(panel)
+                                .with_animation("thread-in", enter(), |d, t| {
+                                    d.right(px(-motion::PANEL_TRAVEL * (1. - t))).opacity(t)
+                                }),
+                        )
+                    })
+                    .when_some(leaving_thread, |d, panel| {
+                        // The closed panel sliding out: no handlers, and a cover
+                        // so nothing inside it reacts.
+                        d.when(!has_overlay, |d| {
                             d.child(
                                 div()
-                                    .id("thread-backdrop")
                                     .absolute()
                                     .top_0()
                                     .left_0()
                                     .size_full()
-                                    .occlude()
                                     .bg(backdrop)
-                                    .on_any_mouse_down(cx.listener(|this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.close_thread(cx);
-                                    })),
+                                    .with_animation("thread-backdrop-out", exit(), |d, t| {
+                                        d.opacity(1. - t)
+                                    }),
                             )
                         })
-                        .child(div().absolute().top_0().right_0().h_full().occlude().child(panel))
+                        .child(
+                            inert(div().absolute().top_0().right_0().h_full().child(panel))
+                                .with_animation("thread-out", exit(), |d, t| {
+                                    d.right(px(-motion::PANEL_TRAVEL * t)).opacity(1. - t)
+                                }),
+                        )
                     }),
             )
-            .when_some(overlay, |d, overlay| {
+            .when_some(overlay, |d, (name, card, overlay)| {
+                // The image viewer fills the window, so it only fades; cards
+                // also rise a little into place.
+                let content = if card {
+                    div()
+                        .relative()
+                        .child(overlay)
+                        .with_animation(anim_id("overlay-in", name), enter(), |d, t| {
+                            d.opacity(t).top(px(motion::TRAVEL * (1. - t)))
+                        })
+                        .into_any_element()
+                } else {
+                    div()
+                        .size_full()
+                        .child(overlay)
+                        .with_animation(anim_id("overlay-in", name), enter(), |d, t| d.opacity(t))
+                        .into_any_element()
+                };
+                // Over the thread panel, the panel's own backdrop was already
+                // drawn: fading this one in would flash lighter.
+                let shade = div().absolute().top_0().left_0().size_full().bg(backdrop);
+                let shade = if thread_open {
+                    shade.into_any_element()
+                } else {
+                    shade
+                        .with_animation(anim_id("backdrop-in", name), enter(), |d, t| d.opacity(t))
+                        .into_any_element()
+                };
                 d.child(
                     div()
                         .key_context(keys::OVERLAY)
@@ -1253,13 +1476,88 @@ impl Render for TwittyApp {
                         .left_0()
                         .size_full()
                         .occlude()
-                        .bg(backdrop)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(overlay),
+                        .child(shade)
+                        .child(centered().child(content)),
                 )
             })
+            .children(leaving)
+    }
+}
+
+/// Id of the animation `what` of the overlay `name` (e.g. "overlay-in", "compose").
+fn anim_id(what: &str, name: &str) -> gpui_kit::ElementId {
+    gpui_kit::ElementId::Name(format!("{what}-{name}").into())
+}
+
+/// A full-window layer that centres its child.
+fn centered() -> gpui_kit::Div {
+    div().absolute().top_0().left_0().size_full().flex().items_center().justify_center()
+}
+
+/// `el` (which must be positioned) with a transparent cover on top that
+/// takes the mouse, so a view that is only animating out can't be clicked.
+fn inert(el: gpui_kit::Div) -> gpui_kit::Div {
+    el.child(div().absolute().top_0().left_0().size_full().occlude())
+}
+
+impl TwittyApp {
+    /// The overlay that just closed, fading out. It has no key context, no
+    /// handlers and no occluding backdrop: clicks go to what's under it,
+    /// except on its card, which is covered.
+    fn render_leaving(
+        &self,
+        backdrop: gpui_kit::Hsla,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let leaving = self.leaving.as_ref()?;
+        let (name, content) = match &leaving.what {
+            LeavingOverlay::Media(post, index) => {
+                ("media", self.render_media_viewer(post, *index, false, window, cx))
+            }
+            LeavingOverlay::View(view) => ("view", view.clone().into_any_element()),
+            LeavingOverlay::Account => ("account", self.render_account_panel(cx)),
+            LeavingOverlay::Settings => ("settings", self.render_settings_panel(cx)),
+        };
+        let media = matches!(leaving.what, LeavingOverlay::Media(..));
+        let tokens = cx.theme().motion.clone();
+        let exit = move || {
+            let easing = tokens.easing_exit.clone();
+            Animation::new(tokens.duration_fast)
+                .with_easing(move |t| easing.sample(t).clamp(0., 1.))
+        };
+        let content = if media {
+            // Rendered without handlers already.
+            div()
+                .size_full()
+                .child(content)
+                .with_animation(anim_id("overlay-out", name), exit(), |d, t| d.opacity(1. - t))
+                .into_any_element()
+        } else {
+            inert(div().relative().child(content))
+                .with_animation(anim_id("overlay-out", name), exit(), |d, t| {
+                    d.opacity(1. - t).top(px(motion::TRAVEL * t))
+                })
+                .into_any_element()
+        };
+        // Over the thread panel, its own backdrop is back already.
+        let shade = self.thread.is_none().then(|| {
+            div().absolute().top_0().left_0().size_full().bg(backdrop).with_animation(
+                anim_id("backdrop-out", name),
+                exit(),
+                |d, t| d.opacity(1. - t),
+            )
+        });
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .children(shade)
+                .child(centered().child(content))
+                .into_any_element(),
+        )
     }
 }
 
@@ -1826,6 +2124,106 @@ mod tests {
         assert_eq!(index(cx), None);
     }
 
+    /// Lets every exit animation finish.
+    fn finish_exits(cx: &mut VisualTestContext) {
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn a_closing_thread_panel_animates_out_without_taking_clicks(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        // A spot inside the open panel where a click switches to another post.
+        let root = first_post(&app, cx).id.to_string();
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let x = viewport.width - px(300.);
+        let spot = (60..1000)
+            .step_by(20)
+            .map(|y| point(x, px(y as f32)))
+            .find(|&at| {
+                open_panel(&app, &root, cx);
+                cx.simulate_click(at, Modifiers::default());
+                cx.run_until_parked();
+                let switched = panel_root(&app, cx).is_some_and(|now| now != root);
+                app.update(cx, |app, cx| {
+                    app.dismiss(cx);
+                    app.dismiss(cx);
+                });
+                finish_exits(cx);
+                switched
+            })
+            .expect("the panel shows a post to click");
+
+        open_panel(&app, &root, cx);
+        cx.simulate_keystrokes("escape");
+        assert_eq!(panel_root(&app, cx), None, "closed at once");
+        assert!(app.read_with(cx, |app, _| app.is_leaving()), "still drawn while it slides out");
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+
+        // The same spot on the leaving panel does nothing...
+        cx.simulate_click(spot, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(panel_root(&app, cx), None, "the leaving panel's posts don't react");
+        // ...but the deck beside it does: a post opens its thread.
+        cx.simulate_click(point(px(250.), px(200.)), Modifiers::default());
+        cx.run_until_parked();
+        assert!(panel_root(&app, cx).is_some(), "the leaving panel doesn't block the deck");
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()), "reopening drops the old one");
+
+        cx.simulate_keystrokes("escape");
+        finish_exits(cx);
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()), "gone once the animation is over");
+    }
+
+    #[gpui_kit::test]
+    fn a_closing_image_viewer_is_inert(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let post = column.read_with(cx, |c, _| {
+            c.model().items().iter().flat_map(|i| i.posts()).find(|p| p.media.len() >= 2).cloned()
+        });
+        let post = Arc::new(post.expect("the mock has a multi-image post"));
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.is_leaving()));
+
+        // The fading › button does nothing (it would step the columns now).
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let next =
+            point(viewport.width - px(viewer::PADDING + viewer::NAV / 2.), viewport.height / 2.);
+        cx.simulate_click(next, Modifiers::default());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()));
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0);
+        finish_exits(cx);
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()));
+    }
+
+    #[gpui_kit::test]
+    fn closing_dialogs_animate_out_unless_animations_are_off(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        cx.simulate_keystrokes("n");
+        cx.simulate_keystrokes("escape");
+        assert!(app.read_with(cx, |app, _| app.compose().is_none()));
+        assert!(app.read_with(cx, |app, _| app.is_leaving()));
+        finish_exits(cx);
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()));
+
+        app.update(cx, |app, cx| app.set_animations(false, cx));
+        assert!(cx.update(|_, cx| cx.reduce_motion()));
+        app.update(cx, |app, cx| app.open_settings(cx));
+        cx.simulate_keystrokes("escape");
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()), "nothing lingers");
+        open_panel(&app, "1", cx);
+        cx.simulate_keystrokes("escape");
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()));
+    }
+
     #[gpui_kit::test]
     fn settings_change_theme_and_polling_and_are_saved(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -1844,6 +2242,7 @@ mod tests {
         app.update(cx, |app, cx| app.open_settings(cx));
         app.update_in(cx, |app, window, cx| app.set_theme("Light", window, cx));
         app.update(cx, |app, cx| app.set_polling(false, cx));
+        app.update(cx, |app, cx| app.set_animations(false, cx));
         cx.run_until_parked();
         assert_eq!(app.read_with(cx, |app, _| app.theme_name()), "Light");
         let polling = app.read_with(cx, |app, cx| {
@@ -1851,7 +2250,11 @@ mod tests {
         });
         assert!(polling.iter().all(Option::is_none));
         let saved = Settings::load(&path).unwrap();
-        assert_eq!((saved.theme.as_deref(), saved.polling), (Some("Light"), Some(false)));
+        assert_eq!(
+            (saved.theme.as_deref(), saved.polling, saved.animations),
+            (Some("Light"), Some(false), Some(false))
+        );
+        assert!(cx.update(|_, cx| cx.reduce_motion()), "animations off is GPUI's reduce motion");
         cx.simulate_keystrokes("escape");
     }
 }

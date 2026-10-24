@@ -23,6 +23,17 @@ pub struct Effective {
     pub metrics: Metrics,
 }
 
+impl Effective {
+    /// Whether `toggle` is on (liked, reposted, bookmarked).
+    pub fn is_on(&self, toggle: Toggle) -> bool {
+        match toggle {
+            Toggle::Like => self.viewer.liked,
+            Toggle::Repost => self.viewer.reposted,
+            Toggle::Bookmark => self.viewer.bookmarked,
+        }
+    }
+}
+
 /// A change that was applied optimistically and may need to be undone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pending {

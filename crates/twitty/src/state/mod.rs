@@ -9,6 +9,7 @@ pub mod diagnostics;
 pub mod interactions;
 pub mod login;
 pub mod media_layout;
+pub mod motion;
 pub mod poll;
 pub mod settings;
 pub mod sources;

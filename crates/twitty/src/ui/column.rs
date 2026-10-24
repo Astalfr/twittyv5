@@ -1,13 +1,16 @@
 //! One deck column: header, virtualised post list, paging and polling.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use gpui_kit::{
-    AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, ListAlignment, ListOffset,
-    ListState, ParentElement, Render, SharedString, Styled, Subscription, Task, Window,
-    assets::IconName, component::button::*, component::scroll::ScrollableElement,
-    component::skeleton::Skeleton, component::spinner::Spinner, component::*, div, list,
-    prelude::*, px,
+    Animation, AnimationExt, AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement,
+    ListAlignment, ListOffset, ListState, ParentElement, Render, SharedString, Styled,
+    Subscription, Task, Window, assets::IconName, component::button::*,
+    component::scroll::ScrollableElement, component::skeleton::Skeleton,
+    component::spinner::Spinner, component::*, div, list, prelude::*, px,
 };
 use twitty_model::{Backend, BackendError, FeedSource};
 
@@ -16,6 +19,7 @@ use crate::{
     state::{
         column::{ColumnModel, ListChange, LoadKind, Status},
         deck::{ColumnId, ColumnWidth},
+        motion::{self, Entrance, Recent},
         poll,
         sources::{self, Tab},
     },
@@ -27,6 +31,8 @@ use crate::{
 
 /// Start loading older rows when this close to the bottom.
 const PREFETCH_ROWS: usize = 5;
+/// Distance of the "new posts" pill from the top of the list.
+const PILL_TOP: f32 = 12.0;
 
 /// Requests from a column to the deck.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +52,8 @@ pub struct ColumnView {
     backend: Arc<dyn Backend>,
     hub: Entity<InteractionsHub>,
     at_top: bool,
+    /// Rows that just arrived and animate in (by item key).
+    arrivals: Recent<String, Entrance>,
     /// Whether keyboard shortcuts act on this column.
     active: bool,
     load_task: Option<Task<()>>,
@@ -114,6 +122,7 @@ impl ColumnView {
             backend,
             hub,
             at_top: true,
+            arrivals: Recent::default(),
             active: false,
             load_task: None,
             poll_interval: poll.then_some(poll::MIN_INTERVAL),
@@ -175,7 +184,9 @@ impl ColumnView {
         if let Err(e) = &result {
             tracing::warn!(column = self.id.0, ?kind, "load failed: {e}");
         }
-        match self.model.finish(kind, result) {
+        let change = self.model.finish(kind, result);
+        self.mark_arrivals(&change, cx);
+        match change {
             ListChange::None => {}
             // +1 for the footer row.
             ListChange::Reset { count } => self.list.reset(count + 1),
@@ -190,6 +201,27 @@ impl ColumnView {
             }
         }
         cx.notify();
+    }
+
+    /// Remembers the rows `change` brings in, so they animate as they appear.
+    fn mark_arrivals(&mut self, change: &ListChange, cx: &Context<Self>) {
+        if matches!(change, ListChange::Reset { .. }) {
+            self.arrivals.clear();
+        }
+        if cx.reduce_motion() {
+            return;
+        }
+        let now = Instant::now();
+        for (ix, entrance) in motion::entrances(change) {
+            if let Some(item) = self.model.items().get(ix) {
+                self.arrivals.mark(item.key(), entrance, now, entrance.total());
+            }
+        }
+    }
+
+    /// Rows still animating in.
+    pub fn arriving(&self) -> usize {
+        self.arrivals.len()
     }
 
     fn on_scroll(&mut self, visible: std::ops::Range<usize>, cx: &mut Context<Self>) {
@@ -229,7 +261,7 @@ impl ColumnView {
 
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let rcx = RowCtx { ix, column_width: self.width.px(), hub: self.hub.clone() };
-        match self.model.items().get(ix) {
+        let row = match self.model.items().get(ix) {
             Some(item) if self.active && self.model.selected() == Some(ix) => {
                 let (bg, bar) = (cx.theme().list_active, cx.theme().list_active_border);
                 div()
@@ -242,7 +274,14 @@ impl ColumnView {
                     .into_any_element()
             }
             Some(item) => render_item(item, &rcx, window, cx),
-            None => self.render_footer(cx),
+            None => return self.render_footer(cx),
+        };
+        let Some(key) = self.model.items().get(ix).map(|item| item.key()) else {
+            return row;
+        };
+        match self.arrivals.get(&key, Instant::now()) {
+            Some(&entrance) => arriving(&key, entrance, row, cx.theme().primary.opacity(0.12)),
+            None => row,
         }
     }
 
@@ -413,22 +452,50 @@ impl ColumnView {
             .child(list(self.list.clone(), cx.processor(Self::render_row)).size_full())
             .vertical_scrollbar(&self.list)
             .when(unseen > 0, |d| {
+                let pill = Button::new("new-posts")
+                    .primary()
+                    .small()
+                    .icon(Icon::new(IconName::ArrowUp))
+                    .label(SharedString::from(format!(
+                        "{unseen} new post{}",
+                        if unseen == 1 { "" } else { "s" }
+                    )))
+                    .on_click(cx.listener(|this, _, _, cx| this.scroll_to_top(cx)));
+                let tokens = theme.motion.clone();
+                // Drops in from the column's top edge when it first appears.
                 d.child(
-                    h_flex().absolute().top_3().w_full().justify_center().child(
-                        Button::new("new-posts")
-                            .primary()
-                            .small()
-                            .icon(Icon::new(IconName::ArrowUp))
-                            .label(SharedString::from(format!(
-                                "{unseen} new post{}",
-                                if unseen == 1 { "" } else { "s" }
-                            )))
-                            .on_click(cx.listener(|this, _, _, cx| this.scroll_to_top(cx))),
+                    h_flex().absolute().w_full().justify_center().child(pill).with_animation(
+                        "new-posts-in",
+                        Animation::new(tokens.duration_slow)
+                            .with_easing(move |t| tokens.easing_enter.sample(t)),
+                        |d, t| {
+                            let t = t.clamp(0., 1.);
+                            d.top(px(PILL_TOP - motion::TRAVEL * (1. - t))).opacity(t)
+                        },
                     ),
                 )
             })
             .into_any_element()
     }
+}
+
+/// `row` fading (and sliding) in; newer posts also carry a fading `tint`.
+/// Only paint moves: the row's measured height never changes.
+fn arriving(key: &str, entrance: Entrance, row: AnyElement, tint: gpui_kit::Hsla) -> AnyElement {
+    div()
+        .relative()
+        .child(row)
+        .with_animation(
+            SharedString::from(format!("arrive-{key}")),
+            Animation::new(entrance.total()),
+            move |d, t| {
+                let frame = entrance.frame(t);
+                d.opacity(frame.opacity)
+                    .top(px(frame.offset))
+                    .when(frame.tint > 0., |d| d.bg(tint.opacity(frame.tint)))
+            },
+        )
+        .into_any_element()
 }
 
 /// Header icon for a source.
@@ -542,6 +609,32 @@ mod tests {
         column.read_with(cx, |c, _| assert_eq!(c.model().unseen(), 2));
         column.update(cx, |c, cx| c.scroll_to_top(cx));
         column.read_with(cx, |c, _| assert_eq!(c.model().unseen(), 0));
+    }
+
+    #[gpui_kit::test]
+    fn arriving_rows_animate_in(cx: &mut TestAppContext) {
+        let (backend, column) = setup(cx);
+        cx.run_until_parked();
+        let first_page = column.read_with(cx, |c, _| c.arriving());
+        assert!(first_page > 0, "the first page cascades in");
+        assert!(first_page <= motion::STAGGER_ROWS * 2, "only its first screenful");
+
+        backend.push_new(&FeedSource::Home { mode: HomeMode::Following }, 2);
+        column.update(cx, |c, cx| c.load(LoadKind::Newer, cx));
+        cx.run_until_parked();
+        column.read_with(cx, |c, _| {
+            let key = c.model().items()[0].key();
+            assert_eq!(c.arrivals.get(&key, Instant::now()), Some(&Entrance::Newer));
+        });
+
+        cx.update(|cx| cx.set_reduce_motion(true));
+        column.update(cx, |c, cx| c.load(LoadKind::Refresh, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            column.read_with(cx, |c, _| c.arriving()),
+            0,
+            "no animation with reduced motion"
+        );
     }
 
     #[gpui_kit::test]

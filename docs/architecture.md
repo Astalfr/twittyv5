@@ -33,6 +33,7 @@
 | `state::interactions` | Optimistic like/repost/bookmark overrides with rollback |
 | `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move/width |
 | `state::media_layout` | Geometry of the 1–4 media grid |
+| `state::motion` | Animation timing: which rows just arrived (`Recent`, `Entrance`), row frames, the toggle "pop" curve ([ui.md](ui.md#animations)) |
 | `format` | Relative times and compact counters |
 | `runtime` | `Runtime::Tokio` (production) / `Runtime::Inline` (tests) |
 | `ui::app` | Root view: rail + horizontally scrolling deck, persists deck changes |
@@ -85,5 +86,5 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - Post rows don't know about panels or dialogs: they emit `hub::Navigate` (`Thread`, `Reply`, `Profile`) through the hub, and `TwittyApp` opens the thread panel, the compose dialog or a User column.
 - Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`.
 - Credentials (`twitty::account`): the sign-in dialog stores the session in Windows Credential Manager (`keyring`, entry `Twitty` / `x-session`, a versioned JSON payload). `main.rs` gives the app an `AccountServices` (a `Connector` that turns `Credentials` into an `Arc<dyn Backend>`, plus the `CredentialStore`), so the UI never sees `twitty-x`. Startup order and sign-out rules: "Signing in" in [x-api.md](x-api.md).
-- Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; today it holds the theme.
+- Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; it holds the theme and the polling and animations switches.
 - Signing in or out replaces the backend: `TwittyApp` rebuilds the hub and every column (old views are dropped, which cancels their loads and polling).

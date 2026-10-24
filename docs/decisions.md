@@ -143,6 +143,11 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: Write our own small `twitty-x` and borrow ideas and patterns from `bun_x` (Apache-2.0, with credit).
 - **Why**: `bun_x` is ~14k lines and does far more than we need. We want to control the wire→model boundary.
 
+### 2026-10-24: Exit animations through inert "leaving" copies
+- **Decision**: Closing an overlay or the thread panel clears its state immediately and keeps the closed view in a `leaving` slot that only draws the exit animation, cleared by a timer task. The leaving layer takes no keys and no clicks: no handlers, no occluding backdrop, and a transparent occluding cover over its card.
+- **Why**: GPUI has no unmount animation. Delaying the real close would make every "is it closed?" check (focus return, `has_dialog`, Esc order, tests) time-dependent; a live leaving copy would still accept clicks (e.g. compose's Post button, the viewer's ‹ › stepping columns once it's gone).
+- **Consequences**: For ~120ms after closing, a click on the fading card itself is swallowed; clicks beside it work. Rows animate only while a `motion::Recent` entry is live, because `list()` drops element state for rows scrolled out. The "Animations" setting maps to GPUI's `reduce_motion`.
+
 ### 2026-10-24: Image viewer caps images at their decoded size
 - **Decision**: The viewer gives `img` only a max width/height (from the window size) and no explicit size, so GPUI lays it out at the decoded bitmap's size, capped by the available box.
 - **Why**: `ImageRef.size` is X's `original_info`, but the URL served is a smaller variant (`?name=medium`, ≤ 1200 px). Capping at `ImageRef.size` would still upscale big originals, and computing the variant's size in the UI would leak X knowledge out of `twitty-x`.
