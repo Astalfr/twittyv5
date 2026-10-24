@@ -1,8 +1,10 @@
 //! The Media Foundation decoder behind [`crate::Decoder`].
 //!
 //! An `IMFSourceReader` opens the file or URL, decodes the first video track
-//! and, with advanced video processing on, converts it to 32-bit RGB. Each
-//! sample is copied out of its locked buffer into a [`VideoFrame`].
+//! (and, when asked, the first audio track) and converts them: the picture to
+//! 32-bit RGB with advanced video processing on, the sound to 32-bit float.
+//! Each sample is copied out of its locked buffer into a [`VideoFrame`] or an
+//! [`AudioChunk`].
 //!
 //! Media Foundation's DLLs are loaded at run time ([`Api`]), not linked:
 //! Windows N editions without the Media Feature Pack and Windows Server
@@ -23,13 +25,14 @@ use windows::{
         Foundation::{E_POINTER, HMODULE, RPC_E_CHANGED_MODE},
         Media::MediaFoundation::{
             IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader,
+            MF_E_INVALIDSTREAMNUMBER, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
             MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_GEOMETRIC_APERTURE, MF_MT_MAJOR_TYPE,
             MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_SUBTYPE, MF_PD_DURATION,
-            MF_SOURCE_READER_ALL_STREAMS, MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING,
-            MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE,
+            MF_SOURCE_READER_ALL_STREAMS, MF_SOURCE_READER_ANY_STREAM,
+            MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, MF_SOURCE_READER_MEDIASOURCE,
             MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED, MF_SOURCE_READERF_ENDOFSTREAM,
-            MF_SOURCE_READERF_ERROR, MF_VERSION, MFMediaType_Video, MFSTARTUP_FULL,
-            MFVideoFormat_RGB32,
+            MF_SOURCE_READERF_ERROR, MF_VERSION, MFAudioFormat_Float, MFMediaType_Audio,
+            MFMediaType_Video, MFSTARTUP_FULL, MFVideoFormat_RGB32,
         },
         System::{
             Com::{
@@ -43,10 +46,10 @@ use windows::{
     core::{GUID, HRESULT, HSTRING, Interface as _, PCSTR, PCWSTR, s, w},
 };
 
-use crate::{Crop, MediaError, VideoFrame, copy_bgra};
-
-/// The reader's first video stream, as the `u32` its methods take.
-const VIDEO: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
+use crate::{
+    AudioChunk, AudioFormat, Crop, MediaError, Packet, Tracks, VideoFrame, copy_bgra, frame_before,
+    trim_audio,
+};
 
 type StartupFn = unsafe extern "system" fn(u32, u32) -> HRESULT;
 type CreateAttributesFn = unsafe extern "system" fn(*mut *mut c_void, u32) -> HRESULT;
@@ -234,16 +237,31 @@ struct Format {
     crop: Crop,
 }
 
+/// The sound track being read.
+#[derive(Debug, Clone, Copy)]
+struct Audio {
+    stream: u32,
+    format: AudioFormat,
+}
+
 pub(crate) struct Decoder {
     // Field order matters: the reader must be released before COM is.
     reader: IMFSourceReader,
+    /// The video track's stream index.
+    video: u32,
     format: Format,
+    audio: Option<Audio>,
     duration: Option<Duration>,
+    /// Tracks that reported their end since the last seek.
+    video_ended: bool,
+    audio_ended: bool,
+    /// After a seek, packets before this time are skipped or trimmed.
+    seek_target: Option<Duration>,
     _started: Started,
 }
 
 impl Decoder {
-    pub(crate) fn open(url: &str) -> Result<Self, MediaError> {
+    pub(crate) fn open(url: &str, tracks: Tracks) -> Result<Self, MediaError> {
         let started = Started::new()?;
         let api = started.api;
         let open = |e: windows::core::Error| MediaError::Open(e.to_string());
@@ -252,57 +270,124 @@ impl Decoder {
         unsafe { attributes.SetUINT32(&MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, 1) }
             .map_err(open)?;
         let reader = api.create_source_reader(url, &attributes).map_err(open)?;
-        // SAFETY: plain calls on a live reader with its own stream constants.
+        let (video, audio) = first_streams(&reader).map_err(open)?;
+        let video = video.ok_or_else(|| MediaError::Open("the file has no video track".into()))?;
+        // SAFETY: plain calls on a live reader with its own stream indices.
         unsafe {
             reader
                 .SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)
                 .map_err(open)?;
-            reader.SetStreamSelection(VIDEO, true).map_err(open)?;
+            reader.SetStreamSelection(video, true).map_err(open)?;
         }
-        let wanted = output_type(api).map_err(open)?;
+        let wanted = output_type(api, &MFMediaType_Video, &MFVideoFormat_RGB32).map_err(open)?;
         // SAFETY: a live reader and media type; no reserved pointer.
-        unsafe { reader.SetCurrentMediaType(VIDEO, None, &wanted) }.map_err(open)?;
-        let format = current_format(&reader).map_err(MediaError::Open)?;
+        unsafe { reader.SetCurrentMediaType(video, None, &wanted) }.map_err(open)?;
+        let format = current_format(&reader, video).map_err(MediaError::Open)?;
+        let audio = match (tracks, audio) {
+            (Tracks::VideoAndAudio, Some(stream)) => select_audio(api, &reader, stream),
+            _ => None,
+        };
         let duration = media_duration(&reader);
-        Ok(Self { reader, format, duration, _started: started })
+        Ok(Self {
+            reader,
+            video,
+            format,
+            audio,
+            duration,
+            video_ended: false,
+            audio_ended: audio.is_none(),
+            seek_target: None,
+            _started: started,
+        })
     }
 
-    pub(crate) fn next_frame(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+    pub(crate) fn audio_format(&self) -> Option<AudioFormat> {
+        self.audio.map(|a| a.format)
+    }
+
+    pub(crate) fn next_packet(&mut self) -> Result<Option<Packet>, MediaError> {
         let decode = |e: windows::core::Error| MediaError::Decode(e.to_string());
         loop {
+            if self.video_ended && self.audio_ended {
+                return Ok(None);
+            }
+            let mut stream = 0u32;
             let mut flags = 0u32;
             let mut sample: Option<IMFSample> = None;
             // SAFETY: the out pointers are valid locals for the whole call
             // (the reader is synchronous: no callback is set).
             unsafe {
-                self.reader.ReadSample(VIDEO, 0, None, Some(&mut flags), None, Some(&mut sample))
+                self.reader.ReadSample(
+                    MF_SOURCE_READER_ANY_STREAM.0 as u32,
+                    0,
+                    Some(&mut stream),
+                    Some(&mut flags),
+                    None,
+                    Some(&mut sample),
+                )
             }
             .map_err(decode)?;
             let has = |flag: i32| flags & flag as u32 != 0;
             if has(MF_SOURCE_READERF_ERROR.0) {
                 return Err(MediaError::Decode("the stream reported an error".into()));
             }
+            let audio = self.audio.filter(|a| a.stream == stream);
             if has(MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0) {
-                self.format = current_format(&self.reader).map_err(MediaError::Decode)?;
+                if stream == self.video {
+                    self.format =
+                        current_format(&self.reader, self.video).map_err(MediaError::Decode)?;
+                } else if let Some(a) = audio {
+                    let format = audio_format(&self.reader, a.stream).map_err(decode)?;
+                    self.audio = Some(Audio { format, ..a });
+                }
             }
             if has(MF_SOURCE_READERF_ENDOFSTREAM.0) {
-                return Ok(None);
+                if stream == self.video {
+                    self.video_ended = true;
+                } else if audio.is_some() {
+                    self.audio_ended = true;
+                }
+                continue;
             }
-            // No sample with no end: a gap in the stream. Read on.
-            if let Some(sample) = sample {
-                return frame(&sample, self.format).map(Some);
+            // No sample (a stream tick or a gap): read on.
+            let Some(sample) = sample else { continue };
+            if stream == self.video {
+                let frame = frame(&sample, self.format)?;
+                if self.seek_target.is_some_and(|t| frame_before(frame.time, frame.duration, t)) {
+                    continue;
+                }
+                return Ok(Some(Packet::Video(frame)));
             }
+            let Some(audio) = self.audio.filter(|a| a.stream == stream) else { continue };
+            let chunk = audio_chunk(&sample)?;
+            let chunk = match self.seek_target {
+                Some(target) => match trim_audio(chunk, target, audio.format) {
+                    Some(chunk) => chunk,
+                    None => continue,
+                },
+                None => chunk,
+            };
+            return Ok(Some(Packet::Audio(chunk)));
         }
     }
 
-    pub(crate) fn rewind(&mut self) -> Result<(), MediaError> {
+    pub(crate) fn seek(&mut self, to: Duration) -> Result<(), MediaError> {
         let mut start = PROPVARIANT::default();
-        // SAFETY: writes the tag of a zeroed PROPVARIANT, whose 64-bit value
-        // is already 0. VT_I8 owns no memory, so nothing needs clearing.
-        unsafe { (*start.Anonymous.Anonymous).vt = VT_I8 };
+        let hns = i64::try_from(to.as_nanos() / 100).unwrap_or(i64::MAX);
+        // SAFETY: sets the tag and the matching 64-bit member of a zeroed
+        // PROPVARIANT. VT_I8 owns no memory, so nothing needs clearing.
+        unsafe {
+            let value = &mut *start.Anonymous.Anonymous;
+            value.vt = VT_I8;
+            value.Anonymous.hVal = hns;
+        }
         // SAFETY: GUID_NULL means 100 ns units; both pointers are valid locals.
         unsafe { self.reader.SetCurrentPosition(&GUID::zeroed(), &start) }
-            .map_err(|e| MediaError::Decode(e.to_string()))
+            .map_err(|e| MediaError::Decode(e.to_string()))?;
+        self.video_ended = false;
+        self.audio_ended = self.audio.is_none();
+        self.seek_target = (to > Duration::ZERO).then_some(to);
+        Ok(())
     }
 
     pub(crate) fn duration(&self) -> Option<Duration> {
@@ -310,23 +395,94 @@ impl Decoder {
     }
 }
 
-/// The type the reader is asked to output: 32-bit RGB (B, G, R, X in memory).
-fn output_type(api: &Api) -> windows::core::Result<IMFMediaType> {
+/// The indices of the first video and the first audio stream.
+fn first_streams(reader: &IMFSourceReader) -> windows::core::Result<(Option<u32>, Option<u32>)> {
+    let (mut video, mut audio) = (None, None);
+    for index in 0u32.. {
+        // SAFETY: a plain getter; an index past the last stream is an error.
+        let ty = match unsafe { reader.GetNativeMediaType(index, 0) } {
+            Ok(ty) => ty,
+            Err(e) if e.code() == MF_E_INVALIDSTREAMNUMBER => break,
+            Err(e) => return Err(e),
+        };
+        // SAFETY: a plain getter with a valid GUID key.
+        let major = unsafe { ty.GetGUID(&MF_MT_MAJOR_TYPE) }?;
+        if major == MFMediaType_Video && video.is_none() {
+            video = Some(index);
+        } else if major == MFMediaType_Audio && audio.is_none() {
+            audio = Some(index);
+        }
+    }
+    Ok((video, audio))
+}
+
+/// Selects the sound track as 32-bit float. A track that can't be decoded
+/// is left out: the video still plays, silent.
+fn select_audio(api: &Api, reader: &IMFSourceReader, stream: u32) -> Option<Audio> {
+    let wanted = output_type(api, &MFMediaType_Audio, &MFAudioFormat_Float).ok()?;
+    // SAFETY: plain calls on a live reader and media type.
+    let selected = unsafe {
+        reader
+            .SetStreamSelection(stream, true)
+            .and_then(|()| reader.SetCurrentMediaType(stream, None, &wanted))
+    };
+    match selected.and_then(|()| audio_format(reader, stream)) {
+        Ok(format) if format.channels > 0 && format.sample_rate > 0 => {
+            Some(Audio { stream, format })
+        }
+        _ => {
+            // SAFETY: as above.
+            let _ = unsafe { reader.SetStreamSelection(stream, false) };
+            None
+        }
+    }
+}
+
+/// The sound's shape as the reader outputs it (read back, not assumed).
+fn audio_format(reader: &IMFSourceReader, stream: u32) -> windows::core::Result<AudioFormat> {
+    // SAFETY: plain getters on live objects with valid GUID keys.
+    unsafe {
+        let ty = reader.GetCurrentMediaType(stream)?;
+        Ok(AudioFormat {
+            sample_rate: ty.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND)?,
+            channels: u16::try_from(ty.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS)?).unwrap_or(0),
+        })
+    }
+}
+
+fn audio_chunk(sample: &IMFSample) -> Result<AudioChunk, MediaError> {
+    let decode = |e: windows::core::Error| MediaError::Decode(e.to_string());
+    // SAFETY: plain getters on a live sample.
+    let (time, buffer) = unsafe {
+        (
+            sample.GetSampleTime().map_err(decode)?,
+            sample.ConvertToContiguousBuffer().map_err(decode)?,
+        )
+    };
+    let locked = Locked::new(&buffer).map_err(decode)?;
+    let samples =
+        locked.bytes().as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+    Ok(AudioChunk { time: hns(time), samples })
+}
+
+/// A type for the reader to output: 32-bit RGB (B, G, R, X in memory) for
+/// video, 32-bit float for audio.
+fn output_type(api: &Api, major: &GUID, subtype: &GUID) -> windows::core::Result<IMFMediaType> {
     let ty = api.create_media_type()?;
     // SAFETY: plain setters; the keys and values are valid GUIDs.
     unsafe {
-        ty.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
-        ty.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)?;
+        ty.SetGUID(&MF_MT_MAJOR_TYPE, major)?;
+        ty.SetGUID(&MF_MT_SUBTYPE, subtype)?;
         Ok(ty)
     }
 }
 
 /// Reads the size, stride and visible area of the reader's output, which can
 /// differ from the file's: decoders pad the coded height (1080 → 1088).
-fn current_format(reader: &IMFSourceReader) -> Result<Format, String> {
+fn current_format(reader: &IMFSourceReader, video: u32) -> Result<Format, String> {
     // SAFETY: plain getters on live objects with valid GUID keys.
     let (ty, size) = unsafe {
-        let ty = reader.GetCurrentMediaType(VIDEO).map_err(|e| e.to_string())?;
+        let ty = reader.GetCurrentMediaType(video).map_err(|e| e.to_string())?;
         let size = ty.GetUINT64(&MF_MT_FRAME_SIZE).map_err(|e| e.to_string())?;
         (ty, size)
     };

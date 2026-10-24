@@ -5,6 +5,13 @@
 //! with the first frame, so a slow connection doesn't make the opening frames
 //! late. If the decoder falls behind (the queue runs dry), the clock waits for
 //! it rather than dropping the frames that arrive late.
+//!
+//! A video with sound follows the sound instead ([`Timeline::tick_with`]):
+//! while sound comes out, its position is the clock. When it doesn't (no
+//! sound track, its end, a dry sound queue), the wall clock carries on from
+//! the last position the sound gave, so a sound track shorter than the
+//! picture, or sound that arrives late, never freezes the picture. Only when
+//! both run dry does the clock wait.
 
 use std::{
     collections::VecDeque,
@@ -58,6 +65,8 @@ pub struct Timeline<T> {
     state: State,
     /// No frame will follow the queued ones.
     ended: bool,
+    /// After a seek: the first new frame shows at once, even while paused.
+    preview: bool,
 }
 
 /// What the viewer asked for.
@@ -76,6 +85,7 @@ impl<T> Default for Timeline<T> {
             since: None,
             state: State::Playing,
             ended: false,
+            preview: false,
         }
     }
 }
@@ -97,12 +107,29 @@ impl<T> Timeline<T> {
     /// No more frames will be pushed.
     pub fn end(&mut self) {
         self.ended = true;
+        // A seek to the very end has no frame to preview.
+        if self.queue.is_empty() {
+            self.preview = false;
+        }
     }
 
     /// Advances to time `at`: the latest due frame goes on screen. Returns
     /// the frames taken off (the old one and any skipped), for the caller to
     /// free.
     pub fn tick(&mut self, at: Instant) -> Vec<T> {
+        if self.preview
+            && let Some((_, frame)) = self.queue.pop_front()
+        {
+            self.preview = false;
+            let retired = self.current.replace(frame).into_iter().collect();
+            if self.state == State::Paused {
+                return retired;
+            }
+            // Playing: the clock starts from the seek target with the
+            // following frames.
+            self.since = Some(at);
+            return retired.into_iter().chain(self.tick(at)).collect();
+        }
         if self.state == State::Playing
             && self.since.is_none()
             && let Some((first, _)) = self.queue.front()
@@ -124,6 +151,40 @@ impl<T> Timeline<T> {
             self.stop_clock(at);
         }
         retired
+    }
+
+    /// As [`Timeline::tick`], following the sound: `audio` is the media
+    /// time of the sound coming out, when some is.
+    pub fn tick_with(&mut self, at: Instant, audio: Option<Duration>) -> Vec<T> {
+        if self.state == State::Playing
+            && !self.preview
+            && let Some(position) = audio
+        {
+            self.base = position;
+            self.since = Some(at);
+        }
+        self.tick(at)
+    }
+
+    /// Continues from `to`: drops the queued frames (returned, for the caller
+    /// to free) and shows the next pushed frame as soon as it arrives. The
+    /// frame on screen stays until then.
+    pub fn seek(&mut self, to: Duration) -> Vec<T> {
+        self.base = to;
+        self.since = None;
+        self.ended = false;
+        self.preview = true;
+        self.queue.drain(..).map(|(_, f)| f).collect()
+    }
+
+    /// The media time at `at` (the playback position).
+    pub fn position(&self, at: Instant) -> Duration {
+        self.now(at)
+    }
+
+    /// Whether the last frame is on screen and no other follows.
+    pub fn is_ended(&self) -> bool {
+        self.ended && self.queue.is_empty() && !self.preview
     }
 
     /// The frame on screen.
@@ -295,6 +356,108 @@ mod tests {
         assert_eq!(t.current(), Some(&1));
         t.tick(start + ms(100));
         assert_eq!(t.current(), Some(&2));
+    }
+
+    #[test]
+    fn with_sound_the_picture_follows_the_sound() {
+        let start = Instant::now();
+        let mut t = frames(5);
+        t.tick_with(start, Some(ms(0)));
+        assert_eq!(t.current(), Some(&0));
+        // The device is behind the wall clock: the picture waits for it.
+        t.tick_with(start + ms(250), Some(ms(150)));
+        assert_eq!(t.current(), Some(&1));
+        // And ahead of it: the picture keeps up.
+        t.tick_with(start + ms(260), Some(ms(310)));
+        assert_eq!(t.current(), Some(&3));
+    }
+
+    #[test]
+    fn when_the_sound_stops_the_wall_clock_carries_on_from_it() {
+        let start = Instant::now();
+        let mut t = frames(6);
+        t.tick_with(start, Some(ms(150)));
+        assert_eq!(t.current(), Some(&1));
+        // The sound track ended (or ran dry); the frames are there.
+        t.tick_with(start + ms(100), None);
+        assert_eq!(t.current(), Some(&2), "150 ms + 100 ms of wall time");
+        t.tick_with(start + ms(300), None);
+        assert_eq!(t.current(), Some(&4), "never frozen");
+    }
+
+    #[test]
+    fn a_seek_while_paused_shows_the_new_picture_and_stays_paused() {
+        let start = Instant::now();
+        let mut t = frames(2);
+        t.tick(start);
+        t.toggle(start);
+        assert_eq!(t.seek(ms(5000)), vec![1], "the queued frame is handed back");
+        assert_eq!(t.current(), Some(&0), "the old picture stays until a new one comes");
+        assert_eq!(t.position(start + ms(999)), ms(5000), "the position is the target");
+        t.push(ms(5000), 50);
+        t.push(ms(5100), 51);
+        assert_eq!(t.tick(start + ms(10)), vec![0]);
+        assert_eq!(t.current(), Some(&50), "a preview of where it went");
+        t.tick(start + ms(500));
+        assert_eq!(t.current(), Some(&50), "still paused");
+        assert_eq!(t.state(), State::Paused);
+    }
+
+    #[test]
+    fn a_seek_while_playing_continues_from_the_target() {
+        let start = Instant::now();
+        let mut t = frames(3);
+        t.tick(start);
+        t.seek(ms(2000));
+        t.push(ms(2000), 20);
+        t.push(ms(2100), 21);
+        t.tick(start + ms(10));
+        assert_eq!(t.current(), Some(&20));
+        t.tick(start + ms(109));
+        assert_eq!(t.current(), Some(&20));
+        t.tick(start + ms(110));
+        assert_eq!(t.current(), Some(&21));
+    }
+
+    #[test]
+    fn a_seek_to_the_very_end_ends() {
+        let start = Instant::now();
+        let mut t = frames(2);
+        t.tick(start);
+        t.seek(ms(5000));
+        // The decoder skipped every frame: only the end comes.
+        t.end();
+        t.tick(start + ms(10));
+        assert!(t.is_ended(), "so play can start it over");
+        assert!(!t.is_running());
+    }
+
+    #[test]
+    fn a_preview_arriving_with_the_end_still_shows() {
+        let start = Instant::now();
+        let mut t = frames(1);
+        t.tick(start);
+        t.toggle(start);
+        t.seek(ms(900));
+        t.push(ms(900), 9);
+        t.end();
+        t.tick(start + ms(10));
+        assert_eq!(t.current(), Some(&9));
+        assert!(t.is_ended());
+    }
+
+    #[test]
+    fn the_end_is_the_last_frame_with_nothing_after_it() {
+        let start = Instant::now();
+        let mut t = frames(2);
+        t.end();
+        t.tick(start);
+        assert!(!t.is_ended(), "a frame is still queued");
+        t.tick(start + ms(100));
+        assert!(t.is_ended());
+        assert_eq!(t.current(), Some(&1), "the last picture stays up");
+        t.seek(Duration::ZERO);
+        assert!(!t.is_ended(), "a seek starts it again");
     }
 
     #[test]

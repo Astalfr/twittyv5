@@ -24,7 +24,7 @@ depends on nothing else of ours.
 |---|---|---|---|
 | `twitty-model` | Stable domain types (`Post`, `Profile`, `FeedItem`, …), `Backend` trait, `BackendError`, `MockBackend` (feature `mock`) | serde, chrono, url, smol_str, thiserror | gpui, reqwest, tokio, twitty-x |
 | `twitty-x` | Everything X-specific: HTTP, auth, query-ID discovery, GraphQL ops, wire parsing, translation into the model | twitty-model, reqwest, tokio, serde_json, regex | gpui, twitty |
-| `twitty-media` | Video decoding: `Decoder` opens a file or URL and returns BGRA frames with their times. Media Foundation on Windows, `Unsupported` elsewhere. The only crate with `unsafe` (COM), confined to its `mf` module | thiserror, windows | gpui, twitty-model, everything X |
+| `twitty-media` | Video decoding: `Decoder` opens a file or URL and returns BGRA frames and float sound (`Packet`s in file order) with their times, and seeks exactly (frames and sound before the target are skipped). Media Foundation on Windows, `Unsupported` elsewhere. The only crate with `unsafe` (COM), confined to its `mf` module | thiserror, windows | gpui, twitty-model, everything X |
 | `twitty` | UI, app state, persistence of decks and settings, keyring, runtime bridge | twitty-model, twitty-x, twitty-media, gpui-kit | (X JSON types, which aren't public anyway) |
 
 `twitty` uses `twitty-x` only in `main.rs`, to find a session, build an `XBackend` and hand it over as `Arc<dyn Backend>`. Without a session, `main.rs` uses `MockBackend` and shows a "Demo mode" banner.
@@ -40,14 +40,15 @@ depends on nothing else of ours.
 | `state::media_layout` | Geometry of the 1–4 media grid |
 | `state::profile` | Profile sheet: Tweets / Media tabs and their sources, media gallery tiles, list row mapping and splices |
 | `state::motion` | Animation timing: which rows just arrived (`Recent`, `Entrance`), row frames, the toggle "pop" curve ([ui.md](ui.md#animations)) |
-| `state::playback` | Video frame timing (`Timeline`): the clock starts with the first frame, waits for a slow decoder, pauses; which frame is due and which leave the screen |
-| `video` | `Video` global and `VideoSource` trait; `SystemVideo` decodes each playback on its own thread with `twitty_media` and sends GPUI images through a bounded channel. Loops keep the clock growing |
+| `state::playback` | Video frame timing (`Timeline`): the clock starts with the first frame, waits for a slow decoder, pauses, follows the sound while it plays (`tick_with`), seeks (with a preview while paused) and ends; which frame is due and which leave the screen |
+| `video` | `Video` global and `VideoSource` trait. `open` returns a `Playback`: the event receiver and a `Control` (seek with a generation, pause, volume, the sound's clock). `SystemVideo` decodes each playback on its own thread with `twitty_media`: frames go to the view through a bounded channel, sound straight to the output device. The thread never blocks without watching its commands (a seek reaches it while the view is paused; a view that goes away stops it). Loops keep the clock growing |
+| `audio` | `AudioShared` (the sound queue, the generation of the latest seek, pause, gain, the clock) and `AudioOut`, the rodio source playing it on the audio thread: one lock per chunk, silence without consuming while paused or dry |
 | `format` | Relative times and compact counters |
 | `runtime` | `Runtime::Tokio` (production) / `Runtime::Inline` (tests) |
 | `ui::app` | Root view: rail + horizontally scrolling deck, persists deck changes |
 | `ui::column` | Column view: header, `list()` + `ListState`, footer row, polling, "new posts" pill |
 | `ui::post` | Row rendering: posts, reposts, threads, media, quotes, link cards, polls, action bar |
-| `ui::player` | `VideoPlayer` view: pulls frames into its `Timeline` on every draw, frees frames that leave the screen from the sprite atlas. It only draws (the container sets how, with `set_draw`, and handles clicks) |
+| `ui::player` | `VideoPlayer` view: pulls frames of the current generation into its `Timeline` on every draw (on the sound's clock), frees frames that leave the screen from the sprite atlas. `Options::GIF` draws pictures only; `Options::video` adds the control bar (sliders seek on release; `VideoVolume` global for the session). The container sets how frames are drawn (`set_draw`) and handles clicks on the picture |
 | `ui::gif` | GIFs playing in timeline tiles: `GifTile` keyed state (`window.use_keyed_state`, so it lives only while the tile is drawn), the hover play/pause button, the `GifAutoplay` global set from the settings |
 | `ui::hub` | `InteractionsHub` entity shared by all columns; sends actions, rolls back, emits `ActionFailed` |
 | `ui::theme`, `ui::assets` | Bundled themes (`themes/x.json`) and the embedded Lucide icon subset |
@@ -97,7 +98,7 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`. Saves are chained (`TwittyApp::persist`), so quick edits never interleave their writes.
 - New-post alerts: a column checks `state::alerts::announce` after each load. The sound goes through the `sound::Sound` global (`SystemSound` from `main.rs`; no global in tests means silence, `RecordingSound` records). System notifications use GPUI's `show_system_notification`, which needs the app identity `main.rs` sets first (`cx.set_app_identity`).
 - Inline GIFs: `ui::post::media_grid` adds `ui::gif::inline_gif` over each GIF tile, keyed by the post and media index inside `RowCtx::scope` (one per list: a column, the thread panel, the profile sheet), so the same post in two columns plays separately. Whether it plays is `state::playback::gif_plays` (the viewer's choice, else the autoplay setting).
-- Video: the image viewer creates a `VideoPlayer` when it shows a GIF (`TwittyApp::sync_media_player`) and drops it when it steps away or closes; dropping it hangs up the channel, which stops the decoder thread. Without a `video::Video` global (tests, by default) the player fails at once and the viewer keeps the poster and "Play on x.com"; `FakeVideo` stands in for tests.
+- Video: the image viewer creates a `VideoPlayer` when it shows a GIF or a video (`TwittyApp::sync_media_player`) and drops it when it steps away or closes; dropping it hangs up the channel, which stops the decoder thread. Without a `video::Video` global (tests, by default) the player fails at once and the viewer keeps the poster and "Play on x.com"; `FakeVideo` stands in for tests.
 - Credentials (`twitty::account`): the sign-in dialog stores the session in Windows Credential Manager (`keyring`, entry `Twitty` / `x-session`, a versioned JSON payload). `main.rs` gives the app an `AccountServices` (a `Connector` that turns `Credentials` into an `Arc<dyn Backend>`, plus the `CredentialStore`), so the UI never sees `twitty-x`. Startup order and sign-out rules: "Signing in" in [x-api.md](x-api.md).
 - Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; it holds the theme and the polling and animations switches.
 - Signing in or out replaces the backend: `TwittyApp` rebuilds the hub and every column (old views are dropped, which cancels their loads and polling).

@@ -15,8 +15,7 @@ use gpui_kit::{
 
 use crate::{
     state::playback::{Autoplay, GifChoice, gif_plays, gif_toggled},
-    ui::player::{DrawFrame, VideoPlayer, play_pause_sign},
-    video::Repeat,
+    ui::player::{DrawFrame, Options, VideoPlayer, play_pause_sign},
 };
 
 /// Diameter of the play/pause button.
@@ -69,7 +68,7 @@ impl GifTile {
             Some(player) => player.update(cx, |p, cx| p.set_playing(plays, cx)),
             None if plays => {
                 let url = self.url.clone();
-                self.player = Some(cx.new(|cx| VideoPlayer::new(&url, Repeat::Loop, window, cx)));
+                self.player = Some(cx.new(|cx| VideoPlayer::new(&url, Options::GIF, window, cx)));
             }
             None => {}
         }

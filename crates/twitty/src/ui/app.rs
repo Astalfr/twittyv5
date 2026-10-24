@@ -34,14 +34,13 @@ use crate::{
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
         login::{LoginEvent, LoginView},
-        player::{VideoPlayer, play_pause_sign},
+        player::{Options as PlayerOptions, VideoPlayer, play_pause_sign},
         post::span_url,
         profile::{CloseProfile, ProfilePanel},
         theme,
         thread::{CloseThread, ThreadPanel},
         title_bar,
     },
-    video::Repeat,
 };
 
 /// Opacity of the theme's overlay colour behind the image viewer, dialogs and
@@ -146,7 +145,7 @@ pub struct TwittyApp {
     window: AnyWindowHandle,
     /// The image viewer: a post and the index of the media shown.
     media: Option<(Arc<twitty_model::Post>, usize)>,
-    /// Plays the viewer's media when it is a GIF.
+    /// Plays the viewer's media when it is a GIF or a video.
     media_player: Option<Entity<VideoPlayer>>,
     /// The overlay animating out after it closed. Inert: it gets no input.
     leaving: Option<Leaving<LeavingOverlay>>,
@@ -330,21 +329,27 @@ impl TwittyApp {
         self.media.as_ref().map(|(p, ix)| (p.as_ref(), *ix))
     }
 
-    /// The player of the viewer's GIF.
+    /// The player of the viewer's GIF or video.
     pub fn media_player(&self) -> Option<&Entity<VideoPlayer>> {
         self.media_player.as_ref()
     }
 
-    /// Starts playing the viewer's media if it is a GIF, and stops whatever
-    /// played before.
+    /// Starts playing the viewer's media if it is a GIF (looping, silent) or
+    /// a video (once, with sound and controls), and stops whatever played
+    /// before.
     fn sync_media_player(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let stream =
             self.media.as_ref().and_then(|(post, index)| match post.media.get(*index)? {
-                twitty_model::Media::Gif { stream: Some(url), .. } => Some(url.to_string()),
+                twitty_model::Media::Gif { stream: Some(url), .. } => {
+                    Some((url.to_string(), PlayerOptions::GIF))
+                }
+                twitty_model::Media::Video { stream: Some(url), duration, .. } => {
+                    Some((url.to_string(), PlayerOptions::video(*duration)))
+                }
                 _ => None,
             });
         self.media_player =
-            stream.map(|url| cx.new(|cx| VideoPlayer::new(&url, Repeat::Loop, window, cx)));
+            stream.map(|(url, options)| cx.new(|cx| VideoPlayer::new(&url, options, window, cx)));
     }
 
     pub fn active_column(&self) -> usize {
@@ -2628,6 +2633,110 @@ mod tests {
         assert_eq!(video.opened().len(), 2, "it starts over");
         cx.simulate_keystrokes("escape");
         assert!(app.read_with(cx, |app, _| app.media_player().is_none()), "closing stops it");
+    }
+
+    #[gpui_kit::test]
+    fn a_video_plays_with_sound_and_controls_in_the_media_viewer(cx: &mut TestAppContext) {
+        use std::time::Duration;
+        let (app, cx) = keyboard_app(cx);
+        let frames = vec![Duration::ZERO, Duration::from_secs(60)];
+        let video = cx.update(|_, cx| crate::video::FakeVideo::install(frames, cx));
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let mut post = column
+            .read_with(cx, |c, _| {
+                c.model()
+                    .items()
+                    .iter()
+                    .flat_map(|i| i.posts())
+                    .find(|p| !p.media.is_empty())
+                    .cloned()
+            })
+            .expect("the mock has a post with media");
+        let poster = post.media[0].preview().clone();
+        let stream = Some(poster.url.join("/clip.mp4").unwrap());
+        let duration = Some(Duration::from_secs(42));
+        post.media = vec![twitty_model::Media::Video { poster, stream, duration, alt: None }];
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        let to = Navigate::Media { post: Arc::new(post), index: 0 };
+        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+
+        assert_eq!(video.sounds(), vec![crate::video::Sound::On]);
+        let player = app.read_with(cx, |app, _| app.media_player().cloned()).expect("playing");
+        assert_eq!(player.read_with(cx, |p, _| p.duration()), duration, "the model's, until told");
+        assert!(cx.debug_bounds("video-controls").is_some(), "the control bar");
+        assert!(cx.debug_bounds("media-play").is_none(), "no need for x.com");
+
+        let play = cx.debug_bounds("video-play").expect("the play button").center();
+        cx.simulate_click(play, Modifiers::default());
+        assert_eq!(player.read_with(cx, |p, _| p.state()), State::Paused, "toggled once");
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_some()), "the viewer stays");
+        assert_eq!(video.control(0).unwrap().paused(), Some(true));
+        cx.simulate_keystrokes("escape");
+        drop(player);
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert_eq!(video.listening(), 0, "closing stops the playback");
+    }
+
+    /// Opens the media viewer on a 42 s video and returns its player.
+    fn viewer_video(
+        app: &Entity<TwittyApp>,
+        cx: &mut VisualTestContext,
+    ) -> (Entity<VideoPlayer>, Arc<crate::video::FakeVideo>) {
+        use std::time::Duration;
+        let frames = vec![Duration::ZERO, Duration::from_secs(60)];
+        let video = cx.update(|_, cx| crate::video::FakeVideo::install(frames, cx));
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let mut post = column
+            .read_with(cx, |c, _| {
+                c.model()
+                    .items()
+                    .iter()
+                    .flat_map(|i| i.posts())
+                    .find(|p| !p.media.is_empty())
+                    .cloned()
+            })
+            .expect("the mock has a post with media");
+        let poster = post.media[0].preview().clone();
+        let stream = Some(poster.url.join("/clip.mp4").unwrap());
+        let duration = Some(Duration::from_secs(42));
+        post.media = vec![twitty_model::Media::Video { poster, stream, duration, alt: None }];
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        let to = Navigate::Media { post: Arc::new(post), index: 0 };
+        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        let player = app.read_with(cx, |app, _| app.media_player().cloned()).expect("playing");
+        (player, video)
+    }
+
+    #[gpui_kit::test]
+    fn a_seek_drag_released_outside_the_bar_only_seeks(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let (player, video) = viewer_video(&app, cx);
+        let slider = cx.debug_bounds("video-progress").expect("the progress slider");
+        let picture = cx.debug_bounds("media-player").expect("the video");
+        use gpui_kit::MouseButton;
+        let drag = |from, to, cx: &mut VisualTestContext| {
+            cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+            cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+            cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+            cx.run_until_parked();
+        };
+        // Up over the picture, which pauses on a click.
+        drag(slider.center(), picture.center(), cx);
+        assert_eq!(player.read_with(cx, |p, _| p.state()), State::Playing, "no pause");
+        assert_eq!(video.control(0).unwrap().seeks().len(), 1, "one seek, on release");
+        // Up below the video, over the backdrop, which closes on a click.
+        let quarter = point(slider.left() + slider.size.width / 4., slider.center().y);
+        drag(quarter, point(picture.left() + px(30.), picture.bottom() + px(20.)), cx);
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_some()), "still open");
+        assert_eq!(video.control(0).unwrap().seeks().len(), 2);
     }
 
     #[gpui_kit::test]

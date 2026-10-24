@@ -23,7 +23,8 @@ reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.9" }
 # `image` must stay on the 0.25 line GPUI uses, since `RenderImage` takes its `Frame`).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 futures = "0.3"
-# The notification sound: mp3 decoding and playback only (GPUI has no audio).
+# The notification sound (mp3) and the sound of videos, decoded by
+# twitty-media and played through a rodio mixer (GPUI has no audio).
 rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
 # Video decoding through Media Foundation (twitty-media only). 0.62 is the
 # version GPUI already builds, so this adds features, not a second copy.

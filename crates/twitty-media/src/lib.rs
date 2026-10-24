@@ -60,7 +60,58 @@ pub enum MediaError {
     Decode(String),
 }
 
-/// Reads the frames of one video, in order.
+/// Which tracks a [`Decoder`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tracks {
+    /// The picture only (GIFs, which have no sound).
+    Video,
+    /// The picture and, when the file has one, the sound.
+    VideoAndAudio,
+}
+
+/// The shape of decoded sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioFormat {
+    /// Frames (one sample per channel) per second.
+    pub sample_rate: u32,
+    /// Interleaved channels.
+    pub channels: u16,
+}
+
+impl AudioFormat {
+    /// How long `samples` interleaved samples last.
+    pub fn duration_of(self, samples: usize) -> Duration {
+        let frames = samples / usize::from(self.channels.max(1));
+        Duration::from_secs_f64(frames as f64 / f64::from(self.sample_rate.max(1)))
+    }
+}
+
+/// A run of decoded sound.
+#[derive(Clone, PartialEq)]
+pub struct AudioChunk {
+    /// When its first frame plays, from the start of the video.
+    pub time: Duration,
+    /// Interleaved 32-bit float samples in the decoder's [`AudioFormat`].
+    pub samples: Vec<f32>,
+}
+
+impl std::fmt::Debug for AudioChunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioChunk")
+            .field("time", &self.time)
+            .field("samples", &self.samples.len())
+            .finish()
+    }
+}
+
+/// What the decoder read next, in file order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Packet {
+    Video(VideoFrame),
+    Audio(AudioChunk),
+}
+
+/// Reads the frames (and sound) of one video, in order.
 pub struct Decoder {
     #[cfg(windows)]
     inner: mf::Decoder,
@@ -70,48 +121,82 @@ pub struct Decoder {
 
 impl std::fmt::Debug for Decoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Decoder").field("duration", &self.duration()).finish_non_exhaustive()
+        f.debug_struct("Decoder")
+            .field("duration", &self.duration())
+            .field("audio", &self.audio_format())
+            .finish_non_exhaustive()
     }
 }
 
 impl Decoder {
     /// Opens `url`: an `https://` URL or a local file path. Blocks while the
-    /// source connects and reads the file header.
-    pub fn open(url: &str) -> Result<Self, MediaError> {
+    /// source connects and reads the file header. Fails when the file has no
+    /// video track; a missing or unreadable sound track is just left out.
+    pub fn open(url: &str, tracks: Tracks) -> Result<Self, MediaError> {
         #[cfg(windows)]
         {
-            mf::Decoder::open(url).map(|inner| Self { inner })
+            mf::Decoder::open(url, tracks).map(|inner| Self { inner })
         }
         #[cfg(not(windows))]
         {
-            let _ = url;
+            let _ = (url, tracks);
             Err(MediaError::Unsupported)
         }
     }
 
-    /// The next frame, or `None` at the end of the video. Blocks while it
-    /// decodes (and downloads, for a URL).
-    pub fn next_frame(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+    /// The decoded sound's shape, when the sound is read.
+    pub fn audio_format(&self) -> Option<AudioFormat> {
         #[cfg(windows)]
         {
-            self.inner.next_frame()
+            self.inner.audio_format()
         }
         #[cfg(not(windows))]
         {
+            match self._never {}
+        }
+    }
+
+    /// The next frame or run of sound, or `None` once every track ended.
+    /// Blocks while it decodes (and downloads, for a URL).
+    pub fn next_packet(&mut self) -> Result<Option<Packet>, MediaError> {
+        #[cfg(windows)]
+        {
+            self.inner.next_packet()
+        }
+        #[cfg(not(windows))]
+        {
+            match self._never {}
+        }
+    }
+
+    /// The next frame, skipping any sound, or `None` at the end.
+    pub fn next_frame(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+        loop {
+            match self.next_packet()? {
+                Some(Packet::Video(frame)) => return Ok(Some(frame)),
+                Some(Packet::Audio(_)) => {}
+                None => return Ok(None),
+            }
+        }
+    }
+
+    /// Continues from `to`: the next frame is the one on screen at `to`, and
+    /// the sound starts exactly there.
+    pub fn seek(&mut self, to: Duration) -> Result<(), MediaError> {
+        #[cfg(windows)]
+        {
+            self.inner.seek(to)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = to;
             match self._never {}
         }
     }
 
     /// Goes back to the first frame.
     pub fn rewind(&mut self) -> Result<(), MediaError> {
-        #[cfg(windows)]
-        {
-            self.inner.rewind()
-        }
-        #[cfg(not(windows))]
-        {
-            match self._never {}
-        }
+        self.seek(Duration::ZERO)
     }
 
     /// The length of the video, when the file says.
@@ -125,6 +210,32 @@ impl Decoder {
             match self._never {}
         }
     }
+}
+
+/// Whether a frame shown at `time` for `duration` is over before `target`
+/// (a seek lands on the keyframe before its target; those frames are skipped).
+#[cfg_attr(all(not(windows), not(test)), expect(dead_code, reason = "used by the Windows decoder"))]
+fn frame_before(time: Duration, duration: Duration, target: Duration) -> bool {
+    time < target && time + duration <= target
+}
+
+/// Cuts the part of `chunk` that plays before `target`. Whole frames are cut
+/// (a multiple of the channel count), or the channels would swap for the rest
+/// of the video. `None` when nothing is left.
+#[cfg_attr(all(not(windows), not(test)), expect(dead_code, reason = "used by the Windows decoder"))]
+fn trim_audio(chunk: AudioChunk, target: Duration, format: AudioFormat) -> Option<AudioChunk> {
+    if chunk.time >= target {
+        return Some(chunk);
+    }
+    let channels = usize::from(format.channels.max(1));
+    let late = (target - chunk.time).as_secs_f64() * f64::from(format.sample_rate);
+    let cut = (late.ceil() as usize).saturating_mul(channels);
+    if cut >= chunk.samples.len() {
+        return None;
+    }
+    let frames = cut / channels;
+    let time = chunk.time + format.duration_of(frames * channels);
+    Some(AudioChunk { time, samples: chunk.samples[cut..].to_vec() })
 }
 
 /// Copies the visible `crop` of a 32-bit RGB picture out of `data` into
@@ -206,6 +317,46 @@ mod tests {
     fn the_crop_is_cut_out() {
         let out = copy_bgra(&picture(), 13, 2, Crop { x: 1, y: 1, width: 2, height: 1 }).unwrap();
         assert_eq!(out, vec![1, 1, 9, 255, 2, 1, 9, 255]);
+    }
+
+    const STEREO: AudioFormat = AudioFormat { sample_rate: 10, channels: 2 };
+
+    fn chunk(time_ms: u64, frames: usize) -> AudioChunk {
+        // Left samples are the frame number, right ones its negative.
+        let samples = (0..frames).flat_map(|f| [f as f32, -(f as f32)]).collect();
+        AudioChunk { time: Duration::from_millis(time_ms), samples }
+    }
+
+    #[test]
+    fn frames_before_a_seek_target_are_skipped() {
+        let ms = Duration::from_millis;
+        assert!(frame_before(ms(0), ms(100), ms(150)));
+        assert!(!frame_before(ms(100), ms(100), ms(150)), "on screen at the target");
+        assert!(!frame_before(ms(150), ms(100), ms(150)));
+        assert!(frame_before(ms(100), ms(0), ms(150)), "no duration: before is before");
+        assert!(!frame_before(ms(150), ms(0), ms(150)));
+    }
+
+    #[test]
+    fn audio_is_trimmed_to_the_seek_target_in_whole_frames() {
+        // 10 frames per second: frame k plays at k * 100 ms.
+        let out = trim_audio(chunk(0, 10), Duration::from_millis(250), STEREO).unwrap();
+        assert_eq!(out.time, Duration::from_millis(300), "the first whole frame after it");
+        assert_eq!(&out.samples[..2], &[3.0, -3.0], "left stays left");
+        assert_eq!(out.samples.len(), 14);
+    }
+
+    #[test]
+    fn audio_at_or_after_the_target_is_kept_and_before_it_dropped() {
+        let target = Duration::from_millis(500);
+        assert_eq!(trim_audio(chunk(600, 3), target, STEREO), Some(chunk(600, 3)));
+        assert_eq!(trim_audio(chunk(0, 5), target, STEREO), None, "ends at the target");
+        assert_eq!(trim_audio(chunk(0, 2), target, STEREO), None);
+    }
+
+    #[test]
+    fn audio_durations_count_frames_not_samples() {
+        assert_eq!(STEREO.duration_of(20), Duration::from_secs(1));
     }
 
     #[test]

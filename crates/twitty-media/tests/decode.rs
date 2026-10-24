@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use twitty_media::{Decoder, MediaError, VideoFrame};
+use twitty_media::{Decoder, MediaError, Tracks, VideoFrame};
 
 const W: u32 = 128;
 const H: u32 = 90;
@@ -22,12 +22,12 @@ fn fixture() -> String {
 }
 
 fn open() -> Decoder {
-    Decoder::open(&fixture()).unwrap()
+    Decoder::open(&fixture(), Tracks::Video).unwrap()
 }
 
 /// Whether this machine can decode; says why not when it can't.
 fn available() -> bool {
-    match Decoder::open(&fixture()) {
+    match Decoder::open(&fixture(), Tracks::Video) {
         Err(MediaError::Unavailable(why)) => {
             println!("skipped: no Media Foundation here ({why})");
             false
@@ -117,9 +117,9 @@ fn a_missing_file_or_garbage_is_an_open_error() {
         return;
     }
     let missing = format!("{}/tests/fixtures/none.mp4", env!("CARGO_MANIFEST_DIR"));
-    assert!(matches!(Decoder::open(&missing), Err(MediaError::Open(_))));
+    assert!(matches!(Decoder::open(&missing, Tracks::Video), Err(MediaError::Open(_))));
     let garbage = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
-    assert!(matches!(Decoder::open(&garbage), Err(MediaError::Open(_))));
+    assert!(matches!(Decoder::open(&garbage, Tracks::Video), Err(MediaError::Open(_))));
 }
 
 /// An HTTP server on localhost that answers every request with a 404.
@@ -146,9 +146,11 @@ fn a_failed_download_leaves_later_playbacks_working() {
     // Used to crash the process (access violation) on the second open.
     let url = not_found_server();
     for _ in 0..3 {
-        assert!(matches!(Decoder::open(&url), Err(MediaError::Open(_))));
+        assert!(matches!(Decoder::open(&url, Tracks::Video), Err(MediaError::Open(_))));
     }
-    let other = std::thread::spawn(move || matches!(Decoder::open(&url), Err(MediaError::Open(_))));
+    let other = std::thread::spawn(move || {
+        matches!(Decoder::open(&url, Tracks::Video), Err(MediaError::Open(_)))
+    });
     assert!(other.join().unwrap(), "on another thread too");
     assert_eq!(all_frames(&mut open()).len(), 8, "and files still play");
 }

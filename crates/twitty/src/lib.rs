@@ -2,6 +2,7 @@
 //! The binary in `main.rs` only wires these together.
 
 pub mod account;
+pub mod audio;
 pub mod format;
 pub mod logging;
 pub mod runtime;

@@ -284,7 +284,7 @@ I can't access X Pro myself, so this is a spec rather than a copy. The colours b
   - Dim: bg `#15202B`
   - Light: bg `#FFFFFF`
 - **Font**: Segoe UI / system font. Chirp is X's own font and isn't bundled.
-- **Video**: GPUI has no video player on Windows, so `twitty-media` decodes with Media Foundation and the app draws the frames. GIFs play in the media viewer and in place in timeline tiles (hover play/pause button; autoplay of visible GIFs is a setting, off by default). Next: videos with sound (AAC through rodio, audio as the clock) and controls (seek bar, volume). Until then videos show the poster with a ▶ badge and duration, and open on x.com.
+- **Video**: GPUI has no video player on Windows, so `twitty-media` decodes with Media Foundation and the app draws the frames. GIFs play in the media viewer and in place in timeline tiles (hover play/pause button; autoplay of visible GIFs is a setting, off by default). Videos play in the viewer with sound (audio as the clock) and a control bar (play/pause, time, seek, mute, volume). Next, maybe: videos playing in place in timelines, keyboard shortcuts (space, ←/→ seek), hardware decoding through a D3D device.
 
 ---
 
