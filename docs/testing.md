@@ -25,8 +25,19 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 | Discovery | `twitty-x/tests/discovery.rs` | captured HTML/JS samples | Bundle URL and `queryId`/`operationName`/features regexes · cache TTL · fallback order |
 | Backend contract | `twitty-model/tests/contract.rs` (generic) | run against `MockBackend` and `XBackend`+wiremock | Both backends behave the same for paging, errors and actions |
 | Persistence | `twitty/tests/persistence.rs` + `tests/golden/` | golden files | Every past `schema_version` loads and migrates. Saving then loading gives the same data. |
-| UI state | `twitty/src/**` `#[gpui::test]` | `TestAppContext`, `MockBackend` | Column paging, new-posts pill count, optimistic like + rollback on error, deck add/remove/reorder, login flow states, rate-limit UI |
+| App state | `twitty/src/state/**` `#[cfg(test)]` | std, `MockBackend` | `ColumnModel` paging/dedup/unseen/failures, `Interactions` toggles + rollback, `DeckFile` golden files + repair + atomic save, media grid geometry |
+| UI wiring | `twitty/src/ui/**` `#[gpui_kit::test]` | `TestAppContext`, `MockBackend`, `Runtime::inline()` | Column loads on creation, list rows match the model, newer posts at top vs. scrolled, failure + retry, Home tab switch, hub rollback + `ActionFailed` |
 | Live smoke | `twitty-x/tests/live.rs` `#[ignore]` | real X, `TWITTY_LIVE=1` | The current X still works: Viewer, Home, Search, TweetDetail translate with 0 `Unsupported`. Run by hand, never in CI. |
+
+## Current coverage (M2)
+
+74 tests:
+- 23 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging and notifications.
+- 51 in `twitty`: state, formatting, runtime, themes, icons, and GPUI view tests. Two of these open a real test window and scroll Home and Notifications to the end with wheel events, which renders every row shape.
+
+## Manual check
+
+`cargo run -p twitty` shows the deck on demo data. New demo posts arrive every 20s and columns poll every 30s. After about a minute, a column scrolled away from the top shows the "N new posts" pill.
 
 ## Fixtures
 

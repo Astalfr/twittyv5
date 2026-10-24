@@ -17,8 +17,8 @@
 | Test | `cargo test --workspace` (or `cargo nextest run --workspace`) |
 | Review snapshots | `cargo insta review` |
 | Run the app | `cargo run -p twitty` (`RUST_LOG=twitty=debug,twitty_x=debug` for logs) |
-| Dev CLI | `cargo run -p twitty-x --bin twitty-x-cli -- <feed\|capture\|anonymise\|refresh-ids> …` |
-| Live smoke tests | `$env:TWITTY_LIVE=1; cargo test -p twitty-x --test live -- --ignored` |
+| Dev CLI (from M3) | `cargo run -p twitty-x --bin twitty-x-cli -- <feed\|capture\|anonymise\|refresh-ids> …` |
+| Live smoke tests (from M3) | `$env:TWITTY_LIVE=1; cargo test -p twitty-x --test live -- --ignored` |
 | Coverage | `cargo llvm-cov --workspace --html` |
 | Dependency audit | `cargo deny check` |
 
@@ -27,9 +27,14 @@
 - Shared versions and lints live in the root `Cargo.toml` (`[workspace.dependencies]`, `[workspace.lints]`). Crates use `dep.workspace = true` and `lints.workspace = true`.
 - Workspace lints:
   - `rust`: `unsafe_code = "forbid"` (relaxed only in `twitty` if ever needed)
-  - `clippy`: `unwrap_used`, `expect_used`, `dbg_macro`, `todo` = deny
-  - `clippy::pedantic` = warn, with targeted `#[expect]`s.
+  - `clippy`: `unwrap_used`, `expect_used`, `dbg_macro`, `todo`, `unimplemented` = deny; `print_stdout`/`print_stderr` = warn
 - `[profile.dev.package]` builds `gpui-pre*` with `opt-level = 3`, so debug builds stay smooth, as gpui-component does.
+- `clippy.toml` allows `unwrap`/`expect`/`print` in tests only.
+- `rustfmt.toml`: `max_width = 100`, `use_small_heuristics = "Max"`.
+
+## Icons
+
+Icons come from GPUI Kit's Lucide catalog. Only the ones listed in `crates/twitty/src/ui/assets.rs` (`icon_assets!`) are embedded. A new icon must be added there, or it renders blank. The `every_used_icon_resolves` test checks a sample.
 
 ## Pinning and upgrading GPUI Kit
 
@@ -48,7 +53,7 @@
 | Data | Location |
 |---|---|
 | Credentials (`auth_token`, `ct0`) | Windows Credential Manager, service `twitty` |
-| Decks, settings | `%APPDATA%\Twitty\` |
+| Decks, settings | `%APPDATA%\Twitty\config\` (`decks.json`) |
 | Query-ID cache, image cache, logs | `%LOCALAPPDATA%\Twitty\` |
 
 ## Debugging tips

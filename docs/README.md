@@ -2,7 +2,7 @@
 
 These docs explain **how Twitty works**. They change with the code: any change to architecture, data flow, protocol handling, persisted formats or testing updates the matching page in the same commit.
 
-> Project status: **planning**. Pages describe the intended design from [PLAN.md](../PLAN.md). Mark sections `(planned)` until they're implemented, and remove the marker when the code exists.
+> Project status: **M0–M2 done**. `twitty-model` (with `MockBackend`) and the `twitty` UI on demo data are implemented. `twitty-x` is still an empty crate: everything in [x-api.md](x-api.md) is **planned**.
 
 | Page | What it covers |
 |---|---|

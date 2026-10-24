@@ -1,0 +1,30 @@
+[package]
+name = "twitty"
+description = "A native X client with an X Pro style deck UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+twitty-model = { workspace = true, features = ["mock"] }
+gpui-kit.workspace = true
+reqwest_client.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+directories.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+tempfile = "3"
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

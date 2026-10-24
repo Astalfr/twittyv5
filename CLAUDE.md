@@ -14,8 +14,9 @@ cargo clippy --workspace --all-targets -- -D warnings # must be clean
 cargo test --workspace                                # must pass
 cargo insta review                                    # review changed snapshots (never blindly accept)
 cargo run -p twitty                                   # run the app
-cargo run -p twitty-x --bin twitty-x-cli -- feed home # dump a real feed as model JSON (needs a session)
-cargo test -p twitty-x --test live -- --ignored       # live smoke tests against X (needs TWITTY_LIVE=1)
+# From M3 on (not implemented yet):
+# cargo run -p twitty-x --bin twitty-x-cli -- feed home   # dump a real feed as model JSON
+# cargo test -p twitty-x --test live -- --ignored         # live smoke tests (TWITTY_LIVE=1)
 ```
 
 Windows 11 + PowerShell is the main dev environment.
@@ -35,7 +36,8 @@ Windows 11 + PowerShell is the main dev environment.
 - **Translation fails soft.** An entry that can't be parsed becomes `FeedItem::Unsupported` plus a `tracing::warn!`. It must never fail the whole page or panic.
 - **Opaque IDs**: X cursors, query IDs and IDs stay wrapped (`PageToken`, `PostId`, `UserId`). The UI never parses them.
 - **Versioned persistence**: every on-disk format has a `schema_version` and a migration path. Changing a persisted type means adding a migration and a golden-file test.
-- **The UI depends on `dyn Backend`**, never on `XBackend` directly. UI work and UI tests use `MockBackend`.
+- **The UI depends on `dyn Backend`**, never on `XBackend` directly. UI work and UI tests use `MockBackend` (`twitty-model` feature `mock`).
+- **Logic lives in `twitty::state`** (plain Rust, unit tested); `twitty::ui` views only render state and forward input.
 
 ## Rust practices
 
@@ -65,6 +67,7 @@ Windows 11 + PowerShell is the main dev environment.
   - Never block the UI thread or call `block_on` inside GPUI.
 - **Spawned tasks** hold `WeakEntity`, never `Entity`. Don't keep entity borrows across `.await`. Call `cx.notify()` after mutating view state.
 - **Timelines** use `list()` + `ListState` (variable height). Don't use `uniform_list` / `v_virtual_list` for posts.
+- **`ListState::set_scroll_handler` runs while the `ListState` is mutably borrowed.** Reading the list there panics, so `cx.defer` the reaction (see `ui/column.rs`).
 - **Colours** come from the theme (`cx.theme()` tokens), never hard-coded hex in views. UI conventions: [docs/ui.md](docs/ui.md).
 
 ## Testing: a feature isn't done until it's tested
@@ -75,7 +78,7 @@ Full strategy: [docs/testing.md](docs/testing.md).
 - **`translate` changes**: add or update an anonymised fixture in `crates/twitty-x/tests/fixtures/` plus an `insta` snapshot of the *model* output. The model snapshot of an existing fixture must not change unless the change is intended and explained.
 - **Text/entity code** (UTF-16 offsets, spans, URL expansion) gets `proptest` property tests (spans in bounds, on char boundaries, not overlapping).
 - **Transport behaviour** (headers, cookie rotation, 429 backoff, stale queryId refresh) is tested with `wiremock`. Tests never hit the real network, except the `#[ignore]` live suite.
-- **UI state logic** is tested with `#[gpui::test]` + `MockBackend`: paging, optimistic actions + rollback, deck persistence.
+- **UI state logic** goes in `twitty::state` with plain unit tests. View wiring is tested with `#[gpui_kit::test]` + `MockBackend` + `Runtime::inline()` (see the tests in `ui/column.rs`).
 - **Persisted formats** have golden files for every past `schema_version`, and those files must keep loading.
 
 **Before saying a task is done**, run all of the following and show the output:

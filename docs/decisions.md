@@ -4,6 +4,26 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Defer reactions to list scroll events
+- **Decision**: The column's `ListState` scroll handler only captures the visible range and calls `cx.defer` to update the column.
+- **Why**: GPUI invokes the handler while the `ListState` is mutably borrowed. Reading `logical_scroll_top()` inside it panicked on the first wheel scroll. The windowed tests in `ui/column.rs` reproduce this.
+
+### 2026-10-24: Row identity for tombstones and unsupported entries
+- **Decision**: `FeedItem::Unavailable` and `FeedItem::Unsupported` carry an `entry` string supplied by the backend (e.g. X's timeline entry id). `FeedItem::key()` uses it.
+- **Why**: Tombstones often have no post id. Keying on the reason would merge two different rows into one during de-duplication.
+
+### 2026-10-24: App logic in `twitty::state`, views stay thin
+- **Decision**: `twitty` is a library plus a binary. Paging, optimistic actions, decks and layout math are plain Rust in `state/`. GPUI views only render and forward input.
+- **Why**: Plain unit tests are fast and deterministic. GPUI tests only cover the wiring.
+
+### 2026-10-24: `Runtime::Inline` for tests
+- **Decision**: The runtime bridge is an enum. Production uses a background tokio runtime. GPUI tests use `Inline`, which polls backend futures on the test executor.
+- **Why**: GPUI's `run_until_parked()` can't wait for work on other threads, so tests on the tokio runtime would be flaky.
+
+### 2026-10-24: Footer row in every column list
+- **Decision**: `ListState` holds `items + 1` rows. The last one shows the loading spinner, the retry button or "You're all caught up".
+- **Why**: Paging state stays visible without overlaying the list, and appending with `ListState::splice` naturally inserts before the footer.
+
 ### 2026-10-24: Own domain model with an anti-corruption layer
 - **Decision**: All X JSON is parsed in a private `twitty_x::wire` module and converted into `twitty-model` types by `twitty_x::translate`. Nothing outside `twitty-x` sees X's structures.
 - **Why**: X's internal schema changes often. Keeping those changes in one module protects the UI, persisted data and tests from breaking.

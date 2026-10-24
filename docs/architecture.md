@@ -23,7 +23,23 @@
 | `twitty-x` | Everything X-specific: HTTP, auth, query-ID discovery, GraphQL ops, wire parsing, translation into the model | twitty-model, reqwest, tokio, serde_json, regex | gpui, twitty |
 | `twitty` | UI, app state, persistence of decks and settings, keyring, runtime bridge | twitty-model, twitty-x, gpui-kit | (X JSON types, which aren't public anyway) |
 
-`twitty` uses `twitty-x` only in `main.rs`, to build an `XBackend` and hand it over as `Arc<dyn Backend>`.
+`twitty` uses `twitty-x` only in `main.rs`, to build an `XBackend` and hand it over as `Arc<dyn Backend>`. Until M5, `main.rs` uses `MockBackend` and shows a "Demo mode" banner.
+
+`twitty` is a library plus a thin binary:
+
+| Module | Contents |
+|---|---|
+| `state::column` | `ColumnModel`: paging, cursors, de-duplication, unseen count, `ListChange` instructions for the view |
+| `state::interactions` | Optimistic like/repost/bookmark overrides with rollback |
+| `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move/width |
+| `state::media_layout` | Geometry of the 1–4 media grid |
+| `format` | Relative times and compact counters |
+| `runtime` | `Runtime::Tokio` (production) / `Runtime::Inline` (tests) |
+| `ui::app` | Root view: rail + horizontally scrolling deck, persists deck changes |
+| `ui::column` | Column view: header, `list()` + `ListState`, footer row, polling, "new posts" pill |
+| `ui::post` | Row rendering: posts, reposts, threads, media, quotes, link cards, polls, action bar |
+| `ui::hub` | `InteractionsHub` entity shared by all columns; sends actions, rolls back, emits `ActionFailed` |
+| `ui::theme`, `ui::assets` | Bundled themes (`themes/x.json`) and the embedded Lucide icon subset |
 
 ## Layers inside `twitty-x`
 
@@ -45,10 +61,11 @@ ops/HomeTimeline.rs ──► transport (headers, cookies, txid, rate limit) ─
 
 GPUI runs its own executor on the main thread, and reqwest needs tokio. So:
 
-1. `twitty::runtime` starts a multi-threaded **tokio runtime on a background thread** at startup.
-2. A view calls `runtime.spawn(backend.feed(source, page))`, which returns a `tokio::task::JoinHandle`.
-3. The view awaits that handle inside `cx.spawn(async move |this, cx| …)`. A `JoinHandle` can be awaited from any executor.
-4. When the result arrives, the task updates the entity through its `WeakEntity` and calls `cx.notify()`.
+1. `Runtime::tokio()` starts a multi-threaded **tokio runtime on background threads**. It's stored as a GPUI global.
+2. A view calls `Runtime::global(cx).spawn(async move { backend.feed(&source, page).await })`, which returns a future any executor can await.
+3. The view awaits it inside `cx.spawn(async move |this, cx| …)`.
+4. Tests register `Runtime::inline()` instead. It polls the backend future on GPUI's test executor, so `run_until_parked()` stays deterministic.
+5. When the result arrives, the task updates the entity through its `WeakEntity` and calls `cx.notify()`.
 
 Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)` set at startup.
 
@@ -60,9 +77,10 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 4. `ColumnView` adds the items to the shared `PostStore` (deduplicated by `PostId`) and keeps its own ordered list of IDs. It then calls `ListState::splice` and `cx.notify()`.
 5. Scrolling near the bottom triggers `PageRequest::Older(token)`. The "new posts" poll uses `PageRequest::Newer(token)`.
 
-## App state (`twitty` crate, planned)
+## App state (`twitty` crate)
 
-- `AppState` (global entity) holds the session status, `Arc<dyn Backend>`, `PostStore`, `DeckStore` and settings.
-- `PostStore` holds the single shared copy of each post and profile. Updates from actions (like/repost) are applied there, so every column shows the change.
-- `DeckStore` holds the decks and columns (`FeedSource` + width + options). They're saved as JSON in `%APPDATA%\Twitty\decks.json`, with a `schema_version`.
+- `TwittyApp` (root view) owns the `DeckFile`, the column views and the shared `InteractionsHub`.
+- Each `ColumnView` owns its `ColumnModel` (rows + cursors) and its `ListState`. The list has one extra footer row (spinner, retry, "caught up").
+- The viewer's likes, reposts and bookmarks are overrides in `InteractionsHub`, so every column shows the change instantly. Failures roll back.
+- Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`.
 - Credentials live in Windows Credential Manager (`keyring`), never in plain files.

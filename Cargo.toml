@@ -1,0 +1,81 @@
+[workspace]
+resolver = "3"
+members = ["crates/twitty", "crates/twitty-model", "crates/twitty-x"]
+default-members = ["crates/twitty"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+twitty-model = { path = "crates/twitty-model" }
+twitty-x = { path = "crates/twitty-x" }
+
+# UI. gpui-kit pins the gpui-pre snapshot exactly; every gpui-pre-* crate must
+# match it (see docs/development.md before changing these).
+gpui-kit = "=0.8.0"
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.9" }
+
+# Async / HTTP for the X adapter.
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "gzip", "brotli", "query"] }
+
+# Data.
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
+url = { version = "2", features = ["serde"] }
+smol_str = { version = "0.3", features = ["serde"] }
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+html-escape = "0.2"
+
+# Errors / logging.
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# App plumbing.
+directories = "6"
+keyring = { version = "3", features = ["windows-native"] }
+
+# Testing.
+insta = { version = "1", features = ["json"] }
+proptest = "1"
+wiremock = "0.6"
+pretty_assertions = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "warn"
+print_stderr = "warn"
+
+[profile.dev]
+debug = "limited"
+
+# Keep debug builds of the UI smooth (same choice as gpui-component).
+[profile.dev.package]
+gpui-pre = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-pre-sum-tree = { opt-level = 3 }
+taffy = { opt-level = 3 }
+resvg = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
+smol = { opt-level = 3 }
+
+[profile.release]
+strip = "symbols"
+lto = "thin"

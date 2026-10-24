@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "decks": [
+    {
+      "name": "Main",
+      "columns": [
+        { "id": 1, "source": { "type": "home", "mode": "following" }, "width": "medium" },
+        { "id": 2, "source": { "type": "search", "query": "rust", "sort": "latest" }, "width": "wide" },
+        { "id": 5, "source": { "type": "notifications" } }
+      ]
+    }
+  ],
+  "active": 0,
+  "next_column_id": 6
+}

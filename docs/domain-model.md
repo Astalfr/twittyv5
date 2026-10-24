@@ -40,7 +40,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`) is
 5. **Text clean-up**: decode HTML entities (`&amp;`, `&lt;`, …). Replace `t.co` links with their expanded URL. Strip the trailing media `t.co` link X appends to the text. Strip the leading `@mentions` in reply-chain text, because they show up as reply info instead.
 6. **Media**: choose the highest-bitrate MP4 variant for video and keep the poster image. Read the aspect ratio from `original_info` / `aspect_ratio`.
 7. **Unavailable posts** (`TweetTombstone`, `TweetUnavailable`, withheld, or a deleted quoted post) become `Unavailable { reason }` / `PostOrGone::Unavailable`.
-8. **Times** become `DateTime<Utc>`, and counts are `u64` (a missing count is `0`, and the model has no way to say "unknown").
+8. **Times** become `DateTime<Utc>`. Counts are `u64` and a missing count is `0`, except `Metrics::views`, which is `Option<u64>` because many posts have no view count and the UI hides it.
 9. **Profiles are interned**: the same `UserId` within a page gets the same `Arc<Profile>`.
 
 ## Persistence and versioning
