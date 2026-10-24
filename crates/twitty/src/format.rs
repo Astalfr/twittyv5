@@ -1,6 +1,6 @@
 //! Display formatting for times and counters, matching X's conventions.
 
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 
 /// Short relative timestamp: `now`, `42s`, `5m`, `3h`, `Oct 21`, `Oct 21, 2025`.
 pub fn relative_time(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
@@ -13,6 +13,14 @@ pub fn relative_time(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
         _ if at.year() == now.year() => at.format("%b %-d").to_string(),
         _ => at.format("%b %-d, %Y").to_string(),
     }
+}
+
+/// Full timestamp in `tz`, 24-hour: `2026-10-24 15:45`.
+pub fn exact_time<Tz: TimeZone>(at: DateTime<Utc>, tz: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    at.with_timezone(tz).format("%Y-%m-%d %H:%M").to_string()
 }
 
 /// Compact counter: `999`, `1.2K`, `12K`, `1.2M`. Zero renders as empty.
@@ -46,6 +54,15 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 24, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn exact_time_is_in_the_given_zone() {
+        assert_eq!(exact_time(now(), &Utc), "2026-10-24 12:00");
+        let paris = chrono::FixedOffset::east_opt(2 * 3_600).unwrap();
+        assert_eq!(exact_time(now(), &paris), "2026-10-24 14:00");
+        let late = Utc.with_ymd_and_hms(2026, 1, 5, 23, 7, 0).unwrap();
+        assert_eq!(exact_time(late, &paris), "2026-01-06 01:07");
     }
 
     #[test]

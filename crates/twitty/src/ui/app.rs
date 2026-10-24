@@ -1568,16 +1568,18 @@ impl Render for TwittyApp {
 fn render_title_bar(theme: &gpui_kit::component::Theme) -> impl IntoElement {
     // Centred on the whole window, not on the space left of the buttons. The
     // layer has no handlers, so drags and clicks reach the bar under it.
+    // White on dark themes; muted on light ones, where black would be loud.
+    let name_color = if theme.is_dark() { theme.foreground } else { theme.muted_foreground };
     let title = h_flex()
         .debug_selector(|| "window-title".into())
         .gap_1p5()
         .items_center()
-        .child(img(crate::ui::assets::LOGO).size(px(16.)))
+        .child(img(crate::ui::assets::LOGO).size(px(18.)))
         .child(
             div()
-                .text_xs()
+                .text_sm()
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.muted_foreground)
+                .text_color(name_color)
                 .child("Twitty"),
         );
     div()

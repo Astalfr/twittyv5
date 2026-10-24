@@ -7,6 +7,7 @@ pub mod compose;
 pub mod deck;
 pub mod diagnostics;
 pub mod interactions;
+pub mod links;
 pub mod login;
 pub mod media_layout;
 pub mod motion;

@@ -161,3 +161,8 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: Clicking an avatar or a name (post author, reposter, quoted author, notification actor) opens a profile sheet with Tweets / Media tabs. Adding the account as a column is an explicit action: **Open column** on the hover card, or **+** in the sheet. The profile sheet and the thread panel share one side-sheet slot (`Sheet` in `ui/app.rs`); opening one replaces the other, with no back stack.
 - **Why**: A click to look at someone shouldn't change the saved deck. One slot keeps the backdrop, slide-in/out, the inert leaving copy and the Esc order identical for both sheets.
 - **Consequences**: A post opened from a profile replaces the profile; going back means clicking the author again. A back stack can be added in `TwittyApp::show_sheet` if that becomes annoying.
+
+### 2026-10-24: Shared post links point at vxtwitter
+- **Decision**: Clicking a post's time and **Copy tweet link** use the post's canonical `Post.url` with its host swapped for `vxtwitter.com` (`state::links::vx_link`). The share button in the action bar still opens the canonical x.com link.
+- **Why**: vxtwitter links embed properly (video, full text) when pasted into Discord and other chat apps. Swapping the host of `Post.url` keeps the UI from building X URLs out of opaque IDs.
+- **Consequences**: The links depend on a third-party mirror being up. If it goes away, change `VX_HOST` in one place.

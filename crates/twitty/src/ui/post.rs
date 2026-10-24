@@ -5,11 +5,19 @@ use std::sync::Arc;
 use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, App, ClickEvent, ElementId, Entity, FontWeight,
-    HighlightStyle, Hsla, InteractiveText, IntoElement, ObjectFit, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, StyledImage, StyledText, UnderlineStyle, Window,
-    component::avatar::Avatar, component::button::*, component::hover_card::HoverCard,
-    component::*, div, img, prelude::*, px,
+    Animation, AnimationExt, AnyElement, App, ClickEvent, ClipboardItem, ElementId, Entity,
+    FontWeight, HighlightStyle, Hsla, InteractiveText, IntoElement, ObjectFit, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText, UnderlineStyle,
+    Window,
+    component::avatar::Avatar,
+    component::button::*,
+    component::hover_card::HoverCard,
+    component::menu::{ContextMenuExt, PopupMenuItem},
+    component::tooltip::Tooltip,
+    component::*,
+    div, img,
+    prelude::*,
+    px,
 };
 use twitty_model::{
     Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostOrGone, Profile, RichText,
@@ -17,8 +25,8 @@ use twitty_model::{
 };
 
 use crate::{
-    format::{compact_count, relative_time},
-    state::{interactions::Toggle, media_layout, motion},
+    format::{compact_count, exact_time, relative_time},
+    state::{interactions::Toggle, links, media_layout, motion},
     ui::hub::{InteractionsHub, Navigate},
 };
 
@@ -241,8 +249,12 @@ fn post_row(
     let width = content_width(rcx.column_width);
     let key = rcx.ix * 16 + sub;
 
-    // A long name or handle truncates; the time never does.
+    let link = links::vx_link(post);
+
+    // A long name or handle truncates; the time never does, and sits at the
+    // far right.
     let header = h_flex()
+        .w_full()
         .gap_1()
         .min_w_0()
         .overflow_hidden()
@@ -268,14 +280,26 @@ fn post_row(
                 .on_click(open_profile(&post.author, &rcx.hub))
                 .child(format!("@{}", post.author.handle)),
         )
-        .child(
+        .child({
+            let link = link.clone();
+            let exact = exact_time(post.created_at, &chrono::Local);
             div()
                 .id(("time", key))
                 .debug_selector(|| format!("post-time-{key}"))
                 .flex_none()
+                .ml_auto()
+                .pl_1()
+                .text_sm()
                 .whitespace_nowrap()
-                .child(format!("· {}", relative_time(post.created_at, Utc::now()))),
-        );
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .tooltip(move |window, cx| Tooltip::new(exact.clone()).build(window, cx))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    cx.open_url(&link);
+                })
+                .child(relative_time(post.created_at, Utc::now()))
+        });
 
     let mut content = v_flex().flex_1().min_w_0().gap_1().child(header);
 
@@ -350,6 +374,12 @@ fn post_row(
             )
         })
         .child(h_flex().items_start().gap(px(GAP)).child(avatar_col).child(content))
+        .context_menu(move |menu, _, _| {
+            let link = link.clone();
+            menu.item(PopupMenuItem::new("Copy tweet link").on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+            }))
+        })
         .into_any_element()
 }
 
@@ -940,6 +970,53 @@ mod tests {
         let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
         assert!(time.size.width > px(10.), "the time keeps its width: {time:?}");
         assert!(time.right() <= px(310.), "the time is inside the row: {time:?}");
+    }
+
+    #[gpui_kit::test]
+    fn the_time_sits_at_the_far_right(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
+        let author = Arc::make_mut(&mut post.author);
+        author.display_name = "Al".into();
+        author.handle = "al".into();
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+
+        let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
+        let edge = px(310. - PAD_X);
+        assert!((time.right() - edge).abs() < px(1.), "the time ends at {edge:?}: {time:?}");
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_time_opens_vxtwitter_not_the_thread(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, _) = mock_post();
+        let link = links::vx_link(&post);
+        assert_eq!(navigations(cx, FeedItem::Post(post), "post-time-0"), vec![]);
+        assert_eq!(cx.opened_url(), Some(link));
+    }
+
+    #[gpui_kit::test]
+    fn right_clicking_a_post_copies_its_vxtwitter_link(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, backend) = mock_post();
+        let link = links::vx_link(&post);
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+
+        let press = cx.debug_bounds("post-time-0").expect("the time is rendered").center();
+        let press = gpui_kit::point(px(60.), press.y);
+        cx.simulate_mouse_down(press, gpui_kit::MouseButton::Right, Default::default());
+        cx.simulate_mouse_up(press, gpui_kit::MouseButton::Right, Default::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        let copied = cx.read_from_clipboard().and_then(|item| item.text());
+        assert_eq!(copied, Some(link));
     }
 
     /// Renders `item`, clicks the element `target` and returns what the
