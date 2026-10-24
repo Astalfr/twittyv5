@@ -2031,6 +2031,14 @@ mod tests {
             assert!(!p.model(ProfileTab::Media).loaded_once(), "media waits for its tab");
         });
         assert!(cx.debug_bounds("profile-counts").is_some(), "the header shows the counts");
+        // The two tabs split the sheet's width.
+        let tweets = cx.debug_bounds("profile-tab-Tweets").unwrap();
+        let media = cx.debug_bounds("profile-tab-Media").unwrap();
+        let half = px(crate::ui::thread::PANEL_WIDTH / 2.);
+        for tab in [tweets, media] {
+            assert!((tab.size.width - half).abs() <= px(1.), "half the sheet: {tab:?}");
+        }
+        assert_eq!(tweets.right(), media.left());
 
         // Opening the same account again keeps the sheet (and its tab).
         click(cx, "profile-tab-Media");

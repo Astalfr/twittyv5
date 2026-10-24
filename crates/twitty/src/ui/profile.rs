@@ -272,6 +272,7 @@ impl ProfilePanel {
                 .child(label)
         };
         v_flex()
+            .w_full()
             .px_4()
             .pt_4()
             .pb_3()
@@ -337,7 +338,9 @@ impl ProfilePanel {
                         .when(active, |d| d.bg(theme.primary)),
                 )
         };
+        // A list row only gets its content's width unless it asks for more.
         h_flex()
+            .w_full()
             .border_b_1()
             .border_color(theme.border)
             .children(ProfileTab::ALL.into_iter().map(tab))
