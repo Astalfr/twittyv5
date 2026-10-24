@@ -150,16 +150,26 @@ impl LoginView {
     }
 }
 
+/// Wide enough for the how-to steps to wrap on two lines at most.
+const DIALOG_WIDTH: f32 = 560.0;
+
 impl Render for LoginView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let checking = self.form.status() == &LoginStatus::Checking;
+        // `min_w_0` lets a step's text wrap instead of pushing past the dialog.
         let step = |n: &'static str, text: &'static str| {
             h_flex()
                 .gap_2()
                 .items_start()
                 .child(div().flex_none().w(px(16.)).text_color(theme.primary).child(n))
-                .child(div().flex_1().child(text))
+                .child(
+                    div()
+                        .debug_selector(move || format!("login-step-{n}"))
+                        .flex_1()
+                        .min_w_0()
+                        .child(text),
+                )
         };
         let field = |label: &'static str, state: &Entity<InputState>| {
             v_flex()
@@ -168,7 +178,8 @@ impl Render for LoginView {
                 .child(Input::new(state).disabled(checking))
         };
         v_flex()
-            .w(px(460.))
+            .debug_selector(|| "login-dialog".into())
+            .w(px(DIALOG_WIDTH))
             .gap_4()
             .p_6()
             .rounded_2xl()
@@ -272,6 +283,21 @@ mod tests {
             .detach();
         });
         (view, cx, events)
+    }
+
+    #[gpui_kit::test]
+    fn the_steps_wrap_inside_the_dialog(cx: &mut TestAppContext) {
+        let (_view, cx, _) = open(cx, MockBackend::new(), MemoryStore::default());
+        cx.run_until_parked();
+        let dialog = cx.debug_bounds("login-dialog").expect("the dialog is drawn");
+        assert_eq!(dialog.size.width, px(DIALOG_WIDTH));
+        let one = cx.debug_bounds("login-step-1").expect("step 1");
+        for name in ["login-step-1", "login-step-2", "login-step-3"] {
+            let step = cx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn"));
+            assert!(step.right() <= dialog.right(), "{name} overflows: {step:?} {dialog:?}");
+        }
+        let long = cx.debug_bounds("login-step-2").expect("step 2");
+        assert!(long.size.height > one.size.height, "the long step wraps: {long:?} {one:?}");
     }
 
     #[gpui_kit::test]
