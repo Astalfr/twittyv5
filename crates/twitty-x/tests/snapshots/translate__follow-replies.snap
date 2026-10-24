@@ -1,0 +1,8 @@
+---
+source: crates/twitty-x/tests/translate.rs
+expression: out
+---
+friendships-create Follow → Following
+friendships-create Unfollow → NotFollowing
+friendships-create-protected Follow → Requested
+friendships-create-protected Unfollow → NotFollowing

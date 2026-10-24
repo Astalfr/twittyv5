@@ -8,8 +8,8 @@ use std::{sync::Arc, time::Duration};
 
 use serde_json::{Value, json};
 use twitty_model::{
-    Backend, BackendError, FeedItem, FeedSource, HomeMode, ListId, NotificationFilter, PageRequest,
-    PageToken, PostAction, PostId, SearchSort, UserId, UserTab,
+    Backend, BackendError, FeedItem, FeedSource, FollowAction, FollowStatus, HomeMode, ListId,
+    NotificationFilter, PageRequest, PageToken, PostAction, PostId, SearchSort, UserId, UserTab,
 };
 use twitty_x::{
     Session, XBackend, XClient,
@@ -416,6 +416,77 @@ async fn failed_actions_report_xs_message() {
     .await;
     let err = backend(&server).act(PostAction::Bookmark(PostId::new("1"))).await.unwrap_err();
     assert_eq!(err, BackendError::Upstream("X error 999: nope".into()));
+}
+
+/// Serves `status` and `body` for every POST to the v1.1 REST `path`.
+async fn serve_rest(server: &MockServer, path: &str, status: u16, body: Value) {
+    Mock::given(method("POST"))
+        .and(wiremock::matchers::path(format!("/i/api/1.1/{path}")))
+        .respond_with(ResponseTemplate::new(status).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
+/// The form fields of the only request.
+async fn sent_form(server: &MockServer) -> Vec<(String, String)> {
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "exactly one request");
+    url::form_urlencoded::parse(&requests[0].body)
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect()
+}
+
+#[tokio::test]
+async fn following_posts_the_user_id_to_friendships() {
+    let user = UserId::new("1000000000000000001");
+    let cases = [
+        (
+            FollowAction::Follow,
+            "friendships/create.json",
+            "friendships-create",
+            FollowStatus::Following,
+        ),
+        (
+            FollowAction::Follow,
+            "friendships/create.json",
+            "friendships-create-protected",
+            FollowStatus::Requested,
+        ),
+        (
+            FollowAction::Unfollow,
+            "friendships/destroy.json",
+            "friendships-create",
+            FollowStatus::NotFollowing,
+        ),
+    ];
+    for (action, path, body, expected) in cases {
+        let server = MockServer::start().await;
+        serve_rest(&server, path, 200, fixture(body)).await;
+        let status = backend(&server).set_following(&user, action).await.unwrap();
+        assert_eq!(status, expected, "{action:?} with {body}");
+        let form = sent_form(&server).await;
+        assert!(form.contains(&("user_id".into(), user.as_str().into())), "{form:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_pending_request_counts_as_requested() {
+    let server = MockServer::start().await;
+    let body = json!({"errors": [{"code": 160, "message": "You've already requested to follow."}]});
+    serve_rest(&server, "friendships/create.json", 403, body).await;
+    let status =
+        backend(&server).set_following(&UserId::new("2"), FollowAction::Follow).await.unwrap();
+    assert_eq!(status, FollowStatus::Requested);
+}
+
+#[tokio::test]
+async fn a_refused_follow_is_an_error_not_a_lost_session() {
+    let server = MockServer::start().await;
+    let body = json!({"errors": [{"code": 162, "message": "You have been blocked from following this account."}]});
+    serve_rest(&server, "friendships/create.json", 403, body).await;
+    let err =
+        backend(&server).set_following(&UserId::new("3"), FollowAction::Follow).await.unwrap_err();
+    assert!(matches!(&err, BackendError::Upstream(m) if m.contains("blocked")), "{err:?}");
 }
 
 #[tokio::test]

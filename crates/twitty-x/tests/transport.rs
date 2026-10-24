@@ -307,6 +307,31 @@ async fn mutations_post_json_with_query_id() {
     assert_eq!(req.headers["content-type"], "application/json");
 }
 
+#[tokio::test]
+async fn rest_posts_send_a_form_with_the_session_headers() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/i/api/1.1/friendships/create.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id_str": "42"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let fields =
+        vec![("user_id".to_owned(), "42".to_owned()), ("a b".to_owned(), "c&d".to_owned())];
+    let body = client(&server).rest_post("1.1/friendships/create.json", fields).await.unwrap();
+    assert_eq!(body, json!({"id_str": "42"}));
+    let req: &Request = &server.received_requests().await.unwrap()[0];
+    assert_eq!(req.headers["content-type"], "application/x-www-form-urlencoded");
+    let sent: Vec<(String, String)> = url::form_urlencoded::parse(&req.body)
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    assert_eq!(sent, [("user_id".into(), "42".into()), ("a b".into(), "c&d".into())]);
+    assert_eq!(req.headers["x-csrf-token"], CSRF);
+    assert!(req.headers["cookie"].to_str().unwrap().contains(&format!("ct0={CSRF}")));
+    assert!(req.headers.contains_key("x-client-transaction-id"));
+    assert!(req.headers["authorization"].to_str().unwrap().starts_with("Bearer "));
+}
+
 /// Matches when the `variables` query parameter is this JSON, in any key order.
 struct Variables(Value);
 

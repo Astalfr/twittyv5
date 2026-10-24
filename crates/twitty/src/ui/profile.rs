@@ -9,13 +9,14 @@ use gpui_kit::{
     component::button::*, component::scroll::ScrollableElement, component::spinner::Spinner,
     component::*, div, img, list, prelude::*, px,
 };
-use twitty_model::{Backend, BackendError, FeedPage, Media, Profile};
+use twitty_model::{Backend, BackendError, FeedPage, FollowStatus, Media, Profile, UserId};
 
 use crate::{
     format::compact_count,
     runtime::Runtime,
     state::{
         column::{ColumnModel, ListChange, LoadKind, Status},
+        follow::Follow,
         profile::{self, ProfileTab, Row, Tile},
     },
     ui::button::TextButton,
@@ -51,6 +52,9 @@ impl EventEmitter<CloseProfile> for ProfilePanel {}
 /// An account's profile, posts and media.
 pub struct ProfilePanel {
     profile: Arc<Profile>,
+    /// The signed-in account, which has no Follow button on its own profile.
+    viewer: Option<UserId>,
+    follow: Follow,
     tab: ProfileTab,
     tweets: ColumnModel,
     media: ColumnModel,
@@ -61,6 +65,7 @@ pub struct ProfilePanel {
     hub: Entity<InteractionsHub>,
     loads: [Option<Task<()>>; 2],
     _refresh: Option<Task<()>>,
+    _follow: Option<Task<()>>,
     _hub_sub: Subscription,
 }
 
@@ -75,8 +80,10 @@ impl std::fmt::Debug for ProfilePanel {
 
 impl ProfilePanel {
     /// Shows `profile` at once, then refreshes it and loads its posts.
+    /// `viewer` is the signed-in account, if any.
     pub fn new(
         profile: Arc<Profile>,
+        viewer: Option<UserId>,
         backend: Arc<dyn Backend>,
         hub: Entity<InteractionsHub>,
         cx: &mut Context<Self>,
@@ -95,6 +102,8 @@ impl ProfilePanel {
         let mut this = Self {
             tweets: ColumnModel::new(ProfileTab::Tweets.source(&profile)),
             media: ColumnModel::new(ProfileTab::Media.source(&profile)),
+            follow: Follow::new(&profile),
+            viewer,
             profile,
             tab,
             tiles: Vec::new(),
@@ -104,6 +113,7 @@ impl ProfilePanel {
             hub,
             loads: [None, None],
             _refresh: None,
+            _follow: None,
         };
         this.refresh_profile(cx);
         this.load(tab, LoadKind::Refresh, cx);
@@ -155,6 +165,7 @@ impl ProfilePanel {
                 Ok(Ok(fresh)) => {
                     this.update(cx, |this, cx| {
                         if fresh.id == this.profile.id {
+                            this.follow.refreshed(&fresh);
                             this.profile = Arc::new(fresh);
                             // The header's height may change.
                             this.list.splice(0..1, 1);
@@ -167,6 +178,42 @@ impl ProfilePanel {
                 Err(e) => tracing::warn!("profile refresh failed: {e}"),
             }
         }));
+    }
+
+    pub fn follow(&self) -> &Follow {
+        &self.follow
+    }
+
+    /// Whether the header has a Follow button: not on the viewer's own profile.
+    fn can_follow(&self) -> bool {
+        self.viewer.as_ref() != Some(&self.profile.id)
+    }
+
+    /// Follows or unfollows the account, showing the change at once.
+    pub fn toggle_follow(&mut self, cx: &mut Context<Self>) {
+        let Some(action) = self.follow.click() else { return };
+        self.header_changed(cx);
+        let backend = Arc::clone(&self.backend);
+        let user = self.profile.id.clone();
+        let result =
+            Runtime::global(cx).spawn(async move { backend.set_following(&user, action).await });
+        self._follow = Some(cx.spawn(async move |this, cx| {
+            let result = result.await.unwrap_or_else(|e| Err(BackendError::Network(e.to_string())));
+            if let Err(e) = &result {
+                tracing::warn!("follow change failed: {e}");
+            }
+            this.update(cx, |this, cx| {
+                this.follow.answered(result);
+                this.header_changed(cx);
+            })
+            .ok();
+        }));
+    }
+
+    /// Redraws the header row, whose height may change.
+    fn header_changed(&mut self, cx: &mut Context<Self>) {
+        self.list.splice(0..1, 1);
+        cx.notify();
     }
 
     /// Shows `tab`, loading it the first time.
@@ -314,7 +361,20 @@ impl ProfilePanel {
                 .when(p.banner.is_none(), |d| d.pt_4())
                 .pb_3()
                 .gap_3()
-                .child(h_flex().child(face))
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .items_end()
+                        .child(face)
+                        .when(self.can_follow(), |d| d.child(self.render_follow(cx))),
+                )
+                .children(self.follow.error().filter(|_| self.can_follow()).map(|e| {
+                    div()
+                        .debug_selector(|| "profile-follow-error".into())
+                        .text_sm()
+                        .text_color(theme.danger)
+                        .child(e.to_owned())
+                }))
                 .child(
                     v_flex()
                         .child(
@@ -348,6 +408,24 @@ impl ProfilePanel {
                         .child(count(p.counts.followers, "Followers")),
                 ),
         )
+    }
+
+    fn render_follow(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let follow = &self.follow;
+        Button::new("profile-follow")
+            .debug_selector(|| "profile-follow".into())
+            .map(|b| match follow.status() {
+                FollowStatus::NotFollowing => b.primary(),
+                FollowStatus::Following | FollowStatus::Requested => b.outline(),
+            })
+            .text_button(Size::Small)
+            .label(follow.label())
+            .disabled(!follow.is_clickable() && !follow.is_sending())
+            .when(follow.status() == FollowStatus::Following, |b| b.tooltip("Unfollow"))
+            .when(follow.status() == FollowStatus::Requested, |b| {
+                b.tooltip("Waiting for the account to approve")
+            })
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_follow(cx)))
     }
 
     fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -519,7 +597,7 @@ impl Render for ProfilePanel {
 mod tests {
     use super::*;
     use gpui_kit::TestAppContext;
-    use twitty_model::{ImageRef, UserId, mock::MockBackend};
+    use twitty_model::{FollowAction, ImageRef, mock::MockBackend};
 
     /// Draws the panel for `profile`, unknown to the mock so the refresh
     /// keeps it as given.
@@ -530,10 +608,73 @@ mod tests {
         });
         let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
         let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&backend)));
-        let (_panel, cx) =
-            cx.add_window_view(|_, cx| ProfilePanel::new(Arc::new(profile), backend, hub, cx));
+        let (_panel, cx) = cx
+            .add_window_view(|_, cx| ProfilePanel::new(Arc::new(profile), None, backend, hub, cx));
         cx.run_until_parked();
         cx
+    }
+
+    /// The panel for `profile` as seen by `viewer`, over `backend`.
+    fn open(
+        profile: Profile,
+        viewer: Option<UserId>,
+        backend: MockBackend,
+        cx: &mut TestAppContext,
+    ) -> (Entity<ProfilePanel>, &mut gpui_kit::VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let backend: Arc<dyn Backend> = Arc::new(backend);
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&backend)));
+        let (panel, cx) = cx.add_window_view(|_, cx| {
+            ProfilePanel::new(Arc::new(profile), viewer, backend, hub, cx)
+        });
+        cx.run_until_parked();
+        (panel, cx)
+    }
+
+    fn click_follow(cx: &mut gpui_kit::VisualTestContext) {
+        let button = cx.debug_bounds("profile-follow").expect("the Follow button is drawn");
+        cx.simulate_click(button.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn the_follow_button_follows_and_unfollows(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        let (panel, cx) = open(someone(), Some(UserId::new("viewer")), backend.clone(), cx);
+        let label =
+            |cx: &mut gpui_kit::VisualTestContext| panel.read_with(cx, |p, _| p.follow().label());
+        assert_eq!(label(cx), "Follow");
+
+        click_follow(cx);
+        assert_eq!(label(cx), "Following");
+        click_follow(cx);
+        assert_eq!(label(cx), "Follow");
+        let user = someone().id;
+        assert_eq!(
+            backend.follows(),
+            [(user.clone(), FollowAction::Follow), (user, FollowAction::Unfollow)]
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_follow_rolls_back_and_says_why(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        let (panel, cx) = open(someone(), None, backend.clone(), cx);
+        backend.fail_next(BackendError::Upstream("blocked".into()));
+        click_follow(cx);
+        assert_eq!(panel.read_with(cx, |p, _| p.follow().label()), "Follow");
+        assert!(cx.debug_bounds("profile-follow-error").is_some(), "the reason is shown");
+    }
+
+    #[gpui_kit::test]
+    fn there_is_no_follow_button_on_the_viewers_own_profile(cx: &mut TestAppContext) {
+        let me = someone();
+        let id = me.id.clone();
+        let (_panel, cx) = open(me, Some(id), MockBackend::new(), cx);
+        assert!(cx.debug_bounds("profile-follow").is_none());
     }
 
     fn someone() -> Profile {

@@ -35,6 +35,7 @@ depends on nothing else of ours.
 |---|---|
 | `state::column` | `ColumnModel`: paging, cursors, de-duplication, unseen count, `ListChange` instructions for the view |
 | `state::interactions` | Optimistic like/repost/bookmark overrides with rollback |
+| `state::follow` | The profile sheet's Follow button: optimistic follow/unfollow, rollback with the reason, protected accounts' requests, late profile refreshes ignored after a click |
 | `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move, `ColumnSettings` (name, width, alerts) |
 | `state::alerts` | Which loads announce new rows, and the notification text |
 | `state::media_layout` | Geometry of the 1–4 media grid |

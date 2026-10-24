@@ -5,7 +5,8 @@
 
 use serde_json::{Value, json};
 use twitty_model::{
-    Draft, FeedSource, HomeMode, NotificationFilter, PageRequest, PostAction, SearchSort, UserTab,
+    Draft, FeedSource, FollowAction, HomeMode, NotificationFilter, PageRequest, PostAction,
+    SearchSort, UserId, UserTab,
 };
 
 use crate::client::home_variables;
@@ -125,6 +126,31 @@ pub(crate) fn action(action: &PostAction) -> (&'static str, Value) {
     }
 }
 
+/// The v1.1 REST path and form fields for following or unfollowing `user`,
+/// as the web client sends them.
+pub(crate) fn follow(user: &UserId, action: FollowAction) -> (&'static str, Vec<(String, String)>) {
+    let path = match action {
+        FollowAction::Follow => "1.1/friendships/create.json",
+        FollowAction::Unfollow => "1.1/friendships/destroy.json",
+    };
+    let fields = [
+        ("include_profile_interstitial_type", "1"),
+        ("include_blocking", "1"),
+        ("include_blocked_by", "1"),
+        ("include_followed_by", "1"),
+        ("include_want_retweets", "1"),
+        ("include_mute_edge", "1"),
+        ("include_can_dm", "1"),
+        ("include_can_media_tag", "1"),
+        ("include_ext_is_blue_verified", "1"),
+        ("include_ext_verified_type", "1"),
+        ("include_ext_profile_image_shape", "1"),
+        ("skip_status", "1"),
+        ("user_id", user.as_str()),
+    ];
+    (path, fields.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect())
+}
+
 /// Variables of `CreateTweet` for a draft.
 pub(crate) fn create_tweet(draft: &Draft) -> Value {
     let mut v = json!({
@@ -159,6 +185,16 @@ pub(crate) fn user_by_screen_name_variables(handle: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_goes_to_friendships_with_the_user_id() {
+        let user = UserId::new("42");
+        let (path, fields) = follow(&user, FollowAction::Follow);
+        assert_eq!(path, "1.1/friendships/create.json");
+        assert!(fields.contains(&("user_id".into(), "42".into())));
+        let (path, _) = follow(&user, FollowAction::Unfollow);
+        assert_eq!(path, "1.1/friendships/destroy.json");
+    }
     use pretty_assertions::assert_eq;
     use twitty_model::{ListId, PageToken, PostId, UserId};
 

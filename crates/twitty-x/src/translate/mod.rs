@@ -15,9 +15,11 @@ mod user;
 use std::{collections::HashMap, sync::Arc};
 
 use serde_json::Value;
-use twitty_model::{FeedItem, FeedPage, PageToken, Post, PostId, Profile, ThreadView};
+use twitty_model::{
+    FeedItem, FeedPage, FollowAction, FollowStatus, PageToken, Post, PostId, Profile, ThreadView,
+};
 
-use crate::wire::{self, CursorKind, Entry, at, str_at};
+use crate::wire::{self, CursorKind, Entry, at, bool_at, str_at};
 
 /// Per-response translation state.
 #[derive(Debug, Default)]
@@ -127,6 +129,26 @@ pub fn thread(root: &Value, focal: &PostId) -> Option<ThreadView> {
     Some(ThreadView { ancestors, focus, replies: items.collect(), more_replies: page.older })
 }
 
+/// Where the viewer stands after a v1.1 `friendships/create` or `destroy`
+/// call, from the user object it returns. X's `following` there can still
+/// show the state before the call, so a follow is trusted unless X says it
+/// is only a request (a protected account).
+pub fn follow_status(root: &Value, action: FollowAction) -> FollowStatus {
+    match action {
+        FollowAction::Unfollow => FollowStatus::NotFollowing,
+        FollowAction::Follow => {
+            let requested = bool_at(root, &["follow_request_sent"]) == Some(true);
+            let protected = bool_at(root, &["protected"]) == Some(true);
+            let following = bool_at(root, &["following"]) == Some(true);
+            if requested || (protected && !following) {
+                FollowStatus::Requested
+            } else {
+                FollowStatus::Following
+            }
+        }
+    }
+}
+
 /// The post a `CreateTweet` response returns.
 pub fn created_post(root: &Value) -> Option<Post> {
     let result = at(root, &["data", "create_tweet", "tweet_results", "result"])?;
@@ -184,4 +206,29 @@ fn module(entry: &str, display_type: &str, items: &[Value], ctx: &mut Ctx) -> Ve
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn follow_status_reads_requests_and_ignores_a_stale_following() {
+        let follow = |body| follow_status(&body, FollowAction::Follow);
+        // X can echo the state before the call.
+        assert_eq!(
+            follow(json!({"protected": false, "following": false})),
+            FollowStatus::Following
+        );
+        assert_eq!(follow(json!({"protected": true})), FollowStatus::Requested);
+        assert_eq!(follow(json!({"follow_request_sent": true})), FollowStatus::Requested);
+        assert_eq!(
+            follow(json!({"protected": true, "following": true})),
+            FollowStatus::Following,
+            "already following a locked account"
+        );
+        assert_eq!(follow(json!({})), FollowStatus::Following, "nothing to go on");
+        assert_eq!(follow_status(&json!({}), FollowAction::Unfollow), FollowStatus::NotFollowing);
+    }
 }

@@ -690,7 +690,8 @@ impl TwittyApp {
         }
         let backend = Arc::clone(&self.backend);
         let hub = self.hub.clone();
-        let panel = cx.new(|cx| ProfilePanel::new(profile, backend, hub, cx));
+        let viewer = self.viewer.as_ref().map(|v| v.id.clone());
+        let panel = cx.new(|cx| ProfilePanel::new(profile, viewer, backend, hub, cx));
         let sub = cx.subscribe(&panel, |this, _, _: &CloseProfile, cx| this.close_sheet(cx));
         self.show_sheet(Sheet::Profile(panel), sub, cx);
     }
@@ -2462,6 +2463,13 @@ mod tests {
             handle: &'a str,
         ) -> twitty_model::BoxFuture<'a, Result<Profile, BackendError>> {
             self.0.profile(handle)
+        }
+        fn set_following<'a>(
+            &'a self,
+            user: &'a twitty_model::UserId,
+            action: twitty_model::FollowAction,
+        ) -> twitty_model::BoxFuture<'a, Result<twitty_model::FollowStatus, BackendError>> {
+            self.0.set_following(user, action)
         }
         fn act(
             &self,

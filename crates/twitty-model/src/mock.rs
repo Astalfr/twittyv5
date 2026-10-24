@@ -14,9 +14,10 @@ use url::Url;
 
 use crate::{
     Backend, BackendError, Badges, BoxFuture, Draft, Embed, FeedItem, FeedPage, FeedSource,
-    ImageRef, LinkCard, Media, Metrics, PageRequest, PageToken, Poll, PollOption, Post, PostAction,
-    PostId, PostOrGone, Profile, ProfileCounts, RichText, Span, SpanKind, ThreadView,
-    UnavailableReason, UserId, UserRef, UserTab, VerifiedKind, ViewerPostState,
+    FollowAction, FollowStatus, ImageRef, LinkCard, Media, Metrics, PageRequest, PageToken, Poll,
+    PollOption, Post, PostAction, PostId, PostOrGone, Profile, ProfileCounts, RichText, Span,
+    SpanKind, ThreadView, UnavailableReason, UserId, UserRef, UserTab, VerifiedKind,
+    ViewerPostState,
 };
 use crate::{Notification, NotificationId, NotificationKind};
 
@@ -37,6 +38,9 @@ struct State {
     failures: VecDeque<BackendError>,
     actions: Vec<PostAction>,
     viewer: HashMap<PostId, ViewerPostState>,
+    follows: Vec<(UserId, FollowAction)>,
+    /// Accounts the viewer followed or asked to follow.
+    following: HashMap<UserId, FollowStatus>,
 }
 
 impl Default for MockBackend {
@@ -61,6 +65,8 @@ impl MockBackend {
                 failures: VecDeque::new(),
                 actions: Vec::new(),
                 viewer: HashMap::new(),
+                follows: Vec::new(),
+                following: HashMap::new(),
                 base: base_time(),
             })),
         }
@@ -93,6 +99,11 @@ impl MockBackend {
     /// Actions received so far.
     pub fn actions(&self) -> Vec<PostAction> {
         self.lock().actions.clone()
+    }
+
+    /// Follow changes received so far.
+    pub fn follows(&self) -> Vec<(UserId, FollowAction)> {
+        self.lock().follows.clone()
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -416,11 +427,16 @@ impl Backend for MockBackend {
         Box::pin(async move {
             self.take_failure()?;
             let st = self.lock();
-            st.authors
+            let mut p = st
+                .authors
                 .iter()
                 .find(|a| a.handle.eq_ignore_ascii_case(handle))
                 .map(|a| a.as_ref().clone())
-                .ok_or(BackendError::NotFound)
+                .ok_or(BackendError::NotFound)?;
+            if let Some(status) = st.following.get(&p.id) {
+                p.viewer.following = *status == FollowStatus::Following;
+            }
+            Ok(p)
         })
     }
 
@@ -439,6 +455,26 @@ impl Backend for MockBackend {
             }
             st.actions.push(action);
             Ok(())
+        })
+    }
+
+    fn set_following<'a>(
+        &'a self,
+        user: &'a UserId,
+        action: FollowAction,
+    ) -> BoxFuture<'a, Result<FollowStatus, BackendError>> {
+        Box::pin(async move {
+            self.take_failure()?;
+            let mut st = self.lock();
+            let protected = st.authors.iter().any(|a| &a.id == user && a.badges.protected);
+            let status = match action {
+                FollowAction::Unfollow => FollowStatus::NotFollowing,
+                FollowAction::Follow if protected => FollowStatus::Requested,
+                FollowAction::Follow => FollowStatus::Following,
+            };
+            st.following.insert(user.clone(), status);
+            st.follows.push((user.clone(), action));
+            Ok(status)
         })
     }
 
@@ -573,6 +609,32 @@ mod tests {
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(f)
+    }
+
+    #[test]
+    fn following_is_recorded_and_shows_on_the_profile() {
+        let b = MockBackend::new();
+        let open = b.lock().authors.iter().skip(1).find(|a| !a.badges.protected).cloned().unwrap();
+        let handle = open.handle.to_string();
+        let status = block_on(b.set_following(&open.id, FollowAction::Follow)).unwrap();
+        assert_eq!(status, FollowStatus::Following);
+        assert!(block_on(b.profile(&handle)).unwrap().viewer.following);
+        let status = block_on(b.set_following(&open.id, FollowAction::Unfollow)).unwrap();
+        assert_eq!(status, FollowStatus::NotFollowing);
+        assert!(!block_on(b.profile(&handle)).unwrap().viewer.following);
+        assert_eq!(
+            b.follows(),
+            [(open.id.clone(), FollowAction::Follow), (open.id.clone(), FollowAction::Unfollow)]
+        );
+    }
+
+    #[test]
+    fn following_a_protected_account_is_a_request() {
+        let b = MockBackend::new();
+        let locked = b.lock().authors.iter().find(|a| a.badges.protected).cloned().unwrap();
+        let status = block_on(b.set_following(&locked.id, FollowAction::Follow)).unwrap();
+        assert_eq!(status, FollowStatus::Requested);
+        assert!(!block_on(b.profile(&locked.handle)).unwrap().viewer.following);
     }
 
     #[test]

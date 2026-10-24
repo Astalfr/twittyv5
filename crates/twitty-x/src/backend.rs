@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use twitty_model::{
-    Backend, BackendError, BoxFuture, Draft, FeedPage, FeedSource, PageRequest, Post, PostAction,
-    PostId, Profile, RateBudget, RequestHealth, ThreadView,
+    Backend, BackendError, BoxFuture, Draft, FeedPage, FeedSource, FollowAction, FollowStatus,
+    PageRequest, Post, PostAction, PostId, Profile, RateBudget, RequestHealth, ThreadView, UserId,
 };
 
 use crate::{XClient, XError, health::Health, requests, translate};
@@ -18,6 +18,9 @@ const ASSUMED_LIMIT: u32 = 50;
 /// X error codes meaning the action already happened ("already favorited",
 /// "already retweeted"). The request is idempotent from the UI's view.
 const ALREADY_DONE: [i64; 2] = [139, 327];
+
+/// X's code for "you've already requested to follow" (a protected account).
+const ALREADY_REQUESTED: i64 = 160;
 
 /// X as a [`Backend`]. Cheap to clone; clones share the client.
 #[derive(Debug, Clone)]
@@ -145,6 +148,22 @@ impl Backend for XBackend {
                 Err(e) => Err(e.into()),
             };
             self.track(operation, result)
+        })
+    }
+
+    fn set_following<'a>(
+        &'a self,
+        user: &'a UserId,
+        action: FollowAction,
+    ) -> BoxFuture<'a, Result<FollowStatus, BackendError>> {
+        Box::pin(async move {
+            let (path, fields) = requests::follow(user, action);
+            let result = match self.client.rest_post(path, fields).await {
+                Ok(body) => Ok(translate::follow_status(&body, action)),
+                Err(XError::Api { code: ALREADY_REQUESTED, .. }) => Ok(FollowStatus::Requested),
+                Err(e) => Err(e.into()),
+            };
+            self.track(path, result)
         })
     }
 

@@ -42,13 +42,25 @@ impl Default for RetryPolicy {
 /// One API request.
 #[derive(Debug, Clone)]
 pub(crate) struct ApiRequest {
-    /// Rate-limit bucket and log label (the GraphQL operation name).
+    /// Rate-limit bucket and log label (the GraphQL operation name, or the
+    /// REST path).
     pub endpoint: String,
     pub method: Method,
-    /// Path below the API base, e.g. `graphql/<id>/HomeTimeline`.
+    /// Path below the API base, e.g. `graphql/<id>/HomeTimeline` or
+    /// `1.1/friendships/create.json`.
     pub path: String,
     pub query: Vec<(String, String)>,
-    pub body: Option<Value>,
+    pub body: Option<Body>,
+}
+
+/// The body of a POST.
+#[derive(Debug, Clone)]
+pub(crate) enum Body {
+    /// GraphQL calls.
+    Json(Value),
+    /// The v1.1 REST endpoints (e.g. `friendships/create.json`), which take
+    /// form fields.
+    Form(Vec<(String, String)>),
 }
 
 /// Authenticated client for `https://x.com/i/api/`.
@@ -151,8 +163,17 @@ impl Transport {
         .header("x-csrf-token", session.ct0.expose())
         .header("x-client-transaction-id", headers::transaction_id())
         .query(&req.query);
-        if let Some(body) = &req.body {
-            builder = builder.json(body);
+        match &req.body {
+            Some(Body::Json(body)) => builder = builder.json(body),
+            Some(Body::Form(fields)) => {
+                let encoded = url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(fields)
+                    .finish();
+                builder = builder
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(encoded);
+            }
+            None => {}
         }
 
         let response = builder.send().await?;
@@ -191,6 +212,12 @@ impl Transport {
     }
 }
 
+/// Codes X sends with a 403 when it refuses an action but the session is
+/// fine: 158 "can't follow yourself", 160 "already requested to follow",
+/// 161 "follow limit", 162 "blocked from following". Mapping them to
+/// `Unauthorized` would ask the user to sign in again.
+const REFUSED: [i64; 4] = [158, 160, 161, 162];
+
 /// Maps an HTTP response to the JSON body or an error.
 fn interpret(
     endpoint: &str,
@@ -207,6 +234,14 @@ fn interpret(
         }
         401 => Err(XError::Unauthorized { status: 401, code: first_code }),
         403 if first_code == Some(353) => Err(XError::TransactionIdRequired),
+        403 if first_code.is_some_and(|c| REFUSED.contains(&c)) => {
+            let message = json
+                .as_ref()
+                .and_then(|j| j.get("errors")?.get(0)?.get("message")?.as_str())
+                .unwrap_or("refused")
+                .to_owned();
+            Err(XError::Api { code: first_code.unwrap_or(0), message })
+        }
         403 => Err(XError::Unauthorized { status: 403, code: first_code }),
         429 => {
             let reset_at = RateLimit::from_headers(headers)
@@ -294,6 +329,15 @@ mod tests {
     fn statuses_are_mapped() {
         assert_eq!(interp(401, ""), Err(XError::Unauthorized { status: 401, code: None }));
         assert_eq!(interp(403, r#"{"errors":[{"code":353}]}"#), Err(XError::TransactionIdRequired));
+        assert_eq!(
+            interp(403, r#"{"errors":[{"code":162,"message":"blocked"}]}"#),
+            Err(XError::Api { code: 162, message: "blocked".into() }),
+            "a refused follow is not a lost session"
+        );
+        assert_eq!(
+            interp(403, r#"{"errors":[{"code":64}]}"#),
+            Err(XError::Unauthorized { status: 403, code: Some(64) })
+        );
         assert!(matches!(interp(404, "nope"), Err(XError::Http { status: 404, .. })));
         assert!(matches!(interp(429, ""), Err(XError::RateLimited { .. })));
         assert!(matches!(interp(200, "<html>"), Err(XError::Decode(_))));

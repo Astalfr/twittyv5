@@ -1,6 +1,8 @@
 use std::{future::Future, pin::Pin};
 
-use crate::{BackendError, FeedItem, FeedPage, FeedSource, PageToken, Post, PostId, Profile};
+use crate::{
+    BackendError, FeedItem, FeedPage, FeedSource, PageToken, Post, PostId, Profile, UserId,
+};
 
 /// A boxed, sendable future, so [`Backend`] stays object safe.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -50,6 +52,22 @@ impl PostAction {
             | PostAction::Unbookmark(id) => id,
         }
     }
+}
+
+/// A change the viewer makes to their relation with an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FollowAction {
+    Follow,
+    Unfollow,
+}
+
+/// Whether the viewer follows an account, after a [`FollowAction`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowStatus {
+    NotFollowing,
+    Following,
+    /// The account is protected: it must approve the request first.
+    Requested,
 }
 
 /// How many requests the provider allows for a feed per time window.
@@ -111,6 +129,14 @@ pub trait Backend: Send + Sync + 'static {
 
     /// Applies a viewer action to a post.
     fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>>;
+
+    /// Follows or unfollows `user`, returning where the viewer stands
+    /// afterwards. Doing what is already done succeeds.
+    fn set_following<'a>(
+        &'a self,
+        user: &'a UserId,
+        action: FollowAction,
+    ) -> BoxFuture<'a, Result<FollowStatus, BackendError>>;
 
     /// Publishes a new post and returns it.
     fn publish(&self, draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>>;

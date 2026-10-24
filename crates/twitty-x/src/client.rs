@@ -13,7 +13,7 @@ use crate::{
     Session, XError,
     catalog::{Catalog, Method, OperationSpec, Origin},
     discovery::{Discovery, Report},
-    transport::{ApiRequest, ClientIds, RetryPolicy, RotateHook, Transport},
+    transport::{ApiRequest, Body, ClientIds, RetryPolicy, RotateHook, Transport},
 };
 
 /// Client for X's internal GraphQL API. Returns raw JSON; translation into
@@ -194,9 +194,27 @@ impl XClient {
                     method: Method::Post,
                     path,
                     query: Vec::new(),
-                    body: Some(body),
+                    body: Some(Body::Json(body)),
                 }
             }
+        };
+        self.transport.send(&request).await
+    }
+
+    /// POSTs `fields` as a form to the v1.1 REST endpoint at `path` (e.g.
+    /// `1.1/friendships/create.json`). X's web client still uses these for
+    /// some actions; they have no query id to refresh.
+    pub async fn rest_post(
+        &self,
+        path: &str,
+        fields: Vec<(String, String)>,
+    ) -> Result<Value, XError> {
+        let request = ApiRequest {
+            endpoint: path.to_owned(),
+            method: Method::Post,
+            path: path.to_owned(),
+            query: Vec::new(),
+            body: Some(Body::Form(fields)),
         };
         self.transport.send(&request).await
     }

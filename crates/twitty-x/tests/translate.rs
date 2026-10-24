@@ -9,8 +9,8 @@
 
 use std::fmt::Write as _;
 
-use twitty_model::{Embed, FeedItem, FeedPage, Media, Post, PostOrGone, SpanKind};
-use twitty_x::translate::{Translated, feed_page};
+use twitty_model::{Embed, FeedItem, FeedPage, FollowAction, Media, Post, PostOrGone, SpanKind};
+use twitty_x::translate::{Translated, feed_page, follow_status};
 
 const FIXTURES: &[&str] = &[
     "home",
@@ -253,4 +253,19 @@ fn authors_are_shared_within_a_page() {
     let same: Vec<_> = authors.iter().filter(|a| a.id == first.id).collect();
     assert!(same.len() > 1);
     assert!(same.iter().all(|a| std::sync::Arc::ptr_eq(a, first)), "one Arc per author");
+}
+
+/// The v1.1 `friendships/create` replies (hand-written, no real account):
+/// what each follow change reads as.
+#[test]
+fn follow_replies() {
+    let mut out = String::new();
+    for name in ["friendships-create", "friendships-create-protected"] {
+        let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
+        let body = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for action in [FollowAction::Follow, FollowAction::Unfollow] {
+            let _ = writeln!(out, "{name} {action:?} → {:?}", follow_status(&body, action));
+        }
+    }
+    insta::assert_snapshot!("follow-replies", out);
 }

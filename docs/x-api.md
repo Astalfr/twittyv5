@@ -39,6 +39,7 @@ X doesn't document this API. Everything here comes from community clients and ou
 ```
 GET  https://x.com/i/api/graphql/<queryId>/<OperationName>?variables=<json>&features=<json>[&fieldToggles=<json>]
 POST https://x.com/i/api/graphql/<queryId>/<OperationName>    (mutations, JSON body {variables, features, queryId[, fieldToggles]})
+POST https://x.com/i/api/1.1/<path>.json                       (the few v1.1 REST actions, form body; see Follow below)
 ```
 
 Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>/<OperationName>` path (e.g. `0toR0MxC06yY3Fc57GXBpA/HomeTimeline`) with `features` and `fieldToggles` in the query string.
@@ -157,6 +158,7 @@ The real web client builds this from an animation key in the home page plus a ha
 | … code 353 | `TransactionIdRequired` | `Upstream` |
 | … code 34/144 | `Api` | `NotFound` |
 | 401, 403 | `Unauthorized` (403 + code 353 → `TransactionIdRequired`) | `Unauthorized` |
+| 403 + code 158/160/161/162 (follow refused: yourself, already requested, follow limit, blocked) | `Api` (`transport::REFUSED`) | `Upstream`, except 160 → `FollowStatus::Requested` |
 | 404 | refresh + retry, then `StaleQueryId` | `Upstream` |
 | 429 | `RateLimited` | `RateLimited` |
 | 5xx (after retries), other | `Http { status, snippet }` | `Upstream` |
@@ -175,6 +177,10 @@ All are POSTs with `{variables, features, queryId}`. Error handling (`backend.rs
 - codes **139** ("already favorited") and **327** ("already retweeted") count as success, so a double click or a stale view doesn't roll back a state that is in fact right;
 - any other `errors` with empty `data` becomes `BackendError::Upstream("X error <code>: <message>")`, which the UI shows (rollback for toggles, error text in compose);
 - `CreateTweet` returns the new tweet in `data.create_tweet.tweet_results.result`, translated with `translate::created_post`.
+
+### Follow / unfollow
+
+The web client has no GraphQL mutation for this (the catalog has none): it POSTs to v1.1 REST, `1.1/friendships/create.json` / `1.1/friendships/destroy.json`, with a form body (`application/x-www-form-urlencoded`) of `user_id` plus the `include_*`/`skip_status=1` flags it sends (`requests::follow`). They go through `XClient::rest_post` → `transport::Body::Form`, with the same cookies, csrf and transaction id, but without query-id refresh or GET→POST fallback. The reply is the account as a v1.1 user object; `translate::follow_status` reads it: an unfollow is `NotFollowing`; a follow is `Requested` when `follow_request_sent` is true (or the account is `protected` and not `following`), else `Following`. Its `following` can still show the state before the call, so a plain `false` isn't trusted. Fixtures `friendships-create*.json` are hand-written (no real account), not captures.
 
 **Not verified live**: these shapes come from the web client and community clients. If a write fails with a new error code, capture it (the message is in the UI and the log) and record it here.
 
