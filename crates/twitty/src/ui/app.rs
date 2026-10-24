@@ -35,6 +35,7 @@ use crate::{
         profile::{CloseProfile, ProfilePanel},
         theme,
         thread::{CloseThread, ThreadPanel},
+        title_bar,
     },
 };
 
@@ -1743,7 +1744,7 @@ fn render_title_bar(theme: &gpui_kit::component::Theme) -> impl IntoElement {
     div()
         .relative()
         .flex_none()
-        .child(TitleBar::new().bg(theme.background).border_b_0())
+        .child(title_bar::TitleBar::new(theme.background))
         .child(centered().child(title))
 }
 
@@ -1904,13 +1905,17 @@ mod tests {
             let bar = window.find("title-bar");
             assert!(bar.visible());
             assert_eq!(bar.bounds().top(), px(0.), "the bar is at the very top");
+            assert_eq!(bar.bounds().size.height, px(39.));
             assert!(content.top() >= bar.bounds().bottom(), "dialogs live below the bar");
             let middle = window.viewport_size().width / 2.;
             assert!((title.center().x - middle).abs() < px(1.), "title centred on the window");
             assert_eq!(deck.top(), bar.bounds().bottom(), "the deck's border meets the bar");
             #[cfg(target_os = "windows")]
             for id in ["minimize", "maximize", "close"] {
-                assert!(window.within("window-controls").find(id).visible(), "{id}");
+                let button = window.within("window-controls").find(id);
+                assert!(button.visible(), "{id}");
+                // A 14px icon with 20px on each side.
+                assert_eq!(button.bounds().size.width, px(54.), "{id}");
             }
         });
     }
@@ -2669,7 +2674,7 @@ mod tests {
 
         // The padding around everything (below the title bar) is backdrop.
         cx.simulate_click(
-            point(px(viewer::PADDING / 2.), TITLE_BAR_HEIGHT + px(viewer::PADDING / 2.)),
+            point(px(viewer::PADDING / 2.), title_bar::HEIGHT + px(viewer::PADDING / 2.)),
             Modifiers::default(),
         );
         cx.run_until_parked();

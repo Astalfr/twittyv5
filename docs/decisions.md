@@ -181,3 +181,8 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: The sound is an embedded mp3 played with `rodio` (`playback` + `mp3` features only), one short-lived thread per play. System notifications use GPUI's own `App::show_system_notification`, not `notify-rust`. `main.rs` calls `cx.set_app_identity("Twitty.Twitty", "Twitty")` before anything else.
 - **Why**: GPUI has no audio. On Windows GPUI shows toasts itself, registers the AppUserModelID for the current user (so toasts appear without a Start-menu shortcut) and makes them silent, so the column's own sound is the only one. GPUI's test platform records notifications, so they're tested without a fake.
 - **Consequences**: Without an audio device the sound is skipped with a warning. The app's taskbar identity is now `Twitty.Twitty`, so an existing taskbar pin may need re-pinning once. Toasts don't act on a click yet (GPUI's `on_system_notification_response` could open the column).
+
+### 2026-10-24: Own title bar instead of GPUI Kit's `TitleBar`
+- **Decision**: `ui::title_bar` is a copy of GPUI Kit's `TitleBar` (drag area, Windows caption buttons, Linux/macOS move and double-click) with a 39px bar and 54px-wide window buttons. `main.rs` still uses `TitleBar::window_options()`.
+- **Why**: GPUI Kit's height (34px) and button width (34px) are private constants, so they can't be styled.
+- **Consequences**: Fixes to GPUI Kit's title bar don't reach ours; compare with `gpui-component`'s `title_bar.rs` when upgrading GPUI Kit.
