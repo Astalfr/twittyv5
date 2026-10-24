@@ -98,6 +98,7 @@ fn main() -> anyhow::Result<()> {
     gpui_kit::application().with_assets(ui::assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
         ui::theme::init(theme_name, cx);
+        ui::keys::bind(cx);
         cx.set_global(runtime);
         cx.set_http_client(Arc::new(http));
 

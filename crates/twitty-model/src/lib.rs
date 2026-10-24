@@ -19,7 +19,7 @@ mod post;
 mod profile;
 mod rich_text;
 
-pub use backend::{Backend, BoxFuture, Draft, PageRequest, PostAction, ThreadView};
+pub use backend::{Backend, BoxFuture, Draft, PageRequest, PostAction, RateBudget, ThreadView};
 pub use error::BackendError;
 pub use feed::{FeedItem, FeedPage, FeedSource, HomeMode, NotificationFilter, SearchSort, UserTab};
 pub use ids::{ListId, NotificationId, PageToken, PostId, UserId};

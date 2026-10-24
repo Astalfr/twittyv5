@@ -3,9 +3,10 @@
 use std::{path::PathBuf, sync::Arc};
 
 use gpui_kit::{
-    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, Render, ScrollHandle,
-    Styled, Subscription, Task, Window, assets::IconName, component::button::*,
-    component::scroll::ScrollableElement, component::*, div, prelude::*, px,
+    AnyElement, Context, Entity, FocusHandle, FontWeight, IntoElement, ObjectFit, ParentElement,
+    Render, ScrollHandle, Styled, StyledImage, Subscription, Task, Window, assets::IconName,
+    component::button::*, component::checkbox::Checkbox, component::scroll::ScrollableElement,
+    component::*, div, img, prelude::*, px,
 };
 use twitty_model::{Backend, BackendError, FeedSource, Profile, mock::MockBackend};
 
@@ -14,6 +15,8 @@ use crate::{
     runtime::Runtime,
     state::{
         deck::{ColumnConfig, ColumnId, DeckFile},
+        interactions::Toggle,
+        poll,
         settings::Settings,
     },
     ui::{
@@ -21,6 +24,7 @@ use crate::{
         column::{ColumnEvent, ColumnView},
         compose::{ComposeEvent, ComposeView},
         hub::{ActionFailed, InteractionsHub, Navigate},
+        keys,
         login::{LoginEvent, LoginView},
         theme,
         thread::{CloseThread, ThreadPanel},
@@ -29,6 +33,9 @@ use crate::{
 
 /// Height of the strip under the deck reserved for its horizontal scrollbar.
 const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
+
+/// How often polling intervals are recomputed from the backend's limits.
+const BUDGET_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Shown when the session check at startup gets `Unauthorized`.
 pub const EXPIRED_NOTICE: &str = "Your X session expired or was revoked. Sign in again.";
@@ -65,7 +72,14 @@ pub struct TwittyApp {
     compose: Option<Entity<ComposeView>>,
     thread: Option<Entity<ThreadPanel>>,
     account_panel: bool,
+    settings_panel: bool,
+    /// The image viewer: a post and the index of the media shown.
+    media: Option<(Arc<twitty_model::Post>, usize)>,
+    /// Index of the column keyboard shortcuts act on.
+    active_column: usize,
+    focus: FocusHandle,
     session_check: Option<Task<()>>,
+    _budget_task: Option<Task<()>>,
     _login_sub: Option<Subscription>,
     _add_sub: Option<Subscription>,
     _compose_sub: Option<Subscription>,
@@ -109,7 +123,12 @@ impl TwittyApp {
             compose: None,
             thread: None,
             account_panel: false,
+            settings_panel: false,
+            media: None,
+            active_column: 0,
+            focus: cx.focus_handle(),
             session_check: None,
+            _budget_task: None,
             _login_sub: None,
             _add_sub: None,
             _compose_sub: None,
@@ -121,6 +140,17 @@ impl TwittyApp {
         this.build_columns(cx);
         if this.options.session.is_some() {
             this.check_session(window, cx);
+        }
+        if this.options.poll {
+            // Real limits arrive with the first responses; re-spread polling.
+            this._budget_task = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(BUDGET_REFRESH).await;
+                    if this.update(cx, |this, cx| this.update_polling(cx)).is_err() {
+                        break;
+                    }
+                }
+            }));
         }
         this
     }
@@ -176,7 +206,164 @@ impl TwittyApp {
                 let source = crate::state::add_column::user_source(p.id.clone(), &p.handle);
                 self.add_column(source, cx);
             }
+            Navigate::Media { post, index } => {
+                if index < post.media.len() {
+                    self.media = Some((post, index));
+                    cx.notify();
+                }
+            }
         }
+    }
+
+    /// The post and media index shown in the image viewer.
+    pub fn media_viewer(&self) -> Option<(&twitty_model::Post, usize)> {
+        self.media.as_ref().map(|(p, ix)| (p.as_ref(), *ix))
+    }
+
+    pub fn active_column(&self) -> usize {
+        self.active_column
+    }
+
+    fn active_view(&self) -> Option<Entity<ColumnView>> {
+        self.columns.get(self.active_column).map(|(_, v)| v.clone())
+    }
+
+    /// Makes column `index` (clamped) the target of keyboard shortcuts.
+    fn set_active_column(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.active_column = index.min(self.columns.len().saturating_sub(1));
+        for (ix, (_, column)) in self.columns.iter().enumerate() {
+            let active = ix == self.active_column;
+            column.update(cx, |c, cx| c.set_active(active, cx));
+        }
+        self.deck_scroll.scroll_to_item(self.active_column);
+        cx.notify();
+    }
+
+    fn has_dialog(&self) -> bool {
+        self.login.is_some()
+            || self.add_column.is_some()
+            || self.compose.is_some()
+            || self.account_panel
+            || self.settings_panel
+    }
+
+    fn select(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.media.is_none()
+            && let Some(column) = self.active_view()
+        {
+            column.update(cx, |c, cx| c.move_selection(delta, cx));
+        }
+    }
+
+    fn step_left_right(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if let Some((post, index)) = &mut self.media {
+            let len = post.media.len();
+            *index = (*index as isize + delta).rem_euclid(len.max(1) as isize) as usize;
+            cx.notify();
+            return;
+        }
+        let target = self.active_column.saturating_add_signed(delta);
+        self.set_active_column(target, cx);
+    }
+
+    fn selected_post(&self, cx: &mut Context<Self>) -> Option<Arc<twitty_model::Post>> {
+        if self.media.is_some() {
+            return None;
+        }
+        let column = self.active_view()?;
+        column.read(cx).model().selected_post().cloned().map(Arc::new)
+    }
+
+    fn toggle_selected(&mut self, toggle: Toggle, cx: &mut Context<Self>) {
+        if let Some(post) = self.selected_post(cx) {
+            self.hub.update(cx, |hub, cx| hub.toggle(&post, toggle, cx));
+        }
+    }
+
+    /// Closes the topmost thing: image viewer, dialog, then thread panel.
+    pub fn dismiss(&mut self, cx: &mut Context<Self>) {
+        if self.media.take().is_some() {
+        } else if self.has_dialog() {
+            self.close_overlays(cx);
+        } else {
+            self.thread = None;
+            self._thread_sub = None;
+        }
+        cx.notify();
+    }
+
+    fn render_media_viewer(
+        &self,
+        post: &twitty_model::Post,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme().clone();
+        let count = post.media.len();
+        let Some(media) = post.media.get(index) else {
+            return div().into_any_element();
+        };
+        let playable = !matches!(media, twitty_model::Media::Image { .. });
+        let url = post.url.to_string();
+        let nav = |id: &'static str, icon: IconName, delta: isize| {
+            Button::new(id)
+                .ghost()
+                .large()
+                .icon(Icon::new(icon).size(px(28.)))
+                .on_click(cx.listener(move |this, _, _, cx| this.step_left_right(delta, cx)))
+        };
+        v_flex()
+            .size_full()
+            .p_6()
+            .gap_3()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .text_color(theme.muted_foreground)
+                    .child(format!("{} / {count} · @{}", index + 1, post.author.handle))
+                    .child(
+                        Button::new("media-close")
+                            .ghost()
+                            .icon(IconName::X)
+                            .tooltip("Close (Esc)")
+                            .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .gap_2()
+                    .items_center()
+                    .when(count > 1, |d| d.child(nav("media-prev", IconName::ChevronLeft, -1)))
+                    .child(
+                        div().flex_1().h_full().min_w_0().child(
+                            img(media.preview().url.as_str().to_owned())
+                                .size_full()
+                                .object_fit(ObjectFit::Contain),
+                        ),
+                    )
+                    .when(count > 1, |d| d.child(nav("media-next", IconName::ChevronRight, 1))),
+            )
+            .child(
+                h_flex()
+                    .justify_center()
+                    .gap_3()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .children(media.alt().map(|alt| div().max_w(px(640.)).child(alt.to_owned())))
+                    .when(playable, |d| {
+                        d.child(
+                            Button::new("media-play")
+                                .primary()
+                                .icon(IconName::Play)
+                                .label("Play on x.com")
+                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     /// Shows the conversation around `id` in the side panel.
@@ -230,7 +417,24 @@ impl TwittyApp {
             let view = self.make_column(&config, cx);
             self.columns.push((config.id, view));
         }
+        self.update_polling(cx);
+        let active = self.active_column;
+        self.set_active_column(active, cx);
         cx.notify();
+    }
+
+    /// Spreads polling over the columns within the backend's rate limits.
+    /// Called whenever the deck changes and periodically, as the backend
+    /// learns its real limits.
+    pub fn update_polling(&self, cx: &mut Context<Self>) {
+        let sources: Vec<FeedSource> =
+            self.columns.iter().map(|(_, c)| c.read(cx).model().source().clone()).collect();
+        let enabled = self.options.poll && self.settings.polling_enabled();
+        let backend = Arc::clone(&self.backend);
+        let intervals = poll::intervals(&sources, |s| backend.rate_budget(s));
+        for ((_, column), every) in self.columns.iter().zip(intervals) {
+            column.update(cx, |c, _| c.set_poll_interval(every.filter(|_| enabled)));
+        }
     }
 
     fn check_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -297,6 +501,7 @@ impl TwittyApp {
         self.compose = None;
         self._compose_sub = None;
         self.account_panel = false;
+        self.settings_panel = false;
         cx.notify();
     }
 
@@ -408,6 +613,7 @@ impl TwittyApp {
             let view = self.make_column(&config, cx);
             self.columns.push((id, view));
         }
+        self.update_polling(cx);
         self.persist(cx);
         cx.notify();
     }
@@ -422,6 +628,8 @@ impl TwittyApp {
             ColumnEvent::Remove(id) => {
                 self.deck.remove_column(*id);
                 self.columns.retain(|(cid, _)| cid != id);
+                let active = self.active_column;
+                self.set_active_column(active, cx);
             }
             ColumnEvent::Move(id, delta) => {
                 self.deck.move_column(*id, *delta);
@@ -439,6 +647,9 @@ impl TwittyApp {
                     config.source = source.clone();
                 }
             }
+        }
+        if matches!(event, ColumnEvent::Remove(_) | ColumnEvent::SourceChanged(..)) {
+            self.update_polling(cx);
         }
         self.persist(cx);
         cx.notify();
@@ -464,10 +675,37 @@ impl TwittyApp {
         .detach();
     }
 
-    fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.theme_name = theme::next(self.theme_name);
-        theme::apply(self.theme_name, Some(window), cx);
-        self.settings.theme = Some(self.theme_name.to_owned());
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    pub fn theme_name(&self) -> &'static str {
+        self.theme_name
+    }
+
+    /// Shows the settings page.
+    pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+        self.close_overlays(cx);
+        self.settings_panel = true;
+        cx.notify();
+    }
+
+    /// Switches to the theme called `name` (one of `theme::NAMES`) and saves it.
+    pub fn set_theme(&mut self, name: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        self.theme_name = name;
+        theme::apply(name, Some(window), cx);
+        self.settings.theme = Some(name.to_owned());
+        self.save_settings(cx);
+    }
+
+    /// Turns automatic checks for new posts on or off, and saves the choice.
+    pub fn set_polling(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.polling = Some(enabled);
+        self.update_polling(cx);
+        self.save_settings(cx);
+    }
+
+    fn save_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.options.settings_path.clone() {
             let settings = self.settings.clone();
             cx.background_spawn(async move {
@@ -478,6 +716,73 @@ impl TwittyApp {
             .detach();
         }
         cx.notify();
+    }
+
+    fn render_settings_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let section =
+            |title: &'static str| div().pt_2().text_sm().font_weight(FontWeight::BOLD).child(title);
+        let current = self.theme_name;
+        let themes = theme::NAMES.into_iter().map(|name| {
+            let button = Button::new(name)
+                .small()
+                .label(name)
+                .on_click(cx.listener(move |this, _, window, cx| this.set_theme(name, window, cx)));
+            if name == current { button.primary() } else { button.ghost() }
+        });
+        let weak = cx.entity().downgrade();
+        let shortcuts = keys::HELP.into_iter().map(|(keys, what)| {
+            h_flex()
+                .gap_3()
+                .text_sm()
+                .child(div().w(px(150.)).text_color(theme.muted_foreground).child(keys))
+                .child(what)
+        });
+        let folder = self
+            .options
+            .deck_path
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map(|p| p.display().to_string());
+        v_flex()
+            .w(px(480.))
+            .gap_2()
+            .p_6()
+            .rounded_2xl()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .text_color(theme.foreground)
+            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Settings"))
+            .child(section("Theme"))
+            .child(h_flex().gap_2().children(themes))
+            .child(section("Timelines"))
+            .child(
+                Checkbox::new("polling")
+                    .checked(self.settings.polling_enabled())
+                    .label("Check for new posts automatically (within X's rate limits)")
+                    .on_click(move |checked, _, cx| {
+                        weak.update(cx, |this, cx| this.set_polling(*checked, cx)).ok();
+                    }),
+            )
+            .child(section("Keyboard shortcuts"))
+            .child(v_flex().gap_1().children(shortcuts))
+            .when_some(folder, |d, folder| {
+                d.child(section("Data")).child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("Decks and settings are saved in {folder}")),
+                )
+            })
+            .child(
+                h_flex().justify_end().child(
+                    Button::new("settings-close")
+                        .label("Done")
+                        .on_click(cx.listener(|this, _, _, cx| this.close_overlays(cx))),
+                ),
+            )
+            .into_any_element()
     }
 
     fn render_deck_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -645,8 +950,8 @@ impl TwittyApp {
             .child(div().flex_1())
             .children(self.render_account_button(cx))
             .child(
-                rail_button("theme", IconName::SunMoon, "Switch theme")
-                    .on_click(cx.listener(|this, _, window, cx| this.cycle_theme(window, cx))),
+                rail_button("settings", IconName::Settings, "Settings")
+                    .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
             )
             .child(
                 Button::new("compose")
@@ -664,8 +969,12 @@ impl TwittyApp {
 }
 
 impl Render for TwittyApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        // Give the keyboard back to the deck once no dialog holds it.
+        if !self.has_dialog() && !self.focus.contains_focused(window, cx) {
+            window.focus(&self.focus, cx);
+        }
         let body = if self.columns.is_empty() {
             v_flex()
                 .flex_1()
@@ -701,7 +1010,9 @@ impl Render for TwittyApp {
                 .horizontal_scrollbar(&self.deck_scroll)
                 .into_any_element()
         };
-        let overlay = if let Some(login) = &self.login {
+        let overlay = if let Some((post, index)) = &self.media {
+            Some(self.render_media_viewer(post, *index, cx))
+        } else if let Some(login) = &self.login {
             Some(login.clone().into_any_element())
         } else if let Some(add) = &self.add_column {
             Some(add.clone().into_any_element())
@@ -709,6 +1020,8 @@ impl Render for TwittyApp {
             Some(compose.clone().into_any_element())
         } else if self.account_panel {
             Some(self.render_account_panel(cx))
+        } else if self.settings_panel {
+            Some(self.render_settings_panel(cx))
         } else {
             None
         };
@@ -744,6 +1057,48 @@ impl Render for TwittyApp {
             })
             .child(
                 h_flex()
+                    .id("deck-root")
+                    .track_focus(&self.focus)
+                    .key_context(keys::DECK)
+                    .on_action(cx.listener(|this, _: &keys::SelectNext, _, cx| this.select(1, cx)))
+                    .on_action(
+                        cx.listener(|this, _: &keys::SelectPrevious, _, cx| this.select(-1, cx)),
+                    )
+                    .on_action(
+                        cx.listener(|this, _: &keys::ColumnLeft, _, cx| {
+                            this.step_left_right(-1, cx)
+                        }),
+                    )
+                    .on_action(
+                        cx.listener(|this, _: &keys::ColumnRight, _, cx| {
+                            this.step_left_right(1, cx)
+                        }),
+                    )
+                    .on_action(cx.listener(|this, _: &keys::LikeSelected, _, cx| {
+                        this.toggle_selected(Toggle::Like, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &keys::RepostSelected, _, cx| {
+                        this.toggle_selected(Toggle::Repost, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &keys::BookmarkSelected, _, cx| {
+                        this.toggle_selected(Toggle::Bookmark, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &keys::ReplySelected, window, cx| {
+                        if let Some(post) = this.selected_post(cx) {
+                            this.open_compose(Some(post), window, cx);
+                        }
+                    }))
+                    .on_action(cx.listener(|this, _: &keys::OpenSelected, _, cx| {
+                        if let Some(post) = this.selected_post(cx) {
+                            this.open_thread(post.id.clone(), cx);
+                        }
+                    }))
+                    .on_action(cx.listener(|this, _: &keys::NewPost, window, cx| {
+                        if this.media.is_none() {
+                            this.open_compose(None, window, cx);
+                        }
+                    }))
+                    .on_action(cx.listener(|this, _: &keys::Dismiss, _, cx| this.dismiss(cx)))
                     .flex_1()
                     .min_h_0()
                     .child(self.render_rail(cx))
@@ -760,6 +1115,8 @@ impl Render for TwittyApp {
             .when_some(overlay, |d, overlay| {
                 d.child(
                     div()
+                        .key_context(keys::OVERLAY)
+                        .on_action(cx.listener(|this, _: &keys::Dismiss, _, cx| this.dismiss(cx)))
                         .absolute()
                         .top_0()
                         .left_0()
@@ -1026,5 +1383,219 @@ mod tests {
         cx.run_until_parked();
         let last = app.read_with(cx, |app, _| app.deck().active().columns.last().cloned()).unwrap();
         assert_eq!(last.source.title(), format!("@{}", post.author.handle));
+    }
+
+    /// A mock whose feeds allow 30 requests per 15 minutes.
+    struct Limited(MockBackend);
+
+    impl Backend for Limited {
+        fn viewer(&self) -> twitty_model::BoxFuture<'_, Result<Profile, BackendError>> {
+            self.0.viewer()
+        }
+        fn feed<'a>(
+            &'a self,
+            source: &'a FeedSource,
+            page: twitty_model::PageRequest,
+        ) -> twitty_model::BoxFuture<'a, Result<twitty_model::FeedPage, BackendError>> {
+            self.0.feed(source, page)
+        }
+        fn thread<'a>(
+            &'a self,
+            id: &'a twitty_model::PostId,
+        ) -> twitty_model::BoxFuture<'a, Result<twitty_model::ThreadView, BackendError>> {
+            self.0.thread(id)
+        }
+        fn profile<'a>(
+            &'a self,
+            handle: &'a str,
+        ) -> twitty_model::BoxFuture<'a, Result<Profile, BackendError>> {
+            self.0.profile(handle)
+        }
+        fn act(
+            &self,
+            action: twitty_model::PostAction,
+        ) -> twitty_model::BoxFuture<'_, Result<(), BackendError>> {
+            self.0.act(action)
+        }
+        fn publish(
+            &self,
+            draft: twitty_model::Draft,
+        ) -> twitty_model::BoxFuture<'_, Result<twitty_model::Post, BackendError>> {
+            self.0.publish(draft)
+        }
+        fn rate_budget(&self, _: &FeedSource) -> Option<twitty_model::RateBudget> {
+            Some(twitty_model::RateBudget {
+                limit: 30,
+                window: std::time::Duration::from_secs(900),
+            })
+        }
+    }
+
+    #[gpui_kit::test]
+    fn polling_is_spread_within_the_budget(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let mut deck = DeckFile::default();
+        deck.add_column(FeedSource::Bookmarks);
+        deck.add_column(FeedSource::Bookmarks);
+        let options = AppOptions { poll: true, ..AppOptions::default() };
+        let backend: Arc<dyn Backend> = Arc::new(Limited(MockBackend::new()));
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(deck, Settings::default(), backend, options, window, cx)
+        });
+        let intervals = |cx: &mut VisualTestContext| {
+            app.read_with(cx, |app, cx| {
+                app.columns().map(|c| c.read(cx).poll_interval()).collect::<Vec<_>>()
+            })
+        };
+        let got = intervals(cx);
+        // 30 / 3 = 10 polls per window; the two Bookmarks columns share them.
+        assert_eq!(
+            got.iter().filter(|i| **i == Some(std::time::Duration::from_secs(180))).count(),
+            2
+        );
+        assert!(got.iter().all(Option::is_some));
+
+        app.update(cx, |app, cx| {
+            app.settings.polling = Some(false);
+            app.update_polling(cx);
+        });
+        assert!(intervals(cx).iter().all(Option::is_none), "polling can be turned off");
+    }
+
+    fn keyboard_app(cx: &mut TestAppContext) -> (Entity<TwittyApp>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            keys::bind(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(
+                DeckFile::default(),
+                Settings::default(),
+                backend,
+                AppOptions::default(),
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        // A frame gives the deck keyboard focus.
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        (app, cx)
+    }
+
+    fn selected(app: &Entity<TwittyApp>, cx: &mut VisualTestContext) -> Option<usize> {
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        column.read_with(cx, |c, _| c.model().selected())
+    }
+
+    #[gpui_kit::test]
+    fn j_k_and_arrows_move_the_selection_and_column(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        cx.simulate_keystrokes("j j j k");
+        assert_eq!(selected(&app, cx), Some(1));
+        cx.simulate_keystrokes("right");
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 1);
+        cx.simulate_keystrokes("j");
+        assert_eq!(selected(&app, cx), Some(0));
+        cx.simulate_keystrokes("left left left");
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "clamped");
+    }
+
+    #[gpui_kit::test]
+    fn l_likes_the_selected_post_and_enter_opens_it(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        cx.simulate_keystrokes("j l");
+        cx.run_until_parked();
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let post = column.read_with(cx, |c, _| c.model().selected_post().cloned()).unwrap();
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        assert!(hub.read_with(cx, |hub, _| hub.effective(&post).viewer.liked));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        let panel = app.read_with(cx, |app, _| app.thread_panel().cloned()).expect("thread open");
+        assert_eq!(panel.read_with(cx, |p, _| p.root().clone()), post.id);
+        cx.simulate_keystrokes("escape");
+        assert!(app.read_with(cx, |app, _| app.thread_panel().is_none()), "Esc closes the panel");
+    }
+
+    #[gpui_kit::test]
+    fn n_opens_compose_and_typing_there_is_not_a_shortcut(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        cx.simulate_keystrokes("n");
+        let compose = app.read_with(cx, |app, _| app.compose().cloned()).expect("compose open");
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        cx.simulate_keystrokes("j l n");
+        assert_eq!(selected(&app, cx), None, "keys went to the text field");
+        assert!(app.read_with(cx, |app, _| app.compose().is_some()));
+        drop(compose);
+    }
+
+    #[gpui_kit::test]
+    fn media_viewer_steps_and_closes(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let post = {
+            let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+            column.read_with(cx, |c, _| {
+                c.model()
+                    .items()
+                    .iter()
+                    .flat_map(|i| i.posts())
+                    .find(|p| p.media.len() >= 2)
+                    .cloned()
+                    .map(Arc::new)
+            })
+        }
+        .expect("the mock has a multi-image post");
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        let count = post.media.len();
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
+        cx.simulate_keystrokes("right");
+        assert_eq!(app.read_with(cx, |app, _| app.media_viewer().map(|(_, ix)| ix)), Some(1));
+        cx.simulate_keystrokes("left left");
+        assert_eq!(
+            app.read_with(cx, |app, _| app.media_viewer().map(|(_, ix)| ix)),
+            Some(count - 1),
+            "wraps around"
+        );
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "columns don't move");
+        cx.simulate_keystrokes("escape");
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()));
+    }
+
+    #[gpui_kit::test]
+    fn settings_change_theme_and_polling_and_are_saved(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            theme::init(theme::NAMES[0], cx);
+            cx.set_global(Runtime::inline());
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let options =
+            AppOptions { poll: true, settings_path: Some(path.clone()), ..AppOptions::default() };
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(DeckFile::default(), Settings::default(), backend, options, window, cx)
+        });
+        app.update(cx, |app, cx| app.open_settings(cx));
+        app.update_in(cx, |app, window, cx| app.set_theme("Light", window, cx));
+        app.update(cx, |app, cx| app.set_polling(false, cx));
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.theme_name()), "Light");
+        let polling = app.read_with(cx, |app, cx| {
+            app.columns().map(|c| c.read(cx).poll_interval()).collect::<Vec<_>>()
+        });
+        assert!(polling.iter().all(Option::is_none));
+        let saved = Settings::load(&path).unwrap();
+        assert_eq!((saved.theme.as_deref(), saved.polling), (Some("Light"), Some(false)));
+        cx.simulate_keystrokes("escape");
     }
 }

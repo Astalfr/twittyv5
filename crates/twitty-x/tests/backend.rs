@@ -322,6 +322,28 @@ async fn actions_post_their_mutation() {
 }
 
 #[tokio::test]
+async fn rate_budget_uses_the_limit_x_reported() {
+    let server = MockServer::start().await;
+    Mock::given(path_regex("/HomeTimeline$"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-rate-limit-limit", "500")
+                .insert_header("x-rate-limit-remaining", "499")
+                .insert_header("x-rate-limit-reset", "4102444800")
+                .set_body_json(fixture("home")),
+        )
+        .mount(&server)
+        .await;
+    let b = backend(&server);
+    let home = FeedSource::Home { mode: HomeMode::ForYou };
+    let assumed = b.rate_budget(&home).unwrap();
+    assert_eq!(assumed.limit, 50, "conservative before X answered");
+    b.feed(&home, PageRequest::First).await.unwrap();
+    let known = b.rate_budget(&home).unwrap();
+    assert_eq!((known.limit, known.window.as_secs()), (500, 900));
+}
+
+#[tokio::test]
 async fn already_done_actions_succeed() {
     for body in [
         json!({"errors": [{"code": 139, "message": "You have already favorited this status."}]}),

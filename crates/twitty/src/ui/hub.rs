@@ -24,6 +24,8 @@ pub enum Navigate {
     Reply(Arc<Post>),
     /// Add a column with an account's posts.
     Profile(Arc<Profile>),
+    /// Show a post's media in the viewer, starting at `index`.
+    Media { post: Arc<Post>, index: usize },
 }
 
 /// Owns the viewer's optimistic post state for the whole window.

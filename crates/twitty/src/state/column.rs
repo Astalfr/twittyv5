@@ -56,6 +56,8 @@ pub struct ColumnModel {
     loaded_once: bool,
     /// Rows prepended by `Newer` loads that the user has not scrolled up to yet.
     unseen: usize,
+    /// Row highlighted for keyboard actions.
+    selected: Option<usize>,
 }
 
 impl ColumnModel {
@@ -70,7 +72,30 @@ impl ColumnModel {
             status: Status::Idle,
             loaded_once: false,
             unseen: 0,
+            selected: None,
         }
+    }
+
+    /// The row highlighted for keyboard actions.
+    pub fn selected(&self) -> Option<usize> {
+        self.selected
+    }
+
+    /// Moves the selection by `delta` rows (clamped); from no selection, any
+    /// move selects the first row. Returns the new selection.
+    pub fn select(&mut self, delta: isize) -> Option<usize> {
+        let last = self.items.len().checked_sub(1)?;
+        self.selected = Some(match self.selected {
+            None => 0,
+            Some(ix) => ix.saturating_add_signed(delta).min(last),
+        });
+        self.selected
+    }
+
+    /// The first post of the selected row (a thread's first post, a
+    /// notification's target).
+    pub fn selected_post(&self) -> Option<&twitty_model::Post> {
+        self.items.get(self.selected?)?.posts().into_iter().next()
     }
 
     pub fn source(&self) -> &FeedSource {
@@ -171,6 +196,7 @@ impl ColumnModel {
                 self.newer = page.newer;
                 self.loaded_once = true;
                 self.unseen = 0;
+                self.selected = None;
                 ListChange::Reset { count: self.items.len() }
             }
             LoadKind::Older => {
@@ -196,6 +222,8 @@ impl ColumnModel {
                 }
                 let count = fresh.len();
                 self.unseen += count;
+                // Keep the same row selected when rows arrive above it.
+                self.selected = self.selected.map(|ix| ix + count);
                 self.items.splice(0..0, fresh);
                 ListChange::Splice { range: 0..0, count }
             }
@@ -344,6 +372,25 @@ mod tests {
         let empty = FeedPage { items: vec![], newer: None, older: Some(PageToken::new("more")) };
         assert_eq!(m.finish(LoadKind::Refresh, Ok(empty)), ListChange::Reset { count: 0 });
         assert!(m.loaded_once() && !m.has_older());
+    }
+
+    #[test]
+    fn selection_moves_clamps_and_follows_new_rows() {
+        let backend = MockBackend::new();
+        let mut m = ColumnModel::new(home());
+        assert_eq!(m.select(1), None, "nothing to select yet");
+        load(&mut m, &backend, LoadKind::Refresh);
+        assert_eq!(m.select(1), Some(0), "first move selects the top row");
+        assert_eq!(m.select(1), Some(1));
+        assert_eq!(m.select(-5), Some(0));
+        assert_eq!(m.select(1000), Some(MockBackend::PAGE_SIZE - 1));
+        let selected = m.selected_post().map(|p| p.id.clone());
+        backend.push_new(&home(), 2);
+        load(&mut m, &backend, LoadKind::Newer);
+        assert_eq!(m.selected(), Some(MockBackend::PAGE_SIZE + 1));
+        assert_eq!(m.selected_post().map(|p| p.id.clone()), selected, "same post");
+        load(&mut m, &backend, LoadKind::Refresh);
+        assert_eq!(m.selected(), None);
     }
 
     #[test]

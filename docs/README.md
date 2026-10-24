@@ -2,7 +2,7 @@
 
 These docs explain **how Twitty works**. They change with the code: any change to architecture, data flow, protocol handling, persisted formats or testing updates the matching page in the same commit.
 
-> Project status: **M0–M8 done**. Like, repost, bookmark, reply and post write to X (tested against a mock server; not yet exercised on a real account); clicking a post opens its conversation in a side panel. Sign in by pasting two cookies (kept in Windows Credential Manager); every column type loads from X (Home, Notifications, Search, User posts/replies/media/likes, Lists, Bookmarks, a post's conversation); columns are added from a dialog and arranged in several decks. Without a session it runs on demo data. Next: M9 (polish).
+> Project status: **M0–M9 done**. Polling is spread within X's rate limits; keyboard shortcuts, an image viewer and a settings page are in. Like, repost, bookmark, reply and post write to X (tested against a mock server; not yet exercised on a real account); clicking a post opens its conversation in a side panel. Sign in by pasting two cookies (kept in Windows Credential Manager); every column type loads from X (Home, Notifications, Search, User posts/replies/media/likes, Lists, Bookmarks, a post's conversation); columns are added from a dialog and arranged in several decks. Without a session it runs on demo data. Next: M10 (hardening).
 
 | Page | What it covers |
 |---|---|

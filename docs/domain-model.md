@@ -26,10 +26,11 @@ So Twitty has an **anti-corruption layer**:
 | `FeedPage` | `items` + `newer`/`older` page tokens |
 | `FeedSource` | What a column shows: `Home`, `Notifications`, `Search`, `List`, `User`, `Bookmarks`, `Thread`. It's **persisted**. |
 | `PostAction` | `Like`, `Unlike`, `Repost`, `Unrepost`, `Bookmark`, `Unbookmark`, … |
-| `Draft` | Text, reply target, quote target, media attachments |
+| `Draft` | Text, reply target, quote target |
+| `RateBudget` | `limit` requests per `window`, as the provider reports for a feed |
 | `BackendError` | `Unauthorized`, `RateLimited { reset_at }`, `NotFound`, `Upstream`, `Network`, `Decode` |
 
-The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`) is the only way the app reaches a network.
+The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`, and `rate_budget` with a `None` default) is the only way the app reaches a network.
 
 ## Translation rules (`twitty-x::translate`)
 
@@ -49,7 +50,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`) is
 
 Saved files:
 - `decks.json`: decks, columns, `FeedSource`, widths
-- `settings.json`: theme
+- `settings.json`: theme, `polling` (optional, added without a version bump; absent = on)
 - the keyring entry holding the session (`{schema_version, auth_token, ct0}`, see `twitty::account`)
 - the optional post cache
 

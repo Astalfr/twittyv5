@@ -8,6 +8,7 @@ pub mod deck;
 pub mod interactions;
 pub mod login;
 pub mod media_layout;
+pub mod poll;
 pub mod settings;
 pub mod sources;
 pub mod thread;

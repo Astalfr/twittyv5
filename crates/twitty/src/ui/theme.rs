@@ -7,7 +7,7 @@ use gpui_kit::{
 
 const THEMES: &str = include_str!("../../themes/x.json");
 
-/// Theme names, in the order the toggle cycles through them.
+/// Theme names, in the order the settings page lists them.
 pub const NAMES: [&str; 3] = ["Lights out", "Dim", "Light"];
 
 /// Registers the bundled themes and activates `name`.
@@ -33,12 +33,6 @@ pub fn apply(name: &str, window: Option<&mut Window>, cx: &mut App) {
     }
 }
 
-/// The theme after `current` in [`NAMES`].
-pub fn next(current: &str) -> &'static str {
-    let ix = NAMES.iter().position(|n| *n == current).map_or(0, |i| (i + 1) % NAMES.len());
-    NAMES[ix]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,13 +47,6 @@ mod tests {
             .map(|t| t["name"].as_str().unwrap())
             .collect();
         assert_eq!(names, NAMES);
-    }
-
-    #[test]
-    fn next_cycles() {
-        assert_eq!(next("Lights out"), "Dim");
-        assert_eq!(next("Light"), "Lights out");
-        assert_eq!(next("unknown"), "Lights out");
     }
 
     #[gpui_kit::test]

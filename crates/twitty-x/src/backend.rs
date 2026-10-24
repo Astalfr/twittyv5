@@ -5,10 +5,15 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use twitty_model::{
     Backend, BackendError, BoxFuture, Draft, FeedPage, FeedSource, PageRequest, Post, PostAction,
-    PostId, Profile, ThreadView,
+    PostId, Profile, RateBudget, ThreadView,
 };
 
 use crate::{XClient, XError, requests, translate};
+
+/// X's rate-limit window.
+const WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// Assumed limit before X reported one (the lowest seen for timelines is 50).
+const ASSUMED_LIMIT: u32 = 50;
 
 /// X error codes meaning the action already happened ("already favorited",
 /// "already retweeted"). The request is idempotent from the UI's view.
@@ -102,6 +107,13 @@ impl Backend for XBackend {
                 Err(e) => Err(e.into()),
             }
         })
+    }
+
+    fn rate_budget(&self, source: &FeedSource) -> Option<RateBudget> {
+        let (operation, _) = requests::feed(source, &PageRequest::First);
+        let limit =
+            self.client.transport().limits().get(operation).map_or(ASSUMED_LIMIT, |l| l.limit);
+        Some(RateBudget { limit, window: WINDOW })
     }
 
     fn publish(&self, draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>> {

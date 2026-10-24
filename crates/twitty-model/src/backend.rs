@@ -52,6 +52,13 @@ impl PostAction {
     }
 }
 
+/// How many requests the provider allows for a feed per time window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateBudget {
+    pub limit: u32,
+    pub window: std::time::Duration,
+}
+
 /// A post being composed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Draft {
@@ -86,4 +93,10 @@ pub trait Backend: Send + Sync + 'static {
 
     /// Publishes a new post and returns it.
     fn publish(&self, draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>>;
+
+    /// The request budget for loading `source`, if the provider has one.
+    /// The app spaces out polling with it. `None` means unlimited.
+    fn rate_budget(&self, _source: &FeedSource) -> Option<RateBudget> {
+        None
+    }
 }

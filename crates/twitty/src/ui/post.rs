@@ -247,7 +247,8 @@ fn post_row(
         content = content.child(rich_text(("body", key), &post.body, theme.link, cx));
     }
     if !post.media.is_empty() {
-        content = content.child(media_grid(("media", key), &post.media, width, post, &theme));
+        content =
+            content.child(media_grid(("media", key), &post.media, width, post, &rcx.hub, &theme));
     }
     if let Some(embed) = &post.embed {
         content = content.child(render_embed(("embed", key), embed, width, &rcx.hub, window, cx));
@@ -341,13 +342,14 @@ fn media_grid(
     media: &[Media],
     width: f32,
     post: &Post,
+    hub: &Entity<InteractionsHub>,
     theme: &gpui_kit::component::Theme,
 ) -> impl IntoElement {
+    let post = Arc::new(post.clone());
     // Tiles are positioned inside the 1px border, so lay them out on the inner width.
     let inner = (width - 2.0 * BORDER).max(0.0);
     let grid =
         media_layout::layout(media.len(), media.first().and_then(|m| m.preview().aspect()), inner);
-    let url = post.url.to_string();
     div()
         .id(id)
         .relative()
@@ -359,19 +361,23 @@ fn media_grid(
         .border_1()
         .border_color(theme.border)
         .bg(theme.muted)
-        .cursor_pointer()
-        .on_click(move |_, _, cx| {
-            cx.stop_propagation();
-            cx.open_url(&url);
-        })
-        .children(grid.tiles.iter().zip(media).map(|(tile, m)| {
+        .children(grid.tiles.iter().zip(media).enumerate().map(|(index, (tile, m))| {
+            let hub = hub.clone();
+            let post = Arc::clone(&post);
             let overlay = match m {
                 Media::Video { duration, .. } => Some(video_badge("▶", duration.map(fmt_duration))),
                 Media::Gif { .. } => Some(video_badge("GIF", None)),
                 Media::Image { .. } => None,
             };
             div()
+                .id(("tile", index))
                 .absolute()
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let to = Navigate::Media { post: Arc::clone(&post), index };
+                    hub.update(cx, |hub, cx| hub.navigate(to, cx));
+                })
                 .left(px(tile.x))
                 .top(px(tile.y))
                 .w(px(tile.w))
@@ -630,7 +636,8 @@ fn action_bar(
         h_flex()
             .id((name, key))
             .gap_1()
-            .min_w(px(48.))
+            // Six actions must fit the narrowest column (310px).
+            .min_w(px(36.))
             .text_sm()
             .text_color(color)
             .when(on != Click::Nothing, |d| {

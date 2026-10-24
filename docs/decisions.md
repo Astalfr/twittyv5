@@ -4,6 +4,14 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Polling may use a third of a feed's budget (M9)
+- **Decision**: `state::poll` spaces polling so all columns of one feed type together use at most a third of its rate limit (min 30s, max 30 min). `XBackend` reports X's observed limit and assumes 50 per 15 min before it knows.
+- **Why**: Scrolling, refreshes and first loads need the rest; X's limits differ a lot by operation (50 to 500 per 15 min), and several identical columns used to poll every 30s each.
+
+### 2026-10-24: Shortcuts only in the `Deck` key context (M9)
+- **Decision**: Single-letter shortcuts are bound in the `Deck` context; dialogs render outside that element.
+- **Why**: Otherwise typing "like" in the compose box would like the selected post.
+
 ### 2026-10-24: Writes are tested against a mock server only (M8)
 - **Decision**: Likes, reposts, bookmarks and posts were implemented and tested with `wiremock`, but never sent to X during development.
 - **Why**: They change a real account and can't be fully undone (a post is seen, notifications are sent). The user makes the first real write.

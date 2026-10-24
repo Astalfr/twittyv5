@@ -16,6 +16,7 @@ use crate::{
     state::{
         column::{ColumnModel, ListChange, LoadKind, Status},
         deck::{ColumnId, ColumnWidth},
+        poll,
         sources::{self, Tab},
     },
     ui::{
@@ -24,8 +25,6 @@ use crate::{
     },
 };
 
-/// How often a visible column checks for newer posts.
-pub const POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Start loading older rows when this close to the bottom.
 const PREFETCH_ROWS: usize = 5;
 
@@ -47,7 +46,12 @@ pub struct ColumnView {
     backend: Arc<dyn Backend>,
     hub: Entity<InteractionsHub>,
     at_top: bool,
+    /// Whether keyboard shortcuts act on this column.
+    active: bool,
     load_task: Option<Task<()>>,
+    /// How often to check for newer posts; `None` pauses polling. Set by the
+    /// app from the provider's rate limits (`state::poll`).
+    poll_interval: Option<Duration>,
     _poll_task: Option<Task<()>>,
     _hub_sub: Subscription,
 }
@@ -88,7 +92,13 @@ impl ColumnView {
         let poll_task = poll.then(|| {
             cx.spawn(async move |this, cx| {
                 loop {
-                    cx.background_executor().timer(POLL_INTERVAL).await;
+                    let Ok(every) = this.read_with(cx, |this, _| this.poll_interval) else {
+                        break;
+                    };
+                    cx.background_executor().timer(every.unwrap_or(poll::MIN_INTERVAL)).await;
+                    if every.is_none() {
+                        continue;
+                    }
                     let alive = this.update(cx, |this, cx| this.load(LoadKind::Newer, cx));
                     if alive.is_err() {
                         break;
@@ -104,7 +114,9 @@ impl ColumnView {
             backend,
             hub,
             at_top: true,
+            active: false,
             load_task: None,
+            poll_interval: poll.then_some(poll::MIN_INTERVAL),
             _poll_task: poll_task,
             _hub_sub: hub_sub,
         };
@@ -118,6 +130,15 @@ impl ColumnView {
 
     pub fn model(&self) -> &ColumnModel {
         &self.model
+    }
+
+    pub fn poll_interval(&self) -> Option<Duration> {
+        self.poll_interval
+    }
+
+    /// Changes how often the column polls (`None` pauses it).
+    pub fn set_poll_interval(&mut self, every: Option<Duration>) {
+        self.poll_interval = every;
     }
 
     pub fn set_width(&mut self, width: ColumnWidth, cx: &mut Context<Self>) {
@@ -209,9 +230,33 @@ impl ColumnView {
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let rcx = RowCtx { ix, column_width: self.width.px(), hub: self.hub.clone() };
         match self.model.items().get(ix) {
+            Some(item) if self.active && self.model.selected() == Some(ix) => {
+                let bg = cx.theme().list_active;
+                div().bg(bg).child(render_item(item, &rcx, window, cx)).into_any_element()
+            }
             Some(item) => render_item(item, &rcx, window, cx),
             None => self.render_footer(cx),
         }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Marks the column as the target of keyboard shortcuts.
+    pub fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if self.active != active {
+            self.active = active;
+            cx.notify();
+        }
+    }
+
+    /// Moves the keyboard selection and scrolls it into view.
+    pub fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if let Some(ix) = self.model.select(delta) {
+            self.list.scroll_to_reveal_item(ix);
+        }
+        cx.notify();
     }
 
     fn render_footer(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -261,6 +306,7 @@ impl ColumnView {
             .border_color(theme.border)
             .child(
                 h_flex()
+                    .when(self.active, |d| d.bg(theme.list_hover))
                     .h(px(53.))
                     .px_4()
                     .gap_2()

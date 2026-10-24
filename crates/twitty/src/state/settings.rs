@@ -20,11 +20,14 @@ pub struct Settings {
     /// Theme name; unknown names fall back to the default theme.
     #[serde(default)]
     pub theme: Option<String>,
+    /// Whether columns check for new posts on their own (default on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polling: Option<bool>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { schema_version: SCHEMA_VERSION, theme: None }
+        Self { schema_version: SCHEMA_VERSION, theme: None, polling: None }
     }
 }
 
@@ -74,6 +77,10 @@ impl Settings {
         Ok(())
     }
 
+    pub fn polling_enabled(&self) -> bool {
+        self.polling.unwrap_or(true)
+    }
+
     /// The saved theme if it is one of `known`, else the first of `known`.
     pub fn theme_or_default<'a>(&self, known: &[&'a str]) -> Option<&'a str> {
         let saved = self.theme.as_deref();
@@ -98,6 +105,7 @@ mod tests {
         let s = Settings::from_json(include_str!("../../tests/golden/settings_v1.json")).unwrap();
         assert_eq!(s.theme.as_deref(), Some("Dim"));
         assert_eq!(s.theme_or_default(&KNOWN), Some("Dim"));
+        assert!(s.polling_enabled(), "v1 files predate the setting: polling on");
     }
 
     #[test]

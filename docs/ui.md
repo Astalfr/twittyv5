@@ -13,7 +13,7 @@
 - **Async work**: `cx.spawn(async move |this: WeakEntity<Self>, cx| { let r = runtime_handle.await; this.update(cx, |view, cx| { ...; cx.notify() }) })`. Store the returned `Task` in the view, so dropping the view cancels the work.
 - **Lists**: each column owns a `ListState` (`gpui::list`), which measures rows of different heights and only renders what's visible. When items are added or removed, use `ListState::splice`. To keep the reading position when newer posts are inserted at the top, adjust the scroll offset by the new items' height. Use `ListState::reset` only on a full reload.
 - **Images**: `img(url)` with a fixed size from `ImageRef.size` hints, so rows don't jump when images load. Show a placeholder until the image is ready.
-- **Actions/keybindings**: declare them with `actions!(twitty, [...])` and bind them in `main.rs`, with key contexts per view (`Deck`, `Column`, `Composer`).
+- **Actions/keybindings**: declared in `ui/keys.rs` with `actions!(twitty, [...])` and bound by `keys::bind` (called from `main.rs` and keyboard tests). Deck shortcuts live in the `Deck` key context on the rail/columns/thread container; dialogs are rendered outside it (with an `Overlay` context that only binds Esc), so typing in a text field never triggers a shortcut. When no dialog is open, `TwittyApp::render` gives focus back to the deck.
 
 ## X Pro look (spec)
 
@@ -35,7 +35,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 
 | Element | Spec |
 |---|---|
-| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: logo, **+ Add column**. Bottom: account button, theme switch, Compose (accent). |
+| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: logo, **+ Add column**. Bottom: account button, settings, Compose (accent). |
 | Deck bar | 36px strip above the columns: one tab per deck (active one underlined, with × when more than one deck exists) and **+** for a new empty deck ("Deck N"). Switching rebuilds the columns of that deck; the hub (likes etc.) is kept. |
 | Add column | Overlay dialog: a button per kind (Home, Notifications, Search, User, List, Post, Bookmarks). Kinds without input are added at once; others take a query, `@handle`/profile link, list link/id or post link/id (parsed in `state::add_column`). Handles are resolved with `Backend::profile` ("Looking up…"), unknown ones show an error. |
 | Column tabs | Under the header, from `state::sources::tabs`: Home For you/Following · Notifications All/Verified/Mentions · Search Top/Latest/Media · User Posts/Replies/Media/Likes. A tab switches the column's source and is saved in the deck. |
@@ -45,7 +45,10 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 | Column header | 53px tall: icon, title (bold), subtitle (gray, `@handle` / query), ⚙ popover (width, Top/Latest, media size, clear, remove) |
 | Post cell | 12px padding · 40px round avatar · **name** · `@handle · 2m` gray · ⋯ menu · body 15px · media grid (1–4, 16px radius, 2px gap) · quote card (1px border, 16px radius, smaller avatar) · action bar (gray, active colours: like `pink`, repost `green`) |
 | Sign-in | Demo banner with **Sign in** · rail account button (log-in icon in demo, account icon when signed in) · centred overlay dialog with how-to steps, masked `auth_token`/`ct0` inputs, Enter submits, "Checking…" while `viewer()` runs, error text from `LoginForm` · account panel: `@handle`, session source, **Sign out** for keyring sessions |
-| Feedback | "↑ N new posts" pill when scrolled down · skeleton rows while loading · inline error with Retry (a full refresh after a session error, see `ColumnModel::retry_kind`) · footer row: spinner, Retry, "You're all caught up", or "Nothing to show here yet" for an empty feed · rate-limit countdown |
+| Feedback | "↑ N new posts" pill when scrolled down · skeleton rows while loading · inline error with Retry (a full refresh after a session error, see `ColumnModel::retry_kind`) · footer row: spinner, Retry, "You're all caught up", or "Nothing to show here yet" for an empty feed · a rate-limited load shows "rate limited until <time>" and the column waits for that time |
+| Image viewer | Clicking a media tile opens it full-window (`ObjectFit::Contain`) with `n / count · @handle`, ‹ › (and ←/→) for multi-image posts (wrapping), alt text, and **Play on x.com** for videos and GIFs. Esc or × closes. |
+| Settings | Rail ⚙ opens a page: theme (Lights out / Dim / Light), "Check for new posts automatically", the keyboard shortcuts, and where data is saved. Saved to `settings.json` right away. |
+| Active column | The column keyboard shortcuts act on has a tinted header; its selected row has the `list_active` background. |
 | Thread | Clicking a post (or a quoted post) opens `ThreadPanel`, docked on the right of the deck (440px): ancestors and the focused post as one connected thread, then replies (`state::thread::rows`). Clicking a post inside it switches the panel; × closes it. A reply published from compose reloads the panel showing its parent. |
 | Action bar | Reply (opens compose) · Repost · Like · Views (no action) · Bookmark · Share (opens the post on x.com). Toggles are optimistic and roll back on error. Clicks on links, media, cards and actions stop propagation so they don't also open the thread. |
 | Compose | Overlay dialog from the rail's pen button or Reply: auto-growing textarea, "Replying to @x" with the parent's text, `remaining / 280` counter using X's weighted length (`state::compose`: links 23, CJK/emoji 2; warning under 20, danger below 0), Post disabled when empty or too long, X's error shown on failure with the text kept. |
@@ -71,16 +74,20 @@ Font: Segoe UI / system UI. Chirp, X's own font, isn't bundled.
 
 ## Polling
 
-Each visible column polls for `Newer` posts. The base interval is 60s for Home and 30s for Notifications. It grows when the operation's rate-limit budget is low, and stops for hidden or minimised windows.
+Each column polls for `Newer` posts at an interval from `state::poll`:
+- polling may use a third of a feed's budget (`Backend::rate_budget`, e.g. X's 15-minute limit for the operation), shared by all columns of the same feed type (`poll::bucket`);
+- never more often than every 30s, never less often than every 30 min; conversations aren't polled;
+- `TwittyApp::update_polling` recomputes intervals when the deck changes and every minute (X reports its real limits with the first responses; before that `XBackend` assumes a limit of 50);
+- the settings page can turn polling off; a rate-limited or unauthorised column also holds off (`ColumnModel::begin`).
 
-## Keybindings (planned)
+## Keyboard shortcuts
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Next / previous post in the focused column |
-| `h` / `l` (or ←/→) | Previous / next column |
-| `Enter` | Open thread |
-| `r` | Reply · `t` repost · `f` like · `b` bookmark |
+| `j` / `k` (or ↓/↑) | Next / previous post in the active column |
+| ← / → | Previous / next column (in the image viewer: previous / next image) |
+| `Enter` | Open the conversation |
+| `l` · `t` · `b` | Like · repost · bookmark |
+| `r` | Reply |
 | `n` | New post |
-| `Esc` | Close sheet / dialog |
-| `.` | Load new posts / scroll to top |
+| `Esc` | Close the image viewer, a dialog, or the thread panel |
