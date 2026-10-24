@@ -293,6 +293,39 @@ async fn profile_looks_up_by_handle() {
     assert_eq!(sent_variables(&server).await, json!({"screen_name": "test_viewer"}));
 }
 
+#[tokio::test]
+async fn people_search_asks_for_the_people_tab_and_lists_accounts() {
+    let server = MockServer::start().await;
+    serve(&server, "SearchTimeline", fixture("search-people")).await;
+    let b = backend(&server);
+    let users = b.search_users("rust").await.unwrap();
+    assert_eq!(users.len(), 20, "same accounts as the translate snapshot");
+    let vars = sent_variables(&server).await;
+    assert_eq!(vars["rawQuery"], "rust");
+    assert_eq!(vars["product"], "People");
+    let health = b.health();
+    let people = health.iter().find(|h| h.name == "SearchTimeline (People)").unwrap();
+    assert_eq!((people.ok, people.rows, people.unsupported), (1, 20, 0));
+    assert!(health.iter().all(|h| h.name != "SearchTimeline"), "apart from search columns");
+}
+
+#[tokio::test]
+async fn an_unreadable_account_is_skipped_and_counted() {
+    let server = MockServer::start().await;
+    let mut body = fixture("search-people");
+    let instructions =
+        &mut body["data"]["search_by_raw_query"]["search_timeline"]["timeline"]["instructions"];
+    let entries =
+        instructions.as_array_mut().unwrap().iter_mut().find_map(|i| i.get_mut("entries")).unwrap();
+    entries[0]["content"]["itemContent"]["user_results"]["result"] =
+        json!({"__typename": "UserUnavailable"});
+    serve(&server, "SearchTimeline", body).await;
+    let b = backend(&server);
+    assert_eq!(b.search_users("rust").await.unwrap().len(), 19);
+    let people = b.health().into_iter().find(|h| h.name == "SearchTimeline (People)").unwrap();
+    assert_eq!((people.rows, people.unsupported, people.warnings), (20, 1, 1));
+}
+
 /// The body of the only request, which must be a POST.
 async fn sent_body(server: &MockServer) -> Value {
     let requests = server.received_requests().await.unwrap();

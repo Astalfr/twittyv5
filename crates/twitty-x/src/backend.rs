@@ -22,6 +22,10 @@ const ALREADY_DONE: [i64; 2] = [139, 327];
 /// X's code for "you've already requested to follow" (a protected account).
 const ALREADY_REQUESTED: i64 = 160;
 
+/// Health label of account searches, kept apart from the search columns'
+/// `SearchTimeline` counters (both share X's rate limit).
+const PEOPLE_SEARCH: &str = "SearchTimeline (People)";
+
 /// X as a [`Backend`]. Cheap to clone; clones share the client.
 #[derive(Debug, Clone)]
 pub struct XBackend {
@@ -136,6 +140,32 @@ impl Backend for XBackend {
             }
             .await;
             self.track("UserByScreenName", result)
+        })
+    }
+
+    fn search_users<'a>(
+        &'a self,
+        query: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<Profile>, BackendError>> {
+        Box::pin(async move {
+            let variables = requests::search_users_variables(query);
+            match self.client.graphql("SearchTimeline", variables).await {
+                Ok(body) => {
+                    let translated = translate::users(&body);
+                    let unreadable = translated.warnings.len();
+                    self.health.rows(
+                        PEOPLE_SEARCH,
+                        translated.users.len() + unreadable,
+                        unreadable,
+                        &translated.warnings,
+                    );
+                    Ok(translated.users)
+                }
+                Err(e) => {
+                    self.health.error(PEOPLE_SEARCH, &e);
+                    Err(e.into())
+                }
+            }
         })
     }
 

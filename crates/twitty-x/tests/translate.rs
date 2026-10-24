@@ -10,7 +10,7 @@
 use std::fmt::Write as _;
 
 use twitty_model::{Embed, FeedItem, FeedPage, FollowAction, Media, Post, PostOrGone, SpanKind};
-use twitty_x::translate::{Translated, feed_page, follow_status};
+use twitty_x::translate::{Translated, feed_page, follow_status, users};
 
 const FIXTURES: &[&str] = &[
     "home",
@@ -300,4 +300,29 @@ fn follow_replies() {
         }
     }
     insta::assert_snapshot!("follow-replies", out);
+}
+
+/// The "People" tab of `SearchTimeline`: accounts, not posts.
+#[test]
+fn people_search_lists_accounts() {
+    let path = format!("{}/tests/fixtures/search-people.json", env!("CARGO_MANIFEST_DIR"));
+    let body = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let t = users(&body);
+    assert!(t.warnings.is_empty(), "{:#?}", t.warnings);
+    assert_eq!(t.users.len(), 20);
+    assert!(feed_page(&body).page.items.is_empty(), "accounts are not feed rows");
+    let mut out = String::new();
+    for p in &t.users {
+        let _ = writeln!(
+            out,
+            "{} @{} \"{}\" {:?} followers={} avatar={}",
+            p.id,
+            p.handle,
+            short(&p.display_name, 30),
+            p.badges.verified,
+            p.counts.followers,
+            p.avatar.is_some()
+        );
+    }
+    insta::assert_snapshot!("search-people", out);
 }

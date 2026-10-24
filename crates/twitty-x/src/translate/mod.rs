@@ -107,6 +107,38 @@ pub fn viewer(root: &Value) -> Option<Profile> {
     user::profile(at(root, &["data", "viewer", "user_results", "result"])?)
 }
 
+/// Result of translating a list of accounts.
+#[derive(Debug)]
+pub struct TranslatedUsers {
+    pub users: Vec<Profile>,
+    /// Entries that could not be read as an account, with reasons.
+    pub warnings: Vec<String>,
+}
+
+/// The accounts of a `SearchTimeline` "People" response, in X's order. An
+/// entry that isn't a readable account is skipped with a warning.
+pub fn users(root: &Value) -> TranslatedUsers {
+    let mut ctx = Ctx::default();
+    let mut users = Vec::new();
+    for entry in wire::timeline(root) {
+        let Entry::Item { id, content } = entry else { continue };
+        match str_at(content, &["itemType"]) {
+            Some("TimelineUser") => {}
+            // Prompts, spelling suggestions…: known, just not accounts.
+            Some(t) if SKIPPED_ITEMS.contains(&t) => continue,
+            t => {
+                ctx.warn(format!("{id}: not an account ({t:?})"));
+                continue;
+            }
+        }
+        match at(content, &["user_results", "result"]).and_then(user::profile) {
+            Some(profile) => users.push(profile),
+            None => ctx.warn(format!("{id}: unreadable account")),
+        }
+    }
+    TranslatedUsers { users, warnings: ctx.warnings }
+}
+
 /// The profile from a `UserByScreenName` response.
 pub fn user(root: &Value) -> Option<Profile> {
     user::profile(at(root, &["data", "user", "result"])?)

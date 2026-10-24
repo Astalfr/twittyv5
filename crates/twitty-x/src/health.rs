@@ -28,9 +28,15 @@ impl Health {
     pub(crate) fn page(&self, name: &str, items: &[FeedItem], warnings: &[String]) {
         let unsupported =
             items.iter().filter(|i| matches!(i, FeedItem::Unsupported { .. })).count();
+        self.rows(name, items.len(), unsupported, warnings);
+    }
+
+    /// A successful response with `rows` rows, `unsupported` of them
+    /// unreadable, and translation `warnings`.
+    pub(crate) fn rows(&self, name: &str, rows: usize, unsupported: usize, warnings: &[String]) {
         self.update(name, |h| {
             h.ok += 1;
-            h.rows += items.len() as u64;
+            h.rows += rows as u64;
             h.unsupported += unsupported as u64;
             h.warnings += warnings.len() as u64;
             if let Some(last) = warnings.last() {

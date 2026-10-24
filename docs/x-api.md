@@ -90,6 +90,8 @@ A session file is `{"auth_token": "…", "ct0": "…"}`. Unusable sources are lo
 | `User { tab: Likes }` | `Likes` | X only shows the signed-in account's likes; other accounts come back empty |
 | `List { id }` | `ListLatestTweetsTimeline` | |
 | `Bookmarks` | `Bookmarks` | |
+
+`Backend::search_users` (the **Search people** dialog) calls `SearchTimeline` (POST) with `product: "People"`. The response is a timeline of `TimelineUser` items whose `user_results.result` has the same shape as `UserByScreenName`, so `translate::users` reuses the profile translation. An entry that isn't a readable account is skipped with a warning. Its health counters are kept as `SearchTimeline (People)`, apart from the search columns, but it spends the same `SearchTimeline` rate budget.
 | `Thread { root }` | `TweetDetail` | |
 
 `PageRequest::Older` sends the bottom cursor and `Newer` the top cursor, both as `cursor`. A page with no rows ends the feed even if X sends a cursor, so scrolling can't loop on empty pages.
@@ -281,6 +283,7 @@ Variables that worked live (2026-10-24):
 | `UserByScreenName` | `{"screen_name":"NASA"}` |
 | `UserTweets` | `{"userId":"…","count":40,"includePromotedContent":true,"withQuickPromoteEligibilityTweetFields":true,"withVoice":true}` |
 | `SearchTimeline` (POST) | `{"rawQuery":"rust lang:en","count":20,"querySource":"typed_query","product":"Top"}` (`Latest`, `Top`, `Media`) |
+| `SearchTimeline` (POST), accounts | `{"rawQuery":"rust","count":20,"querySource":"typed_query","product":"People"}` |
 | `TweetDetail` | `{"focalTweetId":"…","with_rux_injections":false,"rankingMode":"Relevance","includePromotedContent":true,"withCommunity":true,"withQuickPromoteEligibilityTweetFields":true,"withBirdwatchNotes":true,"withVoice":true}` |
 | `Bookmarks` | `{"count":20,"includePromotedContent":true}` |
 | `NotificationsTimeline` | `{"timeline_type":"All","count":20}` |

@@ -226,3 +226,8 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: `ui::title_bar` is a copy of GPUI Kit's `TitleBar` (drag area, Windows caption buttons, Linux/macOS move and double-click) with a 39px bar and 54px-wide window buttons. `main.rs` still uses `TitleBar::window_options()`.
 - **Why**: GPUI Kit's height (34px) and button width (34px) are private constants, so they can't be styled.
 - **Consequences**: Fixes to GPUI Kit's title bar don't reach ours; compare with `gpui-component`'s `title_bar.rs` when upgrading GPUI Kit.
+
+### 2026-10-24: People search through `SearchTimeline`, debounced
+- **Decision**: The rail's **Search people** dialog uses `SearchTimeline` with `product: "People"`, not the v1.1 `search/typeahead.json` endpoint. It has no search button: the search follows the input once typing pauses for 300ms.
+- **Why**: The People tab returns full GraphQL user objects (counts, banner, relationship), the same shape as `UserByScreenName`, so the existing profile translation applies and a result opens straight in the profile sheet without a second lookup. Typeahead returns v1.1 user objects that would need their own translator.
+- **Consequences**: Each settled query spends the `SearchTimeline` budget (about 50 per 15 minutes) shared with search columns. The debounce and skipping a repeated query keep that to about one request per word typed, but long typing sessions can still run the budget down. Only the first page (20 accounts) is shown.

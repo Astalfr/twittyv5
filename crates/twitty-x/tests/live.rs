@@ -71,6 +71,17 @@ async fn home_timeline_returns_instructions() {
 }
 
 #[tokio::test]
+#[ignore = "calls the real X API; needs TWITTY_LIVE=1 and a session"]
+async fn people_search_finds_accounts() {
+    let backend = twitty_x::XBackend::new(Arc::new(live_client()));
+    let users = twitty_model::Backend::search_users(&backend, "nasa").await.unwrap();
+    assert!(!users.is_empty(), "no account found for \"nasa\"");
+    let unreadable: u64 =
+        twitty_model::Backend::health(&backend).iter().map(|h| h.unsupported + h.warnings).sum();
+    assert_eq!(unreadable, 0, "{:#?}", twitty_model::Backend::health(&backend));
+}
+
+#[tokio::test]
 #[ignore = "downloads x.com's public bundles; needs TWITTY_LIVE=1"]
 async fn discovery_logged_out_finds_operations() {
     assert_eq!(std::env::var("TWITTY_LIVE").as_deref(), Ok("1"), "set TWITTY_LIVE=1");

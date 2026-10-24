@@ -471,6 +471,26 @@ impl Backend for MockBackend {
         })
     }
 
+    fn search_users<'a>(
+        &'a self,
+        query: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<Profile>, BackendError>> {
+        Box::pin(async move {
+            self.take_failure()?;
+            let query = query.to_lowercase();
+            Ok(self
+                .lock()
+                .authors
+                .iter()
+                .filter(|a| {
+                    a.handle.to_lowercase().contains(&query)
+                        || a.display_name.to_lowercase().contains(&query)
+                })
+                .map(|a| a.as_ref().clone())
+                .collect())
+        })
+    }
+
     fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>> {
         Box::pin(async move {
             self.take_failure()?;
@@ -750,6 +770,17 @@ mod tests {
         assert!(!media.is_empty());
         assert!(media.iter().all(|i| matches!(i, FeedItem::Post(p)
             if p.author.id == user.id && !p.media.is_empty())));
+    }
+
+    #[test]
+    fn user_search_matches_handles_and_names_ignoring_case() {
+        let b = MockBackend::new();
+        let handles = |q| -> Vec<String> {
+            block_on(b.search_users(q)).unwrap().iter().map(|p| p.handle.to_string()).collect()
+        };
+        assert_eq!(handles("ADA"), ["ada"]);
+        assert_eq!(handles("hopper"), ["grace"]);
+        assert!(handles("nobody here").is_empty());
     }
 
     #[test]

@@ -127,6 +127,13 @@ pub trait Backend: Send + Sync + 'static {
     /// A profile by handle (without `@`).
     fn profile<'a>(&'a self, handle: &'a str) -> BoxFuture<'a, Result<Profile, BackendError>>;
 
+    /// Accounts matching `query` (names, handles, bios), best match first.
+    /// One page only; an empty list means nothing matched.
+    fn search_users<'a>(
+        &'a self,
+        query: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<Profile>, BackendError>>;
+
     /// Applies a viewer action to a post.
     fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>>;
 

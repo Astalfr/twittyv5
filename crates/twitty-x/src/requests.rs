@@ -177,6 +177,16 @@ pub(crate) fn create_tweet(draft: &Draft) -> Value {
     v
 }
 
+/// Variables of `SearchTimeline` for its "People" tab: accounts, not posts.
+pub(crate) fn search_users_variables(query: &str) -> Value {
+    json!({
+        "rawQuery": query,
+        "count": PAGE_SIZE,
+        "querySource": "typed_query",
+        "product": "People",
+    })
+}
+
 /// Variables of `UserByScreenName`.
 pub(crate) fn user_by_screen_name_variables(handle: &str) -> Value {
     json!({"screen_name": handle.trim_start_matches('@')})

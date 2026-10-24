@@ -42,6 +42,7 @@ use crate::{
         theme,
         thread::{CloseThread, ThreadPanel},
         title_bar, toasts as toast_view,
+        user_search::{UserSearchEvent, UserSearchView},
     },
 };
 
@@ -74,7 +75,7 @@ struct Leaving<T> {
 /// An overlay that just closed (see [`Leaving`]).
 enum LeavingOverlay {
     Media(Arc<twitty_model::Post>, usize),
-    /// A dialog view: sign-in, add column, column settings, compose.
+    /// A dialog view: sign-in, add column, column settings, compose, people search.
     View(AnyView),
     Account,
     Settings,
@@ -135,6 +136,7 @@ pub struct TwittyApp {
     add_column: Option<Entity<AddColumnView>>,
     column_settings: Option<Entity<ColumnSettingsView>>,
     compose: Option<Entity<ComposeView>>,
+    user_search: Option<Entity<UserSearchView>>,
     /// The side sheet: a conversation or a profile.
     sheet: Option<Sheet>,
     /// The lookup of a mentioned account, before its profile opens.
@@ -167,6 +169,7 @@ pub struct TwittyApp {
     _add_sub: Option<Subscription>,
     _column_settings_sub: Option<Subscription>,
     _compose_sub: Option<Subscription>,
+    _user_search_sub: Option<Subscription>,
     _sheet_sub: Option<Subscription>,
     _hub_subs: Vec<Subscription>,
     /// Messages at the bottom of the window, and the timer that hides them.
@@ -211,6 +214,7 @@ impl TwittyApp {
             add_column: None,
             column_settings: None,
             compose: None,
+            user_search: None,
             sheet: None,
             mention_lookup: None,
             account_panel: false,
@@ -231,6 +235,7 @@ impl TwittyApp {
             _add_sub: None,
             _column_settings_sub: None,
             _compose_sub: None,
+            _user_search_sub: None,
             _sheet_sub: None,
             _hub_subs: Vec::new(),
             toasts: Toasts::default(),
@@ -444,6 +449,7 @@ impl TwittyApp {
             || self.add_column.is_some()
             || self.column_settings.is_some()
             || self.compose.is_some()
+            || self.user_search.is_some()
             || self.account_panel
             || self.settings_panel
     }
@@ -907,6 +913,8 @@ impl TwittyApp {
             Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.compose {
             Some(LeavingOverlay::View(view.clone().into()))
+        } else if let Some(view) = &self.user_search {
+            Some(LeavingOverlay::View(view.clone().into()))
         } else if self.account_panel {
             Some(LeavingOverlay::Account)
         } else if self.settings_panel {
@@ -929,6 +937,8 @@ impl TwittyApp {
         self._column_settings_sub = None;
         self.compose = None;
         self._compose_sub = None;
+        self.user_search = None;
+        self._user_search_sub = None;
         self.account_panel = false;
         self.settings_panel = false;
         cx.notify();
@@ -949,6 +959,26 @@ impl TwittyApp {
             this.close_overlays(cx);
         }));
         self.add_column = Some(view);
+        self.account_panel = false;
+        cx.notify();
+    }
+
+    pub fn user_search_dialog(&self) -> Option<&Entity<UserSearchView>> {
+        self.user_search.as_ref()
+    }
+
+    /// Shows the "Search people" dialog; a picked account opens in the sheet.
+    pub fn open_user_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let backend = Arc::clone(&self.backend);
+        let demo = self.options.session.is_none();
+        let view = cx.new(|cx| UserSearchView::new(backend, demo, window, cx));
+        self._user_search_sub = Some(cx.subscribe(&view, |this, _, e: &UserSearchEvent, cx| {
+            this.close_overlays(cx);
+            if let UserSearchEvent::Open(profile) = e {
+                this.open_profile(Arc::clone(profile), cx);
+            }
+        }));
+        self.user_search = Some(view);
         self.account_panel = false;
         cx.notify();
     }
@@ -1565,6 +1595,11 @@ impl TwittyApp {
                 rail_button("add-column", IconName::Plus, "Add column")
                     .on_click(cx.listener(|this, _, window, cx| this.open_add_column(window, cx))),
             )
+            .child(
+                rail_button("search-people", IconName::Search, "Search people")
+                    .debug_selector(|| "rail-search-people".into())
+                    .on_click(cx.listener(|this, _, window, cx| this.open_user_search(window, cx))),
+            )
             .child(div().flex_1())
             .children(self.render_account_button(cx))
             .child(
@@ -1661,6 +1696,8 @@ impl Render for TwittyApp {
             Some(("column-settings", true, view.clone().into_any_element()))
         } else if let Some(compose) = &self.compose {
             Some(("compose", true, compose.clone().into_any_element()))
+        } else if let Some(view) = &self.user_search {
+            Some(("user-search", true, view.clone().into_any_element()))
         } else if self.account_panel {
             Some(("account", true, self.render_account_panel(cx)))
         } else if self.settings_panel {
@@ -2464,6 +2501,24 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn the_rail_searches_people_and_opens_the_picked_profile(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        click(cx, "rail-search-people");
+        let dialog = app.read_with(cx, |app, _| app.user_search_dialog().cloned());
+        assert!(dialog.is_some(), "the rail button opens the dialog");
+        cx.simulate_input("@ada");
+        cx.executor().advance_clock(crate::state::user_search::DEBOUNCE);
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        click(cx, "user-result-0");
+        assert!(app.read_with(cx, |app, _| app.user_search_dialog().is_none()), "dialog closed");
+        let panel = app.read_with(cx, |app, _| app.profile_panel().cloned());
+        let handle = panel.map(|p| p.read_with(cx, |p, _| p.profile().handle.to_string()));
+        assert_eq!(handle.as_deref(), Some("ada"));
+    }
+
+    #[gpui_kit::test]
     fn an_author_opens_in_a_profile_sheet_not_a_column(cx: &mut TestAppContext) {
         use crate::state::profile::ProfileTab;
         let (app, cx) = keyboard_app(cx);
@@ -2570,6 +2625,12 @@ mod tests {
             handle: &'a str,
         ) -> twitty_model::BoxFuture<'a, Result<Profile, BackendError>> {
             self.0.profile(handle)
+        }
+        fn search_users<'a>(
+            &'a self,
+            query: &'a str,
+        ) -> twitty_model::BoxFuture<'a, Result<Vec<Profile>, BackendError>> {
+            self.0.search_users(query)
         }
         fn set_following<'a>(
             &'a self,
@@ -3177,8 +3238,9 @@ mod tests {
         let store = MemoryStore::default();
         let (app, cx) = start(cx, MockBackend::new(), None, &store);
         let column = app.read_with(cx, |app, _| app.columns[0].0);
-        let openers: [(&str, OpenDialog); 6] = [
+        let openers: [(&str, OpenDialog); 7] = [
             ("compose", |app, _, window, cx| app.open_compose(None, window, cx)),
+            ("search people", |app, _, window, cx| app.open_user_search(window, cx)),
             ("add column", |app, _, window, cx| app.open_add_column(window, cx)),
             ("column settings", |app, id, window, cx| app.open_column_settings(id, window, cx)),
             ("login", |app, _, window, cx| app.open_login(None, window, cx)),

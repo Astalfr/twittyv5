@@ -20,3 +20,4 @@ pub mod theme;
 pub mod thread;
 pub mod title_bar;
 pub mod toasts;
+pub mod user_search;
