@@ -289,8 +289,10 @@ impl ColumnView {
     }
 
     /// Switches the column to another variant of its source (a header tab).
+    /// The current one scrolls back to the top instead.
     pub fn switch_source(&mut self, source: FeedSource, cx: &mut Context<Self>) {
         if self.model.source() == &source {
+            self.scroll_to_top(cx);
             return;
         }
         if let ListChange::Reset { count } = self.model.set_source(source.clone()) {
@@ -494,6 +496,7 @@ impl ColumnView {
             let active = source == current;
             v_flex()
                 .id(label)
+                .debug_selector(move || format!("column-tab-{label}"))
                 .flex_1()
                 .items_center()
                 .cursor_pointer()
@@ -946,8 +949,9 @@ mod tests {
         assert_eq!(navigations.get(), 0, "no thread opened under the pill");
     }
 
-    #[gpui_kit::test]
-    fn clicking_the_column_name_scrolls_back_to_the_top(cx: &mut TestAppContext) {
+    /// Scrolls a Home (Following) column down, clicks the header element
+    /// `selector`, and checks the column is back at the top on the same feed.
+    fn click_scrolls_back_to_the_top(cx: &mut TestAppContext, selector: &'static str) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             cx.set_global(Runtime::inline());
@@ -967,14 +971,25 @@ mod tests {
         cx.run_until_parked();
         assert!(column.read_with(cx, |c, _| c.list.logical_scroll_top().item_ix > 0));
 
-        let name = cx.debug_bounds("column-name").expect("the name is drawn");
-        cx.simulate_click(name.center(), gpui_kit::Modifiers::default());
+        let target = cx.debug_bounds(selector).expect("the clicked element is drawn");
+        cx.simulate_click(target.center(), gpui_kit::Modifiers::default());
         cx.run_until_parked();
         column.read_with(cx, |c, _| {
             let top = c.list.logical_scroll_top();
             assert_eq!((top.item_ix, top.offset_in_item), (0, px(0.)), "back at the top");
             assert!(c.at_top);
+            assert_eq!(c.model().source(), &FeedSource::Home { mode: HomeMode::Following });
         });
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_column_name_scrolls_back_to_the_top(cx: &mut TestAppContext) {
+        click_scrolls_back_to_the_top(cx, "column-name");
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_current_tab_scrolls_back_to_the_top(cx: &mut TestAppContext) {
+        click_scrolls_back_to_the_top(cx, "column-tab-Following");
     }
 
     /// Mounts a real window, draws it, and scrolls with wheel events until the
