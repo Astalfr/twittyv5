@@ -262,17 +262,10 @@ impl ColumnView {
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let rcx = RowCtx { ix, column_width: self.width.px(), hub: self.hub.clone() };
         let row = match self.model.items().get(ix) {
-            Some(item) if self.active && self.model.selected() == Some(ix) => {
-                let (bg, bar) = (cx.theme().list_active, cx.theme().list_active_border);
-                div()
-                    .relative()
-                    .bg(bg)
-                    .child(render_item(item, &rcx, window, cx))
-                    // An accent bar on the left, so the selection still shows
-                    // while the row's hover background covers the tint.
-                    .child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).bg(bar))
-                    .into_any_element()
-            }
+            Some(item) if self.active && self.model.selected() == Some(ix) => div()
+                .bg(cx.theme().list_active)
+                .child(render_item(item, &rcx, window, cx))
+                .into_any_element(),
             Some(item) => render_item(item, &rcx, window, cx),
             None => return self.render_footer(cx),
         };
