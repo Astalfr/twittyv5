@@ -5,17 +5,23 @@
 //! - [`catalog`] + [`discovery`]: which query id to call for each operation;
 //! - [`XClient`]: GraphQL requests returning raw JSON.
 //!
-//! X's JSON never leaves this crate once translation lands (M4): the public
-//! surface for the app will be `twitty_model::Backend`.
+//! - [`translate`]: X JSON → `twitty-model` (the only code that knows both);
+//! - [`anonymise`]: scrubbing captures into committable test fixtures.
+//!
+//! X's JSON shapes stay inside this crate (`wire` is private); everything
+//! public returns `twitty-model` types or raw `serde_json::Value`s for tooling.
 
 #![forbid(unsafe_code)]
 
+pub mod anonymise;
 pub mod catalog;
 mod client;
 pub mod discovery;
 mod error;
 mod session;
+pub mod translate;
 pub mod transport;
+mod wire;
 
 pub use client::XClient;
 pub use error::XError;

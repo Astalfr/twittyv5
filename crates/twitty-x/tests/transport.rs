@@ -274,7 +274,7 @@ async fn override_skips_discovery_on_404() {
     let server = MockServer::start().await;
     Mock::given(path("/i/api/graphql/MANUAL/HomeTimeline"))
         .respond_with(ResponseTemplate::new(404))
-        .expect(1)
+        .expect(2) // GET, then the POST fallback
         .mount(&server)
         .await;
     let c = client_with_discovery(&server);
@@ -400,4 +400,36 @@ async fn discovery_follows_inline_webpack_chunk_map_and_stops_early() {
     let fetched = report.scripts_by_family["responsive-web"];
     assert_eq!(fetched, 8, "one batch");
     assert!(fetched < 2 + unrelated);
+}
+
+#[tokio::test]
+async fn query_served_only_over_post_falls_back_and_is_remembered() {
+    let server = MockServer::start().await;
+    let search = "/i/api/graphql/f7SuGIm11eLbQs7c0K9X9w/SearchTimeline";
+    Mock::given(method("GET"))
+        .and(path(search))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(search))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let c = client(&server);
+    c.graphql("SearchTimeline", json!({"rawQuery": "rust"})).await.unwrap();
+    // Second call goes straight to POST (the GET mock expects exactly one hit).
+    c.graphql("SearchTimeline", json!({"rawQuery": "rust"})).await.unwrap();
+    let post = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.method.as_str() == "POST")
+        .unwrap();
+    let body: Value = serde_json::from_slice(&post.body).unwrap();
+    assert_eq!(body["variables"]["rawQuery"], "rust");
+    assert_eq!(body["queryId"], "f7SuGIm11eLbQs7c0K9X9w");
 }

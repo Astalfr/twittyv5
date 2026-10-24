@@ -78,7 +78,8 @@ Full strategy: [docs/testing.md](docs/testing.md).
 
 - **Every change ships with tests, in the same change.** Bug fixes start with a failing test that reproduces the bug.
 - **`translate` changes**: add or update an anonymised fixture in `crates/twitty-x/tests/fixtures/` plus an `insta` snapshot of the *model* output. The model snapshot of an existing fixture must not change unless the change is intended and explained.
-- **Text/entity code** (UTF-16 offsets, spans, URL expansion) gets `proptest` property tests (spans in bounds, on char boundaries, not overlapping).
+- **Text/entity code** (X's code-point offsets, spans, URL expansion) gets `proptest` property tests (never panics, spans in bounds, on char boundaries, not overlapping).
+- **New X samples** go through `twitty-x-cli anonymise` before they are committed; it refuses to write when a handle or name survives.
 - **Transport behaviour** (headers, cookie rotation, 429 backoff, stale queryId refresh) is tested with `wiremock` in `crates/twitty-x/tests/transport.rs`. Tests never hit the real network, except the `#[ignore]` live suite.
 - **Compare JSON as parsed values, never as strings.** Feature unification turns on serde_json's `preserve_order` in workspace builds, so key order differs between `-p` and `--workspace` runs.
 - **UI state logic** goes in `twitty::state` with plain unit tests. View wiring is tested with `#[gpui_kit::test]` + `MockBackend` + `Runtime::inline()` (see the tests in `ui/column.rs`).

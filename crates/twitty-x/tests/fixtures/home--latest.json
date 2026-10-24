@@ -1,0 +1,163 @@
+{
+  "data": {
+    "home": {
+      "home_timeline_urt": {
+        "instructions": [
+          {
+            "clientEventInfo": {
+              "component": "half_cover",
+              "element": "review-email"
+            },
+            "cover": {
+              "halfCoverDisplayType": "Cover",
+              "impressionCallbacks": [
+                {
+                  "endpoint": "/1.1/onboarding/fatigue.json?flow_name=review-email&fatigue_group_name=ReviewEmailPromptFatigueGroup&action_name=impression&scribe_name=impression&display_location=home_latest&served_time_secs=9206392164&injection_type=half_cover"
+                }
+              ],
+              "primaryCoverCta": {
+                "callbacks": [
+                  {
+                    "endpoint": "/1.1/onboarding/fatigue.json?flow_name=review-email&fatigue_group_name=ReviewEmailPromptFatigueGroup&action_name=dismiss&scribe_name=primary_cta&display_location=home_latest&served_time_secs=9206392164&injection_type=half_cover"
+                  }
+                ],
+                "clientEventInfo": {
+                  "action": "primary_cta"
+                },
+                "ctaBehavior": {
+                  "type": "TimelineCoverBehaviorDismiss"
+                },
+                "text": "Psn, wcxn'e mvbwybe"
+              },
+              "primaryText": {
+                "entities": [],
+                "text": "Itpmov romi jstsz"
+              },
+              "secondaryCoverCta": {
+                "callbacks": [
+                  {
+                    "endpoint": "/1.1/onboarding/fatigue.json?flow_name=review-email&fatigue_group_name=ReviewEmailPromptFatigueGroup&action_name=click&scribe_name=secondary_cta&display_location=home_latest&served_time_secs=9206392164&injection_type=half_cover"
+                  }
+                ],
+                "clientEventInfo": {
+                  "action": "secondary_cta"
+                },
+                "ctaBehavior": {
+                  "type": "TimelineCoverBehaviorNavigate",
+                  "url": {
+                    "url": "https://twitter.com/umexksex/jstsz",
+                    "urlType": "ExternalUrl"
+                  }
+                },
+                "text": "Is, itoqbh jstsz"
+              },
+              "secondaryText": {
+                "entities": [],
+                "text": "Sx cr*******@q****.*** chljl romi jstsz bgclbfw? H sdnlovb jstsz bgclbfw wpznc ltdcyu fql yss'h dfnz ccnugt hk romi pfbndqu."
+              },
+              "type": "TimelineHalfCover"
+            },
+            "type": "TimelineShowCover"
+          },
+          {
+            "entries": [
+              {
+                "content": {
+                  "__typename": "TimelineTimelineCursor",
+                  "cursorType": "Top",
+                  "entryType": "TimelineTimelineCursor",
+                  "value": "KOJNEtQSYWCxW5jXBiXCDPIESVUWDTG"
+                },
+                "entryId": "cursor-top-2448774327620833094",
+                "sortIndex": "2448774327620833094"
+              },
+              {
+                "content": {
+                  "__typename": "TimelineTimelineItem",
+                  "clientEventInfo": {
+                    "component": "grok-bot-inline-prompt",
+                    "details": {
+                      "timelinesDetails": {
+                        "injectionType": "Message"
+                      }
+                    }
+                  },
+                  "entryType": "TimelineTimelineItem",
+                  "feedbackInfo": {
+                    "feedbackKeys": [
+                      "flip-dismiss-0"
+                    ]
+                  },
+                  "itemContent": {
+                    "__typename": "TimelineMessagePrompt",
+                    "content": {
+                      "bodyRichText": {
+                        "entities": [],
+                        "text": "Xlkr yp cwb hpts. Vdtmh yp gfwc zxop zpom asvnaskg wabv."
+                      },
+                      "bodyText": "Xlkr yp cwb hpts. Vdtmh yp gfwc zxop zpom asvnaskg wabv.",
+                      "contentType": "TimelineHeaderImagePrompt",
+                      "headerImage": {
+                        "imageVariants": [
+                          {
+                            "height": 605,
+                            "url": "https://qtj.sduatjy.com/fihvaojfrs/amdrijmoskpur/vmmr-xoq-tkn-7.png",
+                            "width": 1280
+                          }
+                        ]
+                      },
+                      "headerRichText": {
+                        "entities": [],
+                        "text": "Vzrv Vmmr Xoq, Romi YS cohtifecc gxb Uijc & Wabv"
+                      },
+                      "optionalHeaderText": "Vzrv Vmmr Xoq, Romi YS cohtifecc gxb Uijc & Wabv",
+                      "primaryButtonAction": {
+                        "action": {
+                          "clientEventInfo": {
+                            "action": "primary_cta"
+                          },
+                          "dismissOnClick": true,
+                          "onClickCallbacks": [
+                            {
+                              "endpoint": "/1.1/onboarding/fatigue.json?flow_name=grok-bot-inline-prompt&fatigue_group_name=GrokBotInlinePromptFatigueGroup&action_name=click&scribe_name=primary_cta&display_location=home_latest&served_time_secs=9206392164&injection_type=inline_message"
+                            }
+                          ],
+                          "url": "https://t.ai/xoq?pcs=T_Web_Vmmr_Xoq_TKN"
+                        },
+                        "text": "Txl Vmmr Xoq"
+                      }
+                    },
+                    "impressionCallbacks": [
+                      {
+                        "endpoint": "/1.1/onboarding/fatigue.json?flow_name=grok-bot-inline-prompt&fatigue_group_name=GrokBotInlinePromptFatigueGroup&action_name=impression&scribe_name=impression&display_location=home_latest&served_time_secs=9206392164&injection_type=inline_message"
+                      }
+                    ],
+                    "itemType": "TimelineMessagePrompt"
+                  }
+                },
+                "entryId": "flip-prompt-message-grok-bot-inline-prompt",
+                "sortIndex": "2888845090556656279"
+              },
+              {
+                "content": {
+                  "__typename": "TimelineTimelineCursor",
+                  "cursorType": "Bottom",
+                  "entryType": "TimelineTimelineCursor",
+                  "value": "TMORRwRSQSCmF6z___7QUDEIHFMOZWN"
+                },
+                "entryId": "cursor-bottom-3598210669707191243",
+                "sortIndex": "3598210669707191243"
+              }
+            ],
+            "type": "TimelineAddEntries"
+          }
+        ],
+        "metadata": {
+          "scribeConfig": {
+            "page": "following"
+          }
+        }
+      }
+    }
+  }
+}

@@ -5,7 +5,7 @@
 //! or the `TWITTY_AUTH_TOKEN` / `TWITTY_CT0` environment variables. They are
 //! never printed.
 
-#![expect(clippy::print_stdout, reason = "command-line output")]
+#![expect(clippy::print_stdout, clippy::print_stderr, reason = "command-line output")]
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -36,6 +36,17 @@ enum Command {
     Ops,
     /// Re-discover query ids from x.com bundles (logged in) and update the cache.
     RefreshIds,
+    /// Scrub a captured response for use as a committed test fixture.
+    Anonymise {
+        /// Raw capture (e.g. dumps/home.json).
+        input: PathBuf,
+        /// Where to write the scrubbed JSON.
+        output: PathBuf,
+        /// Reviewed false positives of the leak check (comma-separated), e.g.
+        /// an account named "None" colliding with enum values.
+        #[arg(long, value_delimiter = ',')]
+        allow: Vec<String>,
+    },
     /// Fetch a timeline and save the raw JSON response.
     Capture {
         #[command(subcommand)]
@@ -61,6 +72,16 @@ enum Capture {
         #[arg(long, default_value = "dumps/home.json")]
         out: PathBuf,
     },
+    /// Any GraphQL operation with explicit variables.
+    Op {
+        /// Operation name, e.g. TweetDetail.
+        name: String,
+        /// Variables as JSON.
+        #[arg(long, default_value = "{}")]
+        vars: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -84,6 +105,36 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
         }
+        Command::Anonymise { input, output, allow } => {
+            let original: Value = serde_json::from_str(&std::fs::read_to_string(&input)?)
+                .with_context(|| format!("{} is not JSON", input.display()))?;
+            let mut scrubbed = original.clone();
+            twitty_x::anonymise::Anonymiser::random().anonymise(&mut scrubbed);
+            let text = serde_json::to_string_pretty(&scrubbed)?;
+            let lower = text.to_lowercase();
+            let allow: Vec<String> = allow.iter().map(|a| a.to_lowercase()).collect();
+            let leaks: Vec<String> = twitty_x::anonymise::leaks(&original, &scrubbed)
+                .into_iter()
+                .filter(|l| !allow.contains(l))
+                .collect();
+            for leak in &leaks {
+                if let Some(ix) = lower.find(leak.as_str()) {
+                    let start = lower[..ix].char_indices().rev().nth(60).map_or(0, |(i, _)| i);
+                    let ctx: String = text[start..].chars().take(140).collect();
+                    eprintln!("survived: {leak:?} in …{}…", ctx.replace('\n', " "));
+                }
+            }
+            anyhow::ensure!(
+                leaks.is_empty(),
+                "{} identifying value(s) survived; nothing written",
+                leaks.len()
+            );
+            if let Some(dir) = output.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&output, text)?;
+            println!("wrote {} (no names or handles survived)", output.display());
+        }
         Command::RefreshIds => {
             let client = client(cli.session, catalog)?;
             let report = client.refresh_ids().await?;
@@ -105,22 +156,30 @@ async fn main() -> anyhow::Result<()> {
                 client.catalog().set_override(op, &id);
             }
             let body = client.home_timeline(latest, count, cursor.as_deref()).await?;
-            if let Some(dir) = out.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            std::fs::write(&out, serde_json::to_string_pretty(&body)?)
-                .with_context(|| format!("writing {}", out.display()))?;
-            let (instructions, entries) = summarize(&body);
-            println!("saved {} ({} entries)", out.display(), entries);
-            println!("instructions: {instructions:?}");
-            if let Some(l) = client.transport().limits().get(if latest {
-                "HomeLatestTimeline"
-            } else {
-                "HomeTimeline"
-            }) {
-                println!("rate limit: {}/{} until {}", l.remaining, l.limit, l.reset_at);
-            }
+            let op = if latest { "HomeLatestTimeline" } else { "HomeTimeline" };
+            save(&client, op, &body, &out)?;
         }
+        Command::Capture { what: Capture::Op { name, vars, out } } => {
+            let client = client(cli.session, catalog)?;
+            let variables: Value = serde_json::from_str(&vars).context("--vars is not JSON")?;
+            let body = client.graphql(&name, variables).await?;
+            save(&client, &name, &body, &out)?;
+        }
+    }
+    Ok(())
+}
+
+fn save(client: &XClient, op: &str, body: &Value, out: &std::path::Path) -> anyhow::Result<()> {
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(out, serde_json::to_string_pretty(body)?)
+        .with_context(|| format!("writing {}", out.display()))?;
+    let (instructions, entries) = summarize(body);
+    println!("saved {} ({} entries)", out.display(), entries);
+    println!("instructions: {instructions:?}");
+    if let Some(l) = client.transport().limits().get(op) {
+        println!("rate limit: {}/{} until {}", l.remaining, l.limit, l.reset_at);
     }
     Ok(())
 }

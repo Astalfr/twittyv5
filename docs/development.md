@@ -17,7 +17,7 @@
 | Test | `cargo test --workspace` (or `cargo nextest run --workspace`) |
 | Review snapshots | `cargo insta review` |
 | Run the app | `cargo run -p twitty` (`RUST_LOG=twitty=debug,twitty_x=debug` for logs) |
-| Dev CLI (from M3) | `cargo run -p twitty-x --bin twitty-x-cli -- <feed\|capture\|anonymise\|refresh-ids> …` |
+| Dev CLI | `cargo run -p twitty-x --bin twitty-x-cli -- <ops\|refresh-ids\|capture home\|capture op\|anonymise> …` (see [x-api.md](x-api.md#dev-cli)) |
 | Live smoke tests (from M3) | `$env:TWITTY_LIVE=1; cargo test -p twitty-x --test live -- --ignored` |
 | Coverage | `cargo llvm-cov --workspace --html` |
 | Dependency audit | `cargo deny check` |

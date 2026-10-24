@@ -20,6 +20,7 @@ serde_json.workspace = true
 chrono.workspace = true
 url.workspace = true
 regex.workspace = true
+html-escape.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -33,6 +34,8 @@ wiremock.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 pretty_assertions.workspace = true
+proptest.workspace = true
+insta.workspace = true
 
 [lints]
 workspace = true

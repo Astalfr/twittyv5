@@ -4,6 +4,18 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: X entity offsets are code points
+- **Finding**: Across 453 entities in live captures (66 texts with emoji), 98 only match as Unicode code-point offsets and none only as UTF-16. The plan had assumed UTF-16.
+- **Decision**: `translate::text` slices by code points, then emits byte ranges.
+
+### 2026-10-24: GET→POST fallback before refreshing ids
+- **Finding**: `SearchTimeline` answers 404 to GET even with a freshly discovered id, and works over POST.
+- **Decision**: A GET 404 is retried once as POST and remembered per operation; only then are ids refreshed.
+
+### 2026-10-24: Fixtures are anonymised live captures, snapshotted as text summaries
+- **Decision**: Commit scrubbed full responses (`twitty-x-cli anonymise`, random key per run, leak check), and snapshot a compact line-per-row summary of the model output instead of serialising model types.
+- **Why**: Real shapes catch drift that hand-written JSON misses. Summaries are readable in review and keep `twitty-model` free of test-only `Serialize` impls.
+
 ### 2026-10-24: X's logged-out site moved to a Relay client; discovery reads both formats
 - **Finding**: `https://x.com/?lang=en` now loads `x-web` bundles (Vite + Relay). Operations are Relay persisted queries (`params:{id,name:"…Query",operationKind}`) without feature switches. No `responsive-web` bundle is referenced from the HTML or `sw.js`, so the community discovery methods find nothing there. The logged-in app still called `0toR0MxC06yY3Fc57GXBpA/HomeTimeline` (old-style path) on the same day.
 - **Decision**: Discovery extracts both the legacy and the Relay formats, follows `assets/*.js` chunks, and runs logged in when a session exists. It is best effort: the catalog falls back to the cache and then the embedded ids, and a 404 triggers one refresh + one retry.

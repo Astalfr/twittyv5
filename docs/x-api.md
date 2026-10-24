@@ -4,7 +4,9 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 > Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
 
-**Status (M3, done):** transport, catalog, discovery, `XClient` and the dev CLI are implemented, tested against a mock server, and **verified live on 2026-10-24**: `HomeTimeline` and `HomeLatestTimeline` returned data with the declared feature subsets, and logged-in discovery found every operation Twitty uses. Translation into `twitty-model` (`wire` + `translate`) is M4.
+**Status (M4, done):** X responses are translated into `twitty-model` by `translate::feed_page` and checked against 9 anonymised live fixtures. Wiring `XBackend` into the app is M5.
+
+**M3:** transport, catalog, discovery, `XClient` and the dev CLI are implemented, tested against a mock server, and **verified live on 2026-10-24**: `HomeTimeline` and `HomeLatestTimeline` returned data with the declared feature subsets, and logged-in discovery found every operation Twitty uses. Translation into `twitty-model` (`wire` + `translate`) is M4.
 
 ## Code map
 
@@ -15,7 +17,10 @@ X doesn't document this API. Everything here comes from community clients and ou
 | `catalog.rs` | `Catalog`: resolves an operation name to an `OperationSpec` (query id, method, feature switches, field toggles), builds the `features` map. |
 | `discovery.rs` | Best-effort query-id discovery from x.com's bundles (legacy + Relay formats). |
 | `client.rs` | `XClient::graphql(op, variables)` and helpers like `home_timeline`. Recovers once from stale ids. |
-| `bin/twitty-x-cli.rs` | Dev tool: `ops`, `refresh-ids`, `capture home`. |
+| `wire.rs` | Private, lenient readers over X JSON: `at`/`str_at`/`u64_at`…, `timeline()` classifying entries (items, modules, cursors). |
+| `translate/` | X JSON → `twitty-model`: `text` (entities → `RichText`), `user`, `tweet`, `media`, `card`, `notification`, and `feed_page()` for whole timelines. |
+| `anonymise.rs` | Scrubs captures into committable fixtures, plus a leak check. |
+| `bin/twitty-x-cli.rs` | Dev tool: `ops`, `refresh-ids`, `capture home`, `capture op`, `anonymise`. |
 | `data/operations.json` | Embedded fallback ids with feature switches and field toggles, regenerated from a live discovery run. |
 | `data/default_features.json` | Default `features` values (from `bun_x`, Apache-2.0). |
 
@@ -55,7 +60,9 @@ The `queryId` changes with X web releases (about every 2–4 weeks), and `featur
 2. **Runtime cache**: `%LOCALAPPDATA%\Twitty\cache\query-ids.json`, written by discovery, fresh for 24h. Names are looked up as-is, then with a `Query` suffix (Relay naming).
 3. **Embedded fallback**: `data/operations.json`.
 
-On HTTP 404, `XClient::graphql` runs discovery **once** (logged in), and retries **once** if a different id was found. Otherwise it returns `XError::StaleQueryId { operation, query_id }`.
+On HTTP 404, `XClient::graphql` tries two things, in order:
+1. **Wrong method:** some queries are only served over POST (`SearchTimeline` returned 404 to GET with a valid id on 2026-10-24). A GET 404 is retried once as POST (JSON body with `variables`, `features`, `queryId`); on success POST is remembered for that operation.
+2. **Stale id:** discovery runs **once** (logged in) and the call is retried **once** if a different id was found. Otherwise it returns `XError::StaleQueryId { operation, query_id }`.
 
 `features`: when the operation's feature switch names are known (legacy bundles declare them), only those are sent, with values from `default_features.json` (unknown names default to `true`). When they're unknown, the whole default map (~150 flags) is sent.
 
@@ -150,7 +157,20 @@ The session comes from `--session <file>` (`{"auth_token":"…","ct0":"…"}`; `
 cargo run -p twitty-x --bin twitty-x-cli -- ops                        # catalog: id, method, origin
 cargo run -p twitty-x --bin twitty-x-cli -- --session session.json refresh-ids
 cargo run -p twitty-x --bin twitty-x-cli -- --session session.json capture home [--latest] [--count 20] [--cursor C] [--query-id ID] [--out dumps/home.json]
+cargo run -p twitty-x --bin twitty-x-cli -- --session session.json capture op TweetDetail --vars '{"focalTweetId":"…"}' --out dumps/tweetdetail.json
+cargo run -p twitty-x --bin twitty-x-cli -- anonymise dumps/home.json crates/twitty-x/tests/fixtures/home.json [--allow word,…]
 ```
+
+Variables that worked live (2026-10-24):
+
+| Operation | Variables |
+|---|---|
+| `UserByScreenName` | `{"screen_name":"NASA"}` |
+| `UserTweets` | `{"userId":"…","count":40,"includePromotedContent":true,"withQuickPromoteEligibilityTweetFields":true,"withVoice":true}` |
+| `SearchTimeline` (POST) | `{"rawQuery":"rust lang:en","count":20,"querySource":"typed_query","product":"Top"}` (`Latest`, `Top`, `Media`) |
+| `TweetDetail` | `{"focalTweetId":"…","with_rux_injections":false,"rankingMode":"Relevance","includePromotedContent":true,"withCommunity":true,"withQuickPromoteEligibilityTweetFields":true,"withBirdwatchNotes":true,"withVoice":true}` |
+| `Bookmarks` | `{"count":20,"includePromotedContent":true}` |
+| `NotificationsTimeline` | `{"timeline_type":"All","count":20}` |
 
 `capture` writes the raw response (to the gitignored `dumps/` by default) and prints the instruction types, entry count and rate-limit budget.
 
@@ -165,13 +185,16 @@ TWITTY_LIVE=1 cargo test -p twitty-x --test live -- --ignored discovery_logged_o
 TWITTY_LIVE=1 TWITTY_AUTH_TOKEN=… TWITTY_CT0=… cargo test -p twitty-x --test live -- --ignored home
 ```
 
-## Capturing a fixture (M4)
+## Capturing a fixture
 
-1. Run `twitty-x-cli capture home --out dumps/raw.json`, or in DevTools use "Copy response" on a HomeTimeline request.
-2. Anonymise it (planned `twitty-x-cli anonymise`): replace handles, names, ids, text and avatar URLs with deterministic fake values while keeping the structure and UTF-16 offsets valid.
-3. Add a test case, run `cargo insta review` and check the model snapshot by eye.
+1. Capture into the gitignored `dumps/`: `twitty-x-cli capture home` / `capture op …`.
+2. Scrub it: `twitty-x-cli anonymise dumps/x.json crates/twitty-x/tests/fixtures/x.json`.
+   - Keeps the JSON structure, all keys and numbers, dates, `__typename`s, card type names, X's own hosts and URL route words, and the code-point length of every string (so entity offsets stay valid).
+   - Replaces text, names, handles, ids, other hosts, URL paths and opaque tokens with pseudo-random characters. A word or id maps to the same replacement everywhere in the file (handle in `screen_name` = `@handle` in text, `id_str` = id in `entryId`), but the key is random per run, so it can't be reversed with a dictionary.
+   - Refuses to write if any original handle or user display name survives in a string value. Reviewed false positives (e.g. an account literally named "None" colliding with enum values) can be passed with `--allow`.
+3. Add the name to `FIXTURES` in `tests/translate.rs`, run `cargo insta review` and read the summary snapshot.
 
-Never commit a raw capture: it contains other people's posts and profile data.
+Never commit a raw capture: it contains other people's posts and profile data. Polls and tombstones didn't appear in live captures yet; they are covered by synthetic unit tests in `translate/card.rs` and `translate/tweet.rs`.
 
 ## Runbook: "X broke something"
 

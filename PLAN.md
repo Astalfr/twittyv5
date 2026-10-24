@@ -2,7 +2,7 @@
 
 A native desktop client for X (Twitter), written in Rust with **GPUI** (via **GPUI Kit**). It talks to X's internal web GraphQL API (`https://x.com/i/api/graphql/<queryId>/<Operation>`) and looks like the new **X Pro / TweetDeck**: a multi-column deck.
 
-> Status: **M0–M3 done** (X transport, catalog, discovery and CLI verified live on 2026-10-24). Next: M4 (wire + translate into `twitty-model`).
+> Status: **M0–M4 done** (X transport verified live; translation into `twitty-model` checked against 9 anonymised live captures). Next: M5 (`XBackend` in the app, login).
 >
 > Living documentation is in [docs/](docs/README.md) and contributor/agent rules are in [CLAUDE.md](CLAUDE.md). Every milestone below is done only when it meets the definition of done in [docs/testing.md](docs/testing.md).
 
@@ -97,7 +97,7 @@ So Twitty is built as **ports and adapters**, with an anti-corruption layer:
 6. **Opaque handles**: X cursors, query IDs and rest IDs are wrapped as opaque newtypes (`PageToken`, `PostId`, `UserId`). The UI never parses or builds them.
 7. **Data saved to disk** (caches, decks, settings) uses the `twitty-model` types and a `schema_version` field, never raw X JSON. A change at X can't break saved data.
 8. **Normalisation happens in `translate`**:
-   - UTF-16 entity offsets → byte ranges in Rust `String`s
+   - code-point entity offsets (verified live) → byte ranges in Rust `String`s
    - `t.co` → expanded URLs, with trailing media links stripped
    - HTML entities decoded
    - `note_tweet` long text preferred over the truncated text

@@ -1,0 +1,6 @@
+---
+source: crates/twitty-x/tests/translate.rs
+expression: summary(&load(name).page)
+---
+newer cursor: true
+older cursor: true

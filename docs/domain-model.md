@@ -36,9 +36,11 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`) is
 1. **Never panic and never fail a whole page.** An entry that can't be translated becomes `FeedItem::Unsupported { reason }`, plus a `tracing::warn!` that includes the entry ID and the missing path.
 2. **Retweets are unwrapped**: the retweet becomes `FeedItem::Repost { by, post }`, where `post` is the original post.
 3. **Long posts**: prefer `note_tweet` text and entities over the truncated `full_text`.
-4. **Entities**: X gives offsets in **UTF-16 code units** (sometimes code points). These are converted to byte ranges in the decoded string. Out-of-range or overlapping entities are dropped with a warning, never clamped silently.
-5. **Text clean-up**: decode HTML entities (`&amp;`, `&lt;`, …). Replace `t.co` links with their expanded URL. Strip the trailing media `t.co` link X appends to the text. Strip the leading `@mentions` in reply-chain text, because they show up as reply info instead.
-6. **Media**: choose the highest-bitrate MP4 variant for video and keep the poster image. Read the aspect ratio from `original_info` / `aspect_ratio`.
+4. **Entities**: X gives offsets in **Unicode code points** of the raw, HTML-escaped text (checked against 453 live entities on 2026-10-24: 98 only match as code points, none only as UTF-16). They are converted to byte ranges in the decoded string. Inverted, out-of-range or overlapping entities are dropped with a warning; the text itself is never lost.
+5. **Text clean-up**: decode HTML entities (`&amp;`, `&lt;`, …). Show `t.co` links as their `display_url`, with a `Link` span to the expanded URL. Drop the trailing media `t.co` link, and the leading `@mentions` of replies (both are outside `display_text_range`; reply info is shown separately).
+6. **Media**: images and posters use `media_url_https?name=medium`. Video and GIF streams are the highest-bitrate MP4 variant. Sizes come from `original_info`.
+6b. **Cards**: `summary`/`summary_large_image`/`player`, `unified_card` (a JSON document inside a binding) and `<id>:broadcast` become `Embed::Link`; `pollNchoice_*` becomes `Embed::Poll`. Unknown cards are ignored, not unsupported. A quote wins over a card.
+6c. **Skipped on purpose** (not `Unsupported`): promoted entries, prompts and covers, who-to-follow users, trends and topics. Conversation modules become `FeedItem::Thread` (or a single `Post`).
 7. **Unavailable posts** (`TweetTombstone`, `TweetUnavailable`, withheld, or a deleted quoted post) become `Unavailable { reason }` / `PostOrGone::Unavailable`.
 8. **Times** become `DateTime<Utc>`. Counts are `u64` and a missing count is `0`, except `Metrics::views`, which is `Option<u64>` because many posts have no view count and the UI hides it.
 9. **Profiles are interned**: the same `UserId` within a page gets the same `Arc<Profile>`.

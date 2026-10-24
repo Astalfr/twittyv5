@@ -1,7 +1,10 @@
 //! GraphQL calls on top of [`Transport`]: resolves query ids, builds the
 //! request, and self-heals once when X rotated an id.
 
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -21,12 +24,20 @@ pub struct XClient {
     catalog: Arc<Catalog>,
     discovery: Option<Discovery>,
     refreshing: tokio::sync::Mutex<()>,
+    /// Queries X only serves over POST (learned from a GET 404 + POST success).
+    post_only: Mutex<HashSet<String>>,
 }
 
 impl XClient {
     /// `discovery: None` disables query-id refresh (tests, offline use).
     pub fn new(transport: Transport, catalog: Arc<Catalog>, discovery: Option<Discovery>) -> Self {
-        Self { transport, catalog, discovery, refreshing: tokio::sync::Mutex::new(()) }
+        Self {
+            transport,
+            catalog,
+            discovery,
+            refreshing: tokio::sync::Mutex::new(()),
+            post_only: Mutex::new(HashSet::new()),
+        }
     }
 
     pub fn transport(&self) -> &Transport {
@@ -57,14 +68,17 @@ impl XClient {
 
     /// Calls `operation` with `variables`.
     ///
-    /// On HTTP 404 (stale query id) the ids are refreshed once and the call is
-    /// retried once if a different id was found.
+    /// HTTP 404 has two known causes, handled in this order:
+    /// 1. some queries are only served over POST (e.g. `SearchTimeline`): a GET
+    ///    404 is retried once as POST, and POST is remembered for the operation;
+    /// 2. the query id rotated: ids are refreshed once and the call is retried
+    ///    once if a different id was found.
     pub async fn graphql(&self, operation: &str, variables: Value) -> Result<Value, XError> {
         let (spec, origin) = self
             .catalog
             .resolve(operation)
             .ok_or_else(|| XError::UnknownOperation(operation.to_owned()))?;
-        match self.call(operation, &spec, &variables).await {
+        match self.call_with_method_fallback(operation, &spec, &variables).await {
             Err(XError::Http { status: 404, .. }) => {
                 let stale = || XError::StaleQueryId {
                     operation: operation.to_owned(),
@@ -80,19 +94,47 @@ impl XClient {
                 match self.catalog.resolve(operation) {
                     Some((fresh, _)) if fresh.query_id != spec.query_id => {
                         tracing::info!(operation, "retrying with refreshed query id");
-                        self.call(operation, &fresh, &variables).await.map_err(|e| match e {
-                            XError::Http { status: 404, .. } => XError::StaleQueryId {
-                                operation: operation.to_owned(),
-                                query_id: fresh.query_id.clone(),
+                        self.call_with_method_fallback(operation, &fresh, &variables).await.map_err(
+                            |e| match e {
+                                XError::Http { status: 404, .. } => XError::StaleQueryId {
+                                    operation: operation.to_owned(),
+                                    query_id: fresh.query_id.clone(),
+                                },
+                                other => other,
                             },
-                            other => other,
-                        })
+                        )
                     }
                     _ => Err(stale()),
                 }
             }
             other => other,
         }
+    }
+
+    async fn call_with_method_fallback(
+        &self,
+        operation: &str,
+        spec: &OperationSpec,
+        variables: &Value,
+    ) -> Result<Value, XError> {
+        let learned_post =
+            self.post_only.lock().unwrap_or_else(PoisonError::into_inner).contains(operation);
+        if spec.method == Method::Get && !learned_post {
+            match self.call(operation, spec, variables).await {
+                Err(XError::Http { status: 404, .. }) => {}
+                other => return other,
+            }
+        }
+        let post = OperationSpec { method: Method::Post, ..spec.clone() };
+        let result = self.call(operation, &post, variables).await;
+        if result.is_ok() && spec.method == Method::Get && !learned_post {
+            tracing::info!(operation, "query is served over POST only; remembering");
+            self.post_only
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(operation.to_owned());
+        }
+        result
     }
 
     async fn call(
