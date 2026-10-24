@@ -2597,7 +2597,8 @@ mod tests {
         app.update_in(cx, |app, window, cx| app.open_add_column(window, cx));
         let dialog = app.read_with(cx, |app, _| app.add_column_dialog().cloned()).unwrap();
         dialog.update_in(cx, |d, window, cx| {
-            d.choose(crate::state::add_column::ColumnKind::Bookmarks, window, cx)
+            d.choose(crate::state::add_column::ColumnKind::Bookmarks, window, cx);
+            d.submit(window, cx);
         });
         cx.run_until_parked();
         app.read_with(cx, |app, _| {

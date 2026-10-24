@@ -1,5 +1,5 @@
 //! The "Add column" dialog: pick a kind, type a query / handle / link when the
-//! kind needs one. Handles are resolved with `Backend::profile` first.
+//! kind needs one, then confirm. Handles are resolved with `Backend::profile` first.
 
 use std::sync::Arc;
 
@@ -85,21 +85,20 @@ impl AddColumnView {
         self.lookup.is_some()
     }
 
-    /// Selects a kind; kinds without input are added right away.
+    /// Selects a kind. Nothing is added until the dialog is confirmed.
     pub fn choose(&mut self, kind: ColumnKind, window: &mut Window, cx: &mut Context<Self>) {
-        self.kind = kind;
         self.error = None;
         self.lookup = None;
-        if kind.prompt().is_none() {
-            self.submit(window, cx);
-            return;
+        if kind != self.kind
+            && let Some(prompt) = kind.prompt()
+        {
+            self.input.update(cx, |s, cx| {
+                s.set_value("", window, cx);
+                s.set_placeholder(prompt, window, cx);
+                s.focus(window, cx);
+            });
         }
-        let prompt = kind.prompt().unwrap_or_default();
-        self.input.update(cx, |s, cx| {
-            s.set_value("", window, cx);
-            s.set_placeholder(prompt, window, cx);
-            s.focus(window, cx);
-        });
+        self.kind = kind;
         cx.notify();
     }
 
@@ -155,18 +154,23 @@ impl Render for AddColumnView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let selected = self.kind;
+        // Tiles styled like the sidebar entries: the icon over the kind's name.
         let kinds = ColumnKind::ALL.into_iter().map(|kind| {
-            let icon = source_icon(&sample_source(kind));
-            let button = Button::new(kind.label())
-                .icon(Icon::new(icon))
-                .text_button(Size::Small)
-                .label(kind.label())
-                .on_click(cx.listener(move |this, _, window, cx| this.choose(kind, window, cx)));
-            if kind == selected && kind.prompt().is_some() {
-                button.primary()
-            } else {
-                button.ghost()
-            }
+            v_flex()
+                .id(kind.label())
+                .debug_selector(move || format!("add-kind-{}", kind.label()))
+                .w(px(KIND_TILE_WIDTH))
+                .h(px(KIND_TILE_HEIGHT))
+                .gap_1()
+                .items_center()
+                .justify_center()
+                .rounded_lg()
+                .cursor_pointer()
+                .when(kind == selected, |d| d.bg(theme.list_active).font_weight(FontWeight::BOLD))
+                .hover(|s| s.bg(theme.list_hover))
+                .child(Icon::new(source_icon(&sample_source(kind))).size(px(24.)))
+                .child(div().text_sm().child(kind.label()))
+                .on_click(cx.listener(move |this, _, window, cx| this.choose(kind, window, cx)))
         });
         let looking_up = self.is_looking_up();
         v_flex()
@@ -181,7 +185,11 @@ impl Render for AddColumnView {
             .child(div().text_xl().font_weight(FontWeight::BOLD).child("Add column"))
             .child(h_flex().flex_wrap().gap_2().children(kinds))
             .when(selected.prompt().is_some(), |d| {
-                d.child(Input::new(&self.input).disabled(looking_up))
+                d.child(
+                    div()
+                        .debug_selector(|| "add-column-input".into())
+                        .child(Input::new(&self.input).disabled(looking_up)),
+                )
             })
             .when_some(self.error.clone(), |d, error| {
                 d.child(div().text_sm().text_color(theme.danger).child(error))
@@ -199,21 +207,21 @@ impl Render for AddColumnView {
                                 cx.listener(|_, _, _, cx| cx.emit(AddColumnEvent::Dismissed)),
                             ),
                     )
-                    .when(selected.prompt().is_some(), |d| {
-                        d.child(
-                            Button::new("add-submit")
-                                .primary()
-                                .text_button(Size::Medium)
-                                .label(if looking_up { "Looking up…" } else { "Add" })
-                                .loading(looking_up)
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.submit(window, cx)),
-                                ),
-                        )
-                    }),
+                    .child(
+                        Button::new("add-submit")
+                            .primary()
+                            .text_button(Size::Medium)
+                            .label(if looking_up { "Looking up…" } else { "Add" })
+                            .loading(looking_up)
+                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                    ),
             )
     }
 }
+
+/// Four tiles per row in the 460px dialog.
+const KIND_TILE_WIDTH: f32 = 96.;
+const KIND_TILE_HEIGHT: f32 = 68.;
 
 /// A representative source of `kind`, to pick its icon.
 fn sample_source(kind: ColumnKind) -> FeedSource {
@@ -252,13 +260,32 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn kinds_without_input_are_added_at_once(cx: &mut TestAppContext) {
+    fn kinds_without_input_wait_for_confirmation(cx: &mut TestAppContext) {
         let (view, cx, events) = open(cx, MockBackend::new());
         view.update_in(cx, |v, window, cx| v.choose(ColumnKind::Home, window, cx));
+        assert!(events.lock().unwrap().is_empty(), "choosing alone adds nothing");
+        assert_eq!(view.read_with(cx, |v, _| v.kind()), ColumnKind::Home);
+        view.update_in(cx, |v, window, cx| v.submit(window, cx));
         assert_eq!(
             events.lock().unwrap().as_slice(),
             [AddColumnEvent::Add(FeedSource::Home { mode: HomeMode::ForYou })]
         );
+    }
+
+    #[gpui_kit::test]
+    fn the_input_only_shows_for_kinds_that_need_one(cx: &mut TestAppContext) {
+        let (view, cx, _) = open(cx, MockBackend::new());
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("add-column-input").is_some(), "search needs a query");
+        assert!(cx.debug_bounds("add-kind-Bookmarks").is_some(), "kinds are drawn as tiles");
+
+        view.update_in(cx, |v, window, cx| v.choose(ColumnKind::Bookmarks, window, cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("add-column-input").is_none());
+
+        view.update_in(cx, |v, window, cx| v.choose(ColumnKind::User, window, cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("add-column-input").is_some());
     }
 
     #[gpui_kit::test]
