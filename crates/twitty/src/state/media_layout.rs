@@ -21,6 +21,47 @@ pub struct Grid {
     pub height: f32,
 }
 
+/// Which corners of a tile touch a corner of the grid and must be rounded.
+///
+/// GPUI clips children to a rectangle, not to the parent's rounded corners,
+/// so each image has to round its own outer corners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Corners {
+    pub top_left: bool,
+    pub top_right: bool,
+    pub bottom_left: bool,
+    pub bottom_right: bool,
+}
+
+impl Corners {
+    /// All four corners rounded.
+    pub const ALL: Corners =
+        Corners { top_left: true, top_right: true, bottom_left: true, bottom_right: true };
+    /// Only the top corners (an image above other content).
+    pub const TOP: Corners =
+        Corners { top_left: true, top_right: true, bottom_left: false, bottom_right: false };
+    /// Only the bottom corners (an image below other content).
+    pub const BOTTOM: Corners =
+        Corners { top_left: false, top_right: false, bottom_left: true, bottom_right: true };
+}
+
+impl Grid {
+    /// The outer corners of `tile`, for a grid `width` pixels wide.
+    pub fn corners(&self, tile: &Tile, width: f32) -> Corners {
+        const EPS: f32 = 0.5;
+        let left = tile.x <= EPS;
+        let top = tile.y <= EPS;
+        let right = tile.x + tile.w >= width - EPS;
+        let bottom = tile.y + tile.h >= self.height - EPS;
+        Corners {
+            top_left: top && left,
+            top_right: top && right,
+            bottom_left: bottom && left,
+            bottom_right: bottom && right,
+        }
+    }
+}
+
 /// Lays out `count` media tiles in a grid of `width` pixels.
 ///
 /// A single item keeps its aspect ratio, clamped between 3:4 (portrait) and
@@ -115,5 +156,44 @@ mod tests {
     fn zero_width_does_not_go_negative() {
         let g = layout(4, None, 0.0);
         assert!(g.tiles.iter().all(|t| t.w >= 0.0 && t.h >= 0.0));
+    }
+
+    #[test]
+    fn only_outer_corners_are_rounded() {
+        let w = 300.0;
+        let c = |n: usize| {
+            let g = layout(n, None, w);
+            g.tiles.iter().map(|t| g.corners(t, w)).collect::<Vec<_>>()
+        };
+        assert_eq!(c(1), vec![Corners::ALL]);
+
+        let two = c(2);
+        assert_eq!(two[0], Corners { top_left: true, bottom_left: true, ..Corners::default() });
+        assert_eq!(two[1], Corners { top_right: true, bottom_right: true, ..Corners::default() });
+
+        let three = c(3);
+        assert_eq!(three[0], Corners { top_left: true, bottom_left: true, ..Corners::default() });
+        assert_eq!(three[1], Corners { top_right: true, ..Corners::default() });
+        assert_eq!(three[2], Corners { bottom_right: true, ..Corners::default() });
+
+        let four = c(4);
+        assert_eq!(four[0], Corners { top_left: true, ..Corners::default() });
+        assert_eq!(four[1], Corners { top_right: true, ..Corners::default() });
+        assert_eq!(four[2], Corners { bottom_left: true, ..Corners::default() });
+        assert_eq!(four[3], Corners { bottom_right: true, ..Corners::default() });
+    }
+
+    #[test]
+    fn every_grid_corner_is_covered_exactly_once() {
+        let w = 288.0;
+        for n in 1..=4 {
+            let g = layout(n, AspectRatio::new(3, 2), w);
+            let cs: Vec<Corners> = g.tiles.iter().map(|t| g.corners(t, w)).collect();
+            let count = |f: fn(&Corners) -> bool| cs.iter().filter(|c| f(c)).count();
+            assert_eq!(count(|c| c.top_left), 1, "n={n}");
+            assert_eq!(count(|c| c.top_right), 1, "n={n}");
+            assert_eq!(count(|c| c.bottom_left), 1, "n={n}");
+            assert_eq!(count(|c| c.bottom_right), 1, "n={n}");
+        }
     }
 }

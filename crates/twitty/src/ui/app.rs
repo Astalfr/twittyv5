@@ -3,9 +3,9 @@
 use std::{path::PathBuf, sync::Arc};
 
 use gpui_kit::{
-    Context, Entity, FontWeight, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription, Window, assets::IconName, component::button::*, component::*, div, prelude::*,
-    px,
+    Context, Entity, FontWeight, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
+    Styled, Subscription, Window, assets::IconName, component::button::*, component::*, div,
+    prelude::*, px,
 };
 use twitty_model::{Backend, FeedSource, HomeMode, NotificationFilter, SearchSort};
 
@@ -37,6 +37,7 @@ pub struct TwittyApp {
     hub: Entity<InteractionsHub>,
     columns: Vec<(ColumnId, Entity<ColumnView>)>,
     theme_name: &'static str,
+    deck_scroll: ScrollHandle,
     _subs: Vec<Subscription>,
 }
 
@@ -64,6 +65,7 @@ impl TwittyApp {
             hub,
             columns: Vec::new(),
             theme_name: theme::NAMES[0],
+            deck_scroll: ScrollHandle::new(),
             _subs: vec![hub_sub],
         };
         let configs = this.deck.active().columns.clone();
@@ -254,6 +256,10 @@ impl Render for TwittyApp {
                 .min_w_0()
                 .h_full()
                 .overflow_x_scroll()
+                .track_scroll(&self.deck_scroll)
+                // Without this GPUI turns a vertical wheel over a column into a
+                // horizontal deck scroll as well. Shift+wheel / touchpad still scroll sideways.
+                .restrict_scroll_to_axis()
                 .children(self.columns.iter().map(|(_, view)| view.clone()))
                 .into_any_element()
         };
@@ -274,5 +280,53 @@ impl Render for TwittyApp {
                 )
             })
             .child(h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(body))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, point};
+    use twitty_model::mock::MockBackend;
+
+    #[gpui_kit::test]
+    fn vertical_wheel_over_a_column_does_not_scroll_the_deck(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(crate::runtime::Runtime::inline());
+        });
+        // Enough columns to overflow any test window horizontally.
+        let mut deck = DeckFile::default();
+        for _ in 0..8 {
+            deck.add_column(FeedSource::Bookmarks);
+        }
+        let options = AppOptions { deck_path: None, poll: false, banner: None };
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|_, cx| TwittyApp::new(deck, backend, options, cx));
+        cx.run_until_parked();
+        let deck_x = |cx: &mut gpui_kit::VisualTestContext| {
+            app.read_with(cx, |app, _| app.deck_scroll.offset().x)
+        };
+        let over_column = point(px(250.), px(500.));
+
+        for _ in 0..5 {
+            cx.simulate_event(ScrollWheelEvent {
+                position: over_column,
+                delta: ScrollDelta::Lines(point(0.0, -3.0)),
+                ..Default::default()
+            });
+            cx.run_until_parked();
+        }
+        assert_eq!(deck_x(cx), px(0.), "vertical wheel must not move the deck sideways");
+
+        // Shift+wheel arrives from the platform as a horizontal delta.
+        cx.simulate_event(ScrollWheelEvent {
+            position: over_column,
+            delta: ScrollDelta::Lines(point(-3.0, 0.0)),
+            modifiers: Modifiers { shift: true, ..Default::default() },
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        assert!(deck_x(cx) < px(0.), "horizontal wheel still scrolls the deck");
     }
 }

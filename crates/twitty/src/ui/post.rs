@@ -290,16 +290,18 @@ fn media_grid(
     post: &Post,
     theme: &gpui_kit::component::Theme,
 ) -> impl IntoElement {
+    // Tiles are positioned inside the 1px border, so lay them out on the inner width.
+    let inner = (width - 2.0 * BORDER).max(0.0);
     let grid =
-        media_layout::layout(media.len(), media.first().and_then(|m| m.preview().aspect()), width);
+        media_layout::layout(media.len(), media.first().and_then(|m| m.preview().aspect()), inner);
     let url = post.url.to_string();
     div()
         .id(id)
         .relative()
         .mt_2()
         .w(px(width))
-        .h(px(grid.height))
-        .rounded(px(16.))
+        .h(px(grid.height + 2.0 * BORDER))
+        .rounded(px(RADIUS))
         .overflow_hidden()
         .border_1()
         .border_color(theme.border)
@@ -321,13 +323,30 @@ fn media_grid(
                 .top(px(tile.y))
                 .w(px(tile.w))
                 .h(px(tile.h))
-                .child(
-                    img(m.preview().url.as_str().to_owned())
-                        .size_full()
-                        .object_fit(ObjectFit::Cover),
-                )
+                .child(rounded_img(m.preview().url.as_str(), grid.corners(tile, inner)))
                 .children(overlay)
         }))
+}
+
+/// Outer radius of media boxes and cards.
+const RADIUS: f32 = 16.0;
+/// Border width of media boxes and cards.
+const BORDER: f32 = 1.0;
+
+/// A cover-fit image that rounds its own outer corners.
+///
+/// GPUI's `overflow_hidden` clips to a rectangle, so a rounded parent does not
+/// round its children: each image rounds the corners that touch the parent's
+/// corners, with the parent's radius minus its border.
+fn rounded_img(url: &str, corners: media_layout::Corners) -> impl IntoElement {
+    let r = px(RADIUS - BORDER);
+    img(url.to_owned())
+        .size_full()
+        .object_fit(ObjectFit::Cover)
+        .when(corners.top_left, |i| i.rounded_tl(r))
+        .when(corners.top_right, |i| i.rounded_tr(r))
+        .when(corners.bottom_left, |i| i.rounded_bl(r))
+        .when(corners.bottom_right, |i| i.rounded_br(r))
 }
 
 fn fmt_duration(d: std::time::Duration) -> String {
@@ -423,9 +442,10 @@ fn quote_card(id: (&'static str, usize), q: &Post, width: f32, cx: &mut App) -> 
         )
         .children(q.media.first().map(|m| {
             let grid = media_layout::layout(1, m.preview().aspect(), width);
-            div().w_full().h(px(grid.height.min(220.))).child(
-                img(m.preview().url.as_str().to_owned()).size_full().object_fit(ObjectFit::Cover),
-            )
+            div()
+                .w_full()
+                .h(px(grid.height.min(220.)))
+                .child(rounded_img(m.preview().url.as_str(), media_layout::Corners::BOTTOM))
         }))
 }
 
@@ -453,7 +473,7 @@ fn link_card(
             div()
                 .w_full()
                 .h(px(width / 1.91))
-                .child(img(image.url.as_str().to_owned()).size_full().object_fit(ObjectFit::Cover))
+                .child(rounded_img(image.url.as_str(), media_layout::Corners::TOP))
         }))
         .child(
             v_flex()

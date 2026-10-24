@@ -68,6 +68,8 @@ Windows 11 + PowerShell is the main dev environment.
 - **Spawned tasks** hold `WeakEntity`, never `Entity`. Don't keep entity borrows across `.await`. Call `cx.notify()` after mutating view state.
 - **Timelines** use `list()` + `ListState` (variable height). Don't use `uniform_list` / `v_virtual_list` for posts.
 - **`ListState::set_scroll_handler` runs while the `ListState` is mutably borrowed.** Reading the list there panics, so `cx.defer` the reaction (see `ui/column.rs`).
+- **`overflow_hidden` clips to a rectangle, not to rounded corners.** Images inside rounded boxes must round their own outer corners (`rounded_img` + `media_layout::Corners` in `ui/post.rs`).
+- **Horizontal-only scroll containers** need `.restrict_scroll_to_axis()`, or GPUI turns vertical wheel input into horizontal scrolling (see the deck in `ui/app.rs`).
 - **Colours** come from the theme (`cx.theme()` tokens), never hard-coded hex in views. UI conventions: [docs/ui.md](docs/ui.md).
 
 ## Testing: a feature isn't done until it's tested
