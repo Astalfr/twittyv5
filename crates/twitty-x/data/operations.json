@@ -586,10 +586,10 @@
       "method": "POST",
       "source": "live discovery 2026-10-24 (logged-in legacy bundles)"
     },
-    "retweetButtonRetweetMutation": {
-      "query_id": "6uvqjlPaij9o7Ce15XW4sA",
+    "CreateRetweet": {
+      "query_id": "mbRO74GrOvSfRcJnlMapnQ",
       "method": "POST",
-      "source": "live discovery 2026-10-24 (logged-in Relay chunks); the legacy CreateRetweet id 404s"
+      "source": "live discovery 2026-10-24 (logged-in legacy bundles)"
     },
     "DeleteRetweet": {
       "query_id": "ZyZigVsNiFO6v1dEks1eWg",

@@ -61,7 +61,7 @@ X doesn't document this API. These notes come from community clients: [`bun_x`](
   3. Regex `{queryId, operationName}` out of the bundles.
   4. Cache the results on disk for 24h, falling back to an embedded snapshot.
 - **`features` / `fieldToggles`**: JSON query params, one set per operation. They also drift.
-- **`x-client-transaction-id`**: enforcement is increasing. For now a random value is accepted. Error code 353 means X now requires the real algorithm (port it from x-go `transaction.go` / the `x-client-transaction` crate).
+- **`x-client-transaction-id`**: enforced on some writes since 2026-10-24 (random ids get 404/226). The real algorithm is ported in `twitty-x/src/transport/transaction.rs` ([docs/x-api.md](docs/x-api.md)).
 - **Rate limits**: track the `x-rate-limit-limit/remaining/reset` headers per endpoint, and back off on 429.
 - **Response shape**: `data.<root>.timeline.instructions[]`, with these parts:
   - Instruction types: `TimelineAddEntries`, `TimelineReplaceEntry`, `TimelinePinEntry`, `TimelineClearCache`, …

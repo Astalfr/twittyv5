@@ -28,7 +28,7 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: `poll::bucket` returns `None` for Home "For you", like conversations. It loads on open and on an explicit refresh only; "Following" still polls.
 - **Why**: "For you" is algorithmic and re-ranked on every request, so polling it pulls in a churn of posts that aren't "new" and moves the timeline under the reader.
 
-### 2026-10-24: Random transaction id kept (M10)
+### 2026-10-24: Random transaction id kept (M10) (superseded the same day, see "Real `x-client-transaction-id`")
 - **Decision**: The planned port of X's real `x-client-transaction-id` algorithm is not done.
 - **Why**: X still accepts random ids (verified with every live request this session), the algorithm depends on fast-changing web bundles, and a wrong port is worse than none. Enforcement is detected: error 353 becomes `TransactionIdRequired`, visible in the UI, the log and Diagnostics.
 - **Consequences**: When 353 appears, follow the runbook in x-api.md.
@@ -108,15 +108,15 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: Commit scrubbed full responses (`twitty-x-cli anonymise`, random key per run, leak check), and snapshot a compact line-per-row summary of the model output instead of serialising model types.
 - **Why**: Real shapes catch drift that hand-written JSON misses. Summaries are readable in review and keep `twitty-model` free of test-only `Serialize` impls.
 
-### 2026-10-24: Repost uses the Relay mutation `retweetButtonRetweetMutation`
-- **Finding**: The legacy `CreateRetweet` id `mbRO74GrOvSfRcJnlMapnQ` returns HTTP 404, yet the logged-in bundles still declare it. A refresh found the same id, so reposting failed with `StaleQueryId`. On the same day `FavoriteTweet` and `DeleteRetweet` (legacy) still worked. The Relay `retweetButtonRetweetMutation` (`6uvqjlPaij9o7Ce15XW4sA`) works as `graphql/<id>/retweetButtonRetweetMutation` with `{"tweetId"}`. Probed with a nonexistent tweet id (error 144, no side effect).
-- **Decision**: `PostAction::Repost` calls the Relay mutation, which replaces `CreateRetweet` in `data/operations.json`. The other actions stay on their legacy operations while those still answer.
-- **Consequences**: Embedded names are discovery targets, so the Relay name is refreshed like any other. If another legacy mutation starts to 404 while its id is unchanged, look for its `…Mutation` counterpart in the query-id cache.
+### 2026-10-24: Real `x-client-transaction-id` (repost and bookmark were failing)
+- **Finding**: With random transaction ids, `CreateRetweet` and `CreateBookmark` answered HTTP 404, and rediscovery found the same ids. The Relay `retweetButtonRetweetMutation` answered error 226 ("looks like it might be automated") on a real post. Likes, unbookmarking and reads still passed. With a real id, both legacy mutations reach the server again (error 144/34 for a nonexistent tweet), and a signed `CreateBookmark` on a real tweet succeeds. So the 404s were enforcement of this header, not dead ids. That the 226 had the same cause is likely but not yet confirmed by a real repost; 226 can also be an account-level trust signal that no header fixes. An earlier commit the same day (`abe6456`) wrongly moved repost to the Relay mutation; that is reverted.
+- **Decision**: Port the web client's algorithm into `transport/transaction.rs` (after XClientTransaction, MIT), rather than depend on the `x-client-transaction` crate: it is about 250 lines, and owning it keeps the page parsing next to discovery's. The key material comes from the logged-in home page, cached for an hour. Any failure falls back to a random id with a warning, never to a failed request. `sha2` and `base64` were already in the build through other crates.
+- **Consequences**: One extra page fetch per hour. The first request after launch waits for it (two fetches, each with a 20 s timeout), because concurrent requests queue on the signer's lock instead of each fetching the page. The algorithm depends on x.com's markup (`twitter-site-verification`, `loading-x-anim-*`, the `ondemand.s` chunk and its `(x[N],16)` indices), so the runbook in x-api.md lists them. Supersedes "Random transaction id kept (M10)".
 
 ### 2026-10-24: X's logged-out site moved to a Relay client; discovery reads both formats
 - **Finding**: `https://x.com/?lang=en` now loads `x-web` bundles (Vite + Relay). Operations are Relay persisted queries (`params:{id,name:"…Query",operationKind}`) without feature switches. No `responsive-web` bundle is referenced from the HTML or `sw.js`, so the community discovery methods find nothing there. The logged-in app still called `0toR0MxC06yY3Fc57GXBpA/HomeTimeline` (old-style path) on the same day.
 - **Decision**: Discovery extracts both the legacy and the Relay formats, follows `assets/*.js` chunks, and runs logged in when a session exists. It is best effort: the catalog falls back to the cache and then the embedded ids, and a 404 triggers one refresh + one retry.
-- **Settled live (same day)**: the logged-in app is the legacy client and uses `<id>/<OperationName>` with `features`/`fieldToggles`. Its operations are mostly in lazily loaded chunks listed in inline webpack chunk maps, which discovery now follows. Relay operations are called the same way, as `<id>/<relayName>` (see the repost entry above).
+- **Settled live (same day)**: the logged-in app is the legacy client and uses `<id>/<OperationName>` with `features`/`fieldToggles`. Its operations are mostly in lazily loaded chunks listed in inline webpack chunk maps, which discovery now follows. Relay operations also answer on `<id>/<relayName>` (verified with `retweetButtonRetweetMutation`), but Twitty doesn't use them.
 
 ### 2026-10-24: Embedded fallback ids come from our own live discovery
 - **Decision**: `data/operations.json` is generated from a logged-in `refresh-ids` run, including each operation's feature switches and field toggles. `data/default_features.json` (values for those switches) comes from `bun_x` (Apache-2.0).
@@ -164,7 +164,7 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: The user pastes `auth_token` + `ct0`. They're stored in Windows Credential Manager.
 - **Why**: `gpui-webview` doesn't support Windows, and building the X login flow ourselves is fragile and risky.
 
-### 2026-10-24: Random `x-client-transaction-id` for now
+### 2026-10-24: Random `x-client-transaction-id` for now (superseded, see "Real `x-client-transaction-id`")
 - **Decision**: Send a random 32-hex value per request, as `bun_x` does.
 - **Why**: X currently accepts it. The real algorithm is a known follow-up, triggered by error 353 ([x-api.md](x-api.md)).
 

@@ -103,6 +103,78 @@ async fn each_request_gets_a_fresh_transaction_id() {
     );
 }
 
+/// A client whose transport signs requests from a synthetic home page served
+/// by `server` (its chunk map points at `server` too).
+fn signing_client(server: &MockServer) -> XClient {
+    let page = Url::parse(&format!("{}/home", server.uri())).unwrap();
+    let transport = transport(server).signing_from(page).unwrap();
+    XClient::new(transport, Arc::new(Catalog::new(None)), None)
+}
+
+async fn serve_signing_page(server: &MockServer) {
+    let home = include_str!("fixtures/transaction/home.html").replace(
+        "https://abs.twimg.com/responsive-web/client-web/",
+        &format!("{}/client-web/", server.uri()),
+    );
+    Mock::given(path("/home"))
+        .and(header("cookie", format!("auth_token={TOKEN}; ct0={CSRF}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_string(home))
+        .expect(1)
+        .mount(server)
+        .await;
+    Mock::given(path("/client-web/ondemand.s.4b0d8ef8e73c2f3da.js"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("fixtures/transaction/ondemand.s.js")),
+        )
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn requests_are_signed_with_the_page_key() {
+    use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+    let server = MockServer::start().await;
+    serve_signing_page(&server).await;
+    Mock::given(path(HOME_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .mount(&server)
+        .await;
+    let c = signing_client(&server);
+    c.home_timeline(false, 20, None).await.unwrap();
+    c.home_timeline(false, 20, None).await.unwrap();
+
+    let reqs = server.received_requests().await.unwrap();
+    let ids: Vec<_> = reqs
+        .iter()
+        .filter(|r| r.url.path() == HOME_PATH)
+        .map(|r| r.headers["x-client-transaction-id"].to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(ids.len(), 2, "the page is fetched once and the key reused");
+    let raw = STANDARD_NO_PAD.decode(&ids[0]).unwrap();
+    // Random mask byte, then key (48) + time (4) + hash (16) + marker (1).
+    assert_eq!(raw.len(), 1 + 48 + 4 + 16 + 1);
+    assert_eq!(raw[raw.len() - 1] ^ raw[0], 3);
+    assert_ne!(ids[0], ids[1]);
+}
+
+#[tokio::test]
+async fn an_unreadable_signing_page_falls_back_to_random_ids() {
+    let server = MockServer::start().await;
+    Mock::given(path("/home")).respond_with(ResponseTemplate::new(503)).mount(&server).await;
+    Mock::given(path(HOME_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ok_body()))
+        .mount(&server)
+        .await;
+    signing_client(&server).home_timeline(false, 20, None).await.unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let api = reqs.iter().find(|r| r.url.path() == HOME_PATH).unwrap();
+    let id = api.headers["x-client-transaction-id"].to_str().unwrap();
+    assert_eq!(id.len(), 32);
+    assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
 #[tokio::test]
 async fn rotated_cookies_are_used_next_and_reported() {
     let server = MockServer::start().await;

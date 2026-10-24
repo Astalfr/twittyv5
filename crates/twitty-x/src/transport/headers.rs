@@ -70,14 +70,6 @@ pub(crate) fn static_headers(ids: &ClientIds) -> HeaderMap {
     map
 }
 
-/// A value for `x-client-transaction-id`.
-///
-/// X currently accepts an opaque random value. If it starts answering with
-/// error 353, the real algorithm must be implemented here (see docs/x-api.md).
-pub(crate) fn transaction_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,14 +83,6 @@ mod tests {
         assert_eq!(h["x-client-uuid"].to_str().unwrap(), ids.client_uuid);
         assert!(h.get("cookie").is_none());
         assert!(h.get("x-csrf-token").is_none());
-    }
-
-    #[test]
-    fn transaction_ids_are_unique_hex() {
-        let a = transaction_id();
-        assert_eq!(a.len(), 32);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_ne!(a, transaction_id());
     }
 
     #[test]

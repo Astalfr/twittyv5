@@ -306,7 +306,7 @@ async fn actions_post_their_mutation() {
     let cases = [
         (PostAction::Like(PostId::new("1")), "FavoriteTweet", "tweet_id"),
         (PostAction::Unlike(PostId::new("1")), "UnfavoriteTweet", "tweet_id"),
-        (PostAction::Repost(PostId::new("1")), "retweetButtonRetweetMutation", "tweetId"),
+        (PostAction::Repost(PostId::new("1")), "CreateRetweet", "tweet_id"),
         (PostAction::Unrepost(PostId::new("1")), "DeleteRetweet", "source_tweet_id"),
         (PostAction::Bookmark(PostId::new("1")), "CreateBookmark", "tweet_id"),
         (PostAction::Unbookmark(PostId::new("1")), "DeleteBookmark", "tweet_id"),

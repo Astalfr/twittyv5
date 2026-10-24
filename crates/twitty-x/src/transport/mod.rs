@@ -4,6 +4,7 @@
 mod cookies;
 mod headers;
 mod rate_limit;
+mod transaction;
 
 use std::{
     fmt,
@@ -71,6 +72,9 @@ pub struct Transport {
     on_rotate: Option<RotateHook>,
     limits: RateLimits,
     retry: RetryPolicy,
+    /// Signs requests with a real `x-client-transaction-id`; `None` sends
+    /// random ids (tests, which must not fetch x.com).
+    signer: Option<transaction::Signer>,
 }
 
 impl fmt::Debug for Transport {
@@ -79,6 +83,7 @@ impl fmt::Debug for Transport {
             .field("api_base", &self.api_base.as_str())
             .field("session", &"***")
             .field("retry", &self.retry)
+            .field("signer", &self.signer)
             .finish_non_exhaustive()
     }
 }
@@ -86,6 +91,8 @@ impl fmt::Debug for Transport {
 impl Transport {
     /// Production API base.
     pub const API_BASE: &str = "https://x.com/i/api/";
+    /// The page whose key and animation sign requests.
+    pub const SIGNING_PAGE: &str = "https://x.com/home";
 
     /// Builds a transport. `api_base` must end with `/`.
     pub fn new(
@@ -105,7 +112,17 @@ impl Transport {
             on_rotate: None,
             limits: RateLimits::default(),
             retry,
+            signer: None,
         })
+    }
+
+    /// Signs requests with a real `x-client-transaction-id` derived from
+    /// `page` (use [`Self::SIGNING_PAGE`]). The page is fetched, logged in,
+    /// before the first request and again every hour; until it can be read,
+    /// requests carry a random id.
+    pub fn signing_from(mut self, page: Url) -> Result<Self, XError> {
+        self.signer = Some(transaction::Signer::new(page)?);
+        Ok(self)
     }
 
     /// Registers a callback for cookie rotation.
@@ -155,13 +172,17 @@ impl Transport {
 
     async fn send_once(&self, req: &ApiRequest, url: &Url) -> Result<Value, XError> {
         let session = self.session();
+        let transaction_id = match &self.signer {
+            Some(signer) => signer.id(&session, req.method, url.path()).await,
+            None => transaction::random_id(),
+        };
         let mut builder = match req.method {
             Method::Get => self.http.get(url.clone()),
             Method::Post => self.http.post(url.clone()),
         }
         .header("cookie", session.cookie_header())
         .header("x-csrf-token", session.ct0.expose())
-        .header("x-client-transaction-id", headers::transaction_id())
+        .header("x-client-transaction-id", transaction_id)
         .query(&req.query);
         match &req.body {
             Some(Body::Json(body)) => builder = builder.json(body),

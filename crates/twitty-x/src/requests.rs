@@ -117,9 +117,7 @@ pub(crate) fn action(action: &PostAction) -> (&'static str, Value) {
     match action {
         PostAction::Like(_) => ("FavoriteTweet", json!({"tweet_id": id})),
         PostAction::Unlike(_) => ("UnfavoriteTweet", json!({"tweet_id": id})),
-        // X retired the legacy `CreateRetweet` id (404) while it still ships in
-        // the bundles; the Relay mutation is what the web client uses now.
-        PostAction::Repost(_) => ("retweetButtonRetweetMutation", json!({"tweetId": id})),
+        PostAction::Repost(_) => ("CreateRetweet", json!({"tweet_id": id, "dark_request": false})),
         PostAction::Unrepost(_) => {
             ("DeleteRetweet", json!({"source_tweet_id": id, "dark_request": false}))
         }
@@ -289,8 +287,8 @@ mod tests {
             (PostAction::Unlike(id.clone()), "UnfavoriteTweet", json!({"tweet_id": "42"})),
             (
                 PostAction::Repost(id.clone()),
-                "retweetButtonRetweetMutation",
-                json!({"tweetId": "42"}),
+                "CreateRetweet",
+                json!({"tweet_id": "42", "dark_request": false}),
             ),
             (
                 PostAction::Unrepost(id.clone()),

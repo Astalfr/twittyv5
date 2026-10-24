@@ -4,7 +4,7 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 > Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
 
-**M10:** `XBackend` keeps per-operation health counters (`Backend::health`), shown in Settings → Diagnostics; a response with no timeline at all counts as a warning. The transaction id is still random (see below): X accepts it, and a 353 would show up as an error in Diagnostics and the UI.
+**M10:** `XBackend` keeps per-operation health counters (`Backend::health`), shown in Settings → Diagnostics; a response with no timeline at all counts as a warning. Requests carry a real transaction id since 2026-10-24 (see below).
 
 **M8:** `XBackend::act` and `publish` send the web client's mutations (below). They are tested against a mock server only; the first real use is the user's.
 
@@ -57,7 +57,7 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 | `origin` / `referer` | `https://x.com` / `https://x.com/` |
 | `user-agent` | A current stable Chrome UA (`transport::CHROME_UA`, update from time to time) |
 | `x-client-uuid`, `x-twitter-client-deviceid` | `ClientIds`: random UUIDs, saved once per install (`%LOCALAPPDATA%\Twitty\cache\client-ids.json`) |
-| `x-client-transaction-id` | Random 32-hex per request. See below. |
+| `x-client-transaction-id` | Signed per request from the home page's key (`transport/transaction.rs`). See below. |
 
 **Cookie rotation**: when a response's `Set-Cookie` carries a new `ct0`/`auth_token`, the transport switches to it for the next request and calls the `on_rotate` hook. The app writes the rotated session back to where it came from: the keyring, or the session file (write + rename); sessions from env vars aren't persisted. Empty values (deletions) are ignored; an expired session shows up as 401 instead.
 
@@ -125,7 +125,7 @@ What the live runs showed:
 - **Logged out:** 204 Relay operations in 250 `x-web` scripts in ~1.5s.
 - **Logged in:** the legacy client. Its `main.js` declares ~100 operations; the rest (including `HomeTimeline`, `HomeLatestTimeline`, `Bookmarks`, `NotificationsTimeline`, `ListLatestTweetsTimeline`) are only in lazily loaded chunks reachable through the inline chunk maps. The logged-in chunks also contain Relay persisted queries. One run: 464 scripts, 585 legacy + 465 Relay declarations, ~6s.
 - 11 of the 18 ids `bun_x` published the day before were already stale (`HomeLatestTimeline`, `TweetDetail`, `SearchTimeline`, `UserByScreenName`, `UserTweets`, `UserTweetsAndReplies`, `UserMedia`, `Likes`, `ListLatestTweetsTimeline`, `Viewer`, `CreateTweet`); the like/repost/bookmark mutations were unchanged.
-- Twitty mostly calls legacy-named operations. Relay operations work on the same endpoint as `graphql/<id>/<relayName>` with `{variables, features, queryId}` (verified live 2026-10-24 with `retweetButtonRetweetMutation`). Their variables are camelCase (`tweetId`), and a wrong name gets HTTP 422 `GRAPHQL_VALIDATION_FAILED`. A legacy id can die (404) while it still ships in the bundles. Rediscovery then finds the same dead id, so the fix is to move to the Relay operation by hand (see `docs/decisions.md`).
+- Twitty calls legacy-named operations. Relay operations also work on the same endpoint, as `graphql/<id>/<relayName>` with `{variables, features, queryId}` (verified live 2026-10-24 with `retweetButtonRetweetMutation`). Their variables are camelCase (`tweetId`), and a wrong name gets HTTP 422 `GRAPHQL_VALIDATION_FAILED`.
 
 ### Discovery algorithm
 
@@ -138,7 +138,19 @@ What the live runs showed:
 
 ## `x-client-transaction-id`
 
-The real web client builds this from an animation key in the home page plus a hash of method + path + time. For now X accepts a random 32-char hex value per request, and `bun_x` does the same. If X returns **error code 353** (`XError::TransactionIdRequired`), enforcement has arrived. Then port the real algorithm (x-go `transaction.go`, or the `x-client-transaction` crate after checking it against current behaviour) into `transport/headers.rs`.
+X enforces this header on some writes. With a random value, `CreateRetweet` and `CreateBookmark` get **HTTP 404**, which looks exactly like a stale query id: rediscovery finds the same id. A Relay mutation got error **226** ("looks like it might be automated") on a real post, probably for the same reason; 226 can also be an account-level signal that no header fixes. Likes, unbookmarking and reads still passed with random ids on 2026-10-24. So a 404 on a write whose id refresh reports `changed=0` points here, not at the catalog.
+
+`transport/transaction.rs` ports the web client's algorithm (after XClientTransaction, MIT):
+1. **Key material**, loaded once per hour by `Signer` and fetched logged in, with its own plain HTTP client. It comes from `https://x.com/home`:
+   - the base64 `content` of `<meta name="twitter-site-verification">` (the key, 48 bytes);
+   - the four `<svg id="loading-x-anim-N">`. Frame `key[5] % 4` is used, and its second `<path d>` after `M 10,30 C` is split on `C` into 16 rows of 11 numbers.
+   - the `ondemand.s.<hash>a.js` chunk, found through the inline webpack chunk maps (`discovery::extract_webpack_chunks`). Every `(x[N],16)` in it is an index into the key: the first picks the row (`key[i] % 16`), and the rest multiply into the frame time (`Π key[i] % 16`, rounded to tens, over 4096 ms).
+2. **Animation key**: the row is evaluated at that time. A cubic-bezier easing from row[7..11] interpolates colour row[0..3] → row[3..6] and a rotation of 0 → row[6] scaled to 60–360°. The result is printed as hex: rounded colour, then the |values| of the rotation matrix rounded to 2 decimals, as hex fractions.
+3. **Per request**: `t = (now_ms − 1682924400000) / 1000`, and `sha256("{METHOD}!{/i/api/… path}!{t}obfiowerehiring{animation key}")`. Then `[r, (key ++ t as 4 LE bytes ++ hash[..16] ++ [3]) XOR r]` for a random byte `r`, in base64 without padding (94 chars).
+
+If the page can't be read or parsed, requests fall back to a random id with a warning, and loading is retried after 5 minutes. A request never fails because of the signer. Tests don't enable it (`Transport::signing_from` is opt-in; `XClient::production` turns it on). They use a synthetic page and chunk in `tests/fixtures/transaction/`, with vectors computed by a straight Python port of the reference.
+
+When writes start failing again with 404, 226 or 353, check that `twitty-x-cli capture op CreateRetweet --vars '{"tweet_id":"1","dark_request":false}' --out dumps/probe.json` still answers error 144 (no such tweet), which means it was signed and accepted. If not, compare the page markers above with x.com's current HTML and chunk.
 
 ## Rate limits and retries
 
@@ -169,7 +181,7 @@ The real web client builds this from an animation key in the home page plus a ha
 | Action | Operation | Variables |
 |---|---|---|
 | Like / unlike | `FavoriteTweet` / `UnfavoriteTweet` | `{"tweet_id"}` |
-| Repost / undo | `retweetButtonRetweetMutation` (Relay) / `DeleteRetweet` | `{"tweetId"}` / `{"source_tweet_id", "dark_request": false}` |
+| Repost / undo | `CreateRetweet` / `DeleteRetweet` | `{"tweet_id", "dark_request": false}` / `{"source_tweet_id", "dark_request": false}` |
 | Bookmark / remove | `CreateBookmark` / `DeleteBookmark` | `{"tweet_id"}` |
 | Post / reply | `CreateTweet` | `{"tweet_text", "dark_request": false, "media": {"media_entities": [], "possibly_sensitive": false}, "semantic_annotation_ids": [], "disallowed_reply_options": null}` plus `reply: {"in_reply_to_tweet_id", "exclude_reply_user_ids": []}` for replies, `attachment_url: "https://x.com/i/status/<id>"` for quotes |
 
@@ -268,10 +280,11 @@ Never commit a raw capture: it contains other people's posts and profile data. P
 
 | Symptom | Likely cause | Action |
 |---|---|---|
+| 404 on a write whose refresh reports `changed=0`, or error 226 | Transaction id rejected | See `x-client-transaction-id` above. |
 | 404 on a GraphQL op | Stale queryId | Should self-heal through discovery. If not, run `twitty-x-cli refresh-ids` and look at the report. If no operations were found, the bundle format changed: update the extractors in `discovery.rs` (and their unit tests), then update `data/operations.json`. |
 | 400 with "features cannot be null" / feature errors | New feature flag | Refresh ids (legacy bundles declare switches). If a flag is still missing, add it to `data/default_features.json`. |
 | Many `Unsupported` items or decode warnings (Settings → Diagnostics shows them per operation, with the last reason; also in the log) | Schema drift | Capture a fixture, update `wire`/`translate`, and add a snapshot test. **The model must not change unless the new data needs a new model concept.** |
-| Error 353 | Transaction ID enforced | Implement the real `txid` algorithm (see above). |
+| Error 353 | Transaction ID rejected | The page markers or the algorithm changed (see above). |
 | 401, or error 32/89 | Session expired or revoked | The UI asks the user to log in again. Nothing to fix. |
 | 403 with an empty body on everything | Bearer or UA blocked | Re-extract the bearer from the bundles and update `CHROME_UA`. |
 | Requests blocked despite correct headers | TLS fingerprinting | Swap the transport client for a Chrome-impersonating one (e.g. `wreq`). This stays inside `transport/`. |

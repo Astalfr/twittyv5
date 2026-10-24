@@ -50,7 +50,10 @@ impl XClient {
         let ids = ids_path.as_deref().map_or_else(ClientIds::random, ClientIds::load_or_create);
         let base = url::Url::parse(Transport::API_BASE)
             .map_err(|e| XError::Decode(format!("API base: {e}")))?;
-        let mut transport = Transport::new(session, &ids, base, RetryPolicy::default())?;
+        let signing_page = url::Url::parse(Transport::SIGNING_PAGE)
+            .map_err(|e| XError::Decode(format!("signing page: {e}")))?;
+        let mut transport = Transport::new(session, &ids, base, RetryPolicy::default())?
+            .signing_from(signing_page)?;
         if let Some(hook) = on_rotate {
             transport = transport.on_rotate(hook);
         }
