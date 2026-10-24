@@ -7,7 +7,8 @@ use gpui_kit::{
     FocusHandle, FontWeight, ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render,
     Resource, ScrollHandle, SharedString, SharedUri, Styled, StyledImage, Subscription, Task,
     Window, assets::IconName, canvas, component::button::*, component::checkbox::Checkbox,
-    component::scroll::ScrollableElement, component::*, div, img, prelude::*, px,
+    component::scroll::ScrollableElement, component::tooltip::Tooltip, component::*, div, img,
+    prelude::*, px,
 };
 use twitty_model::{
     Backend, BackendError, FeedSource, Profile, SpanKind, UserRef, mock::MockBackend,
@@ -31,6 +32,7 @@ use crate::{
     ui::button::TextButton,
     ui::{
         add_column::{AddColumnEvent, AddColumnView},
+        assets::{ADD_COLUMN, ADD_DECK},
         column::{ColumnEvent, ColumnView},
         column_settings::{ColumnSettingsEvent, ColumnSettingsView},
         compose::{ComposeEvent, ComposeView},
@@ -63,6 +65,10 @@ const CHROME_RADIUS: f32 = 8.0;
 /// Width of the sidebar with icons only, and expanded (with labels).
 const RAIL_WIDTH: f32 = 68.0;
 const RAIL_EXPANDED_WIDTH: f32 = 220.0;
+/// Inset of the expanded sidebar's entries, except the decks, which span it.
+const RAIL_PADDING: f32 = 8.0;
+/// Width of the bar on the left of the selected deck.
+const DECK_MARK_WIDTH: f32 = 3.0;
 /// Height of a sidebar entry.
 const RAIL_ENTRY_HEIGHT: f32 = 48.0;
 
@@ -1567,6 +1573,9 @@ impl TwittyApp {
 
     fn render_account_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.options.account.as_ref()?;
+        if self.sidebar_expanded() {
+            return Some(self.render_account_row(cx));
+        }
         let button = Button::new("account")
             .ghost()
             .large()
@@ -1609,6 +1618,92 @@ impl TwittyApp {
                 .on_click(cx.listener(|this, _, window, cx| this.open_login(None, window, cx)))
                 .into_any_element()
         })
+    }
+
+    /// The account entry of the expanded sidebar: the avatar with the
+    /// viewer's name and `@handle` beside it, or a sign-in row.
+    fn render_account_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.options.session.is_none() {
+            let entry = RailEntry {
+                id: "account".into(),
+                selector: "account-button".into(),
+                icon: IconName::LogIn.path(),
+                label: "Sign in".into(),
+                selected: false,
+            };
+            return self.render_rail_entry(
+                entry,
+                None,
+                |this, window, cx| this.open_login(None, window, cx),
+                cx,
+            );
+        }
+        let theme = cx.theme();
+        let face: AnyElement = match self.viewer.as_ref().and_then(|v| v.avatar.as_ref()) {
+            Some(src) => img(crate::ui::remote_image::source(
+                src.url.as_str(),
+                ACCOUNT_AVATAR,
+                ACCOUNT_AVATAR,
+            ))
+            .size(px(ACCOUNT_AVATAR))
+            .flex_none()
+            .aspect_ratio(1.)
+            .object_fit(ObjectFit::Cover)
+            .rounded_full()
+            .debug_selector(|| "account-avatar".into())
+            .into_any_element(),
+            None => div()
+                .flex_none()
+                .size(px(ACCOUNT_AVATAR))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(IconName::CircleUser).size(px(26.)))
+                .into_any_element(),
+        };
+        let names = match &self.viewer {
+            Some(v) => v_flex()
+                .flex_1()
+                .min_w_0()
+                // The default line height spreads the two lines too far apart.
+                .line_height(gpui_kit::relative(1.2))
+                .child(
+                    div()
+                        .truncate()
+                        .font_weight(FontWeight::BOLD)
+                        .debug_selector(|| "account-name".into())
+                        .child(v.display_name.clone()),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .debug_selector(|| "account-handle".into())
+                        .child(format!("@{}", v.handle)),
+                ),
+            None => v_flex().flex_1().min_w_0().child(div().truncate().child("Account")),
+        };
+        h_flex()
+            .id("account")
+            .debug_selector(|| "account-button".into())
+            .w_full()
+            .h(px(52.))
+            // Centres the avatar on the entries' icons above it.
+            .pl(px(11.))
+            .pr_2()
+            .gap_3()
+            .items_center()
+            .rounded_lg()
+            .cursor_pointer()
+            .hover(|s| s.bg(theme.list_hover))
+            .child(face)
+            .child(names)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.account_panel = !this.account_panel;
+                cx.notify();
+            }))
+            .into_any_element()
     }
 
     fn render_account_panel(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1679,7 +1774,7 @@ impl TwittyApp {
                 .debug_selector(move || selector)
                 .ghost()
                 .large()
-                .icon(Icon::new(icon).size(px(24.)))
+                .icon(Icon::empty().path(icon).size(px(24.)))
                 .tooltip(label)
                 .selected(selected)
                 .w(px(52.))
@@ -1701,17 +1796,61 @@ impl TwittyApp {
             .cursor_pointer()
             .when(selected, |d| d.bg(theme.list_active).font_weight(FontWeight::BOLD))
             .hover(|s| s.bg(theme.list_hover))
-            .child(Icon::new(icon).size(px(24.)))
+            .child(Icon::empty().path(icon).size(px(24.)))
             .child(div().flex_1().min_w_0().truncate().child(label))
             .children(trailing)
             .on_click(on_click)
             .into_any_element()
     }
 
+    /// One deck in the sidebar: a row spanning the whole rail, so the
+    /// selected deck's background reaches the window's edge, where a
+    /// primary-coloured bar marks it.
+    fn render_deck_entry(
+        &self,
+        entry: RailEntry,
+        trailing: Option<AnyElement>,
+        on_click: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let RailEntry { id, selector, icon, label, selected } = entry;
+        let theme = cx.theme();
+        let row = h_flex()
+            .id(id)
+            .debug_selector(move || selector)
+            .w_full()
+            .h(px(RAIL_ENTRY_HEIGHT))
+            .items_center()
+            .cursor_pointer()
+            // Always there, so selecting a deck doesn't shift its icon.
+            .border_l(px(DECK_MARK_WIDTH))
+            .border_color(if selected { theme.primary } else { gpui_kit::transparent_black() })
+            .when(selected, |d| d.bg(theme.list_active).font_weight(FontWeight::BOLD))
+            .hover(|s| s.bg(theme.list_hover))
+            .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx)));
+        if self.sidebar_expanded() {
+            // Lines the icon up with the padded entries above and below.
+            row.pl(px(RAIL_PADDING + 14. - DECK_MARK_WIDTH))
+                .pr(px(RAIL_PADDING + 8.))
+                .gap_3()
+                .child(Icon::empty().path(icon).size(px(24.)))
+                .child(div().flex_1().min_w_0().truncate().child(label))
+                .children(trailing)
+                .into_any_element()
+        } else {
+            // Balances the bar so the icon stays centred.
+            row.pr(px(DECK_MARK_WIDTH))
+                .justify_center()
+                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+                .child(Icon::empty().path(icon).size(px(24.)))
+                .into_any_element()
+        }
+    }
+
     fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let expanded = self.sidebar_expanded();
-        let action = |name: &'static str, icon: IconName, label: &'static str| RailEntry {
+        let action = |name: &'static str, icon: SharedString, label: &'static str| RailEntry {
             id: name.into(),
             selector: format!("rail-{name}"),
             icon,
@@ -1743,7 +1882,7 @@ impl TwittyApp {
                 let entry = RailEntry {
                     id: ("rail-deck", ix).into(),
                     selector: format!("rail-deck-{ix}"),
-                    icon: deck_settings::icon(deck.icon),
+                    icon: deck_settings::icon(deck.icon).path(),
                     label: deck.name.clone().into(),
                     selected: ix == active,
                 };
@@ -1761,30 +1900,29 @@ impl TwittyApp {
                         }))
                         .into_any_element()
                 });
-                self.render_rail_entry(entry, edit, move |this, _, cx| this.switch_deck(ix, cx), cx)
+                self.render_deck_entry(entry, edit, move |this, _, cx| this.switch_deck(ix, cx), cx)
             })
             .collect();
         let toggle = if expanded {
-            action("toggle", IconName::PanelLeftClose, "Collapse menu")
+            action("toggle", IconName::PanelLeftClose.path(), "Collapse menu")
         } else {
-            action("toggle", IconName::PanelLeftOpen, "Expand menu")
+            action("toggle", IconName::PanelLeftOpen.path(), "Expand menu")
         };
-        v_flex()
-            .flex_none()
-            .w(px(if expanded { RAIL_EXPANDED_WIDTH } else { RAIL_WIDTH }))
-            .h_full()
-            .py_2()
-            .gap_1()
-            .map(|d| if expanded { d.px_2() } else { d.items_center() })
+        // The decks span the whole rail; everything else is inset.
+        let inset = |d: gpui_kit::Div| {
+            let d = d.flex_none().gap_1();
+            if expanded { d.px(px(RAIL_PADDING)) } else { d.items_center() }
+        };
+        let top = inset(v_flex())
             .child(compose)
             .child(self.render_rail_entry(
-                action("search-people", IconName::Search, "Search people"),
+                action("search-people", IconName::Search.path(), "Search people"),
                 None,
                 |this, window, cx| this.open_user_search(window, cx),
                 cx,
             ))
             .child(self.render_rail_entry(
-                action("add-column", IconName::ListPlus, "Add column"),
+                action("add-column", ADD_COLUMN.into(), "Add column"),
                 None,
                 |this, window, cx| this.open_add_column(window, cx),
                 cx,
@@ -1797,27 +1935,25 @@ impl TwittyApp {
                     .map(|d| if expanded { d.w_full() } else { d.w(px(36.)) })
                     .bg(theme.border),
             )
-            // One entry per deck; clicking one switches to it. Scrolls itself
-            // when there are more decks than fit.
             .child(
-                v_flex()
-                    .id("rail-decks")
-                    .min_h_0()
-                    .gap_1()
-                    .overflow_y_scroll()
-                    .map(|d| if expanded { d.w_full() } else { d.items_center() })
-                    .children(decks),
+                div()
+                    .pt_1()
+                    .text_color(theme.muted_foreground)
+                    .debug_selector(|| "rail-decks-heading".into())
+                    // Smaller when collapsed so it fits the narrow rail.
+                    .map(|d| if expanded { d.pl(px(14.)).text_sm() } else { d.text_xs() })
+                    .child("Decks"),
             )
             .child(self.render_rail_entry(
-                action("deck-add", IconName::Plus, "New deck"),
+                action("deck-add", ADD_DECK.into(), "New deck"),
                 None,
                 |this, window, cx| this.open_deck_settings(None, window, cx),
                 cx,
-            ))
-            .child(div().flex_1())
+            ));
+        let bottom = inset(v_flex())
             .children(self.render_account_button(cx))
             .child(self.render_rail_entry(
-                action("settings", IconName::Settings, "Settings"),
+                action("settings", IconName::Settings.path(), "Settings"),
                 None,
                 |this, _, cx| this.open_settings(cx),
                 cx,
@@ -1827,7 +1963,27 @@ impl TwittyApp {
                 None,
                 move |this, _, cx| this.set_sidebar_expanded(!expanded, cx),
                 cx,
-            ))
+            ));
+        v_flex()
+            .flex_none()
+            .w(px(if expanded { RAIL_EXPANDED_WIDTH } else { RAIL_WIDTH }))
+            .h_full()
+            .py_2()
+            .gap_1()
+            .child(top)
+            // One entry per deck; clicking one switches to it. Scrolls itself
+            // when there are more decks than fit.
+            .child(
+                v_flex()
+                    .id("rail-decks")
+                    .w_full()
+                    .min_h_0()
+                    .gap_1()
+                    .overflow_y_scroll()
+                    .children(decks),
+            )
+            .child(div().flex_1())
+            .child(bottom)
     }
 }
 
@@ -1836,7 +1992,8 @@ struct RailEntry {
     id: ElementId,
     /// For tests (`debug_bounds`).
     selector: String,
-    icon: IconName,
+    /// The icon's asset path (`IconName::path` or one of `assets`' own).
+    icon: SharedString,
     label: SharedString,
     selected: bool,
 }
@@ -2542,6 +2699,48 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn the_expanded_sidebar_names_the_viewer_beside_their_avatar(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
+        let (app, cx) = start(cx, MockBackend::new(), Some(SessionSource::Keyring), &store);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("account-name").is_none(), "collapsed: the avatar only");
+        let heading = cx.debug_bounds("rail-decks-heading").expect("headed when collapsed too");
+        let deck = cx.debug_bounds("rail-deck-0").expect("deck entry drawn");
+        assert!(heading.bottom() <= deck.top(), "the heading is above the decks");
+        assert!(heading.size.width <= px(RAIL_WIDTH), "it fits the collapsed rail");
+
+        app.update(cx, |app, cx| app.set_sidebar_expanded(true, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let face = cx.debug_bounds("account-avatar").expect("the avatar is drawn");
+        let name = cx.debug_bounds("account-name").expect("the name is drawn");
+        let handle = cx.debug_bounds("account-handle").expect("the handle is drawn");
+        assert!(name.left() >= face.right(), "name right of the avatar: {name:?} {face:?}");
+        assert!(handle.left() >= face.right(), "handle right of the avatar");
+        assert!(handle.top() >= name.bottom(), "handle under the name: {handle:?} {name:?}");
+
+        click(cx, "account-button");
+        assert!(app.read_with(cx, |app, _| app.account_panel), "the row opens the panel");
+    }
+
+    #[gpui_kit::test]
+    fn the_decks_span_the_rail_under_their_heading_and_new_deck(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        for (expanded, width) in [(false, RAIL_WIDTH), (true, RAIL_EXPANDED_WIDTH)] {
+            app.update(cx, |app, cx| app.set_sidebar_expanded(expanded, cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let heading = cx.debug_bounds("rail-decks-heading").expect("heading drawn");
+            let add = cx.debug_bounds("rail-deck-add").expect("new deck drawn");
+            let deck = cx.debug_bounds("rail-deck-0").expect("deck drawn");
+            assert!(heading.bottom() <= add.top(), "new deck under the heading ({expanded})");
+            assert!(add.bottom() <= deck.top(), "then the decks ({expanded})");
+            assert_eq!(deck.left(), px(0.), "from the window's edge ({expanded})");
+            assert_eq!(deck.size.width, px(width), "across the whole rail ({expanded})");
+        }
+    }
+
+    #[gpui_kit::test]
     fn sign_out_clears_store_and_returns_to_demo(cx: &mut TestAppContext) {
         let store = MemoryStore::default();
         store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
@@ -2640,7 +2839,7 @@ mod tests {
             tops.windows(2).all(|pair| pair[0] < pair[1]),
             "Tweet, Search people, Add column, then the decks"
         );
-        assert!(top(cx, "rail-deck-0") < top(cx, "rail-deck-add"), "New deck under the list");
+        assert!(top(cx, "rail-deck-add") < top(cx, "rail-deck-0"), "New deck above the list");
         assert!(cx.debug_bounds("deck-edit-0").is_none(), "no edit buttons while collapsed");
 
         // + asks for the new deck's name and icon first.
@@ -2757,6 +2956,8 @@ mod tests {
         cx.run_until_parked();
         let rail = cx.debug_bounds("rail-deck-0").expect("deck entry drawn");
         assert!(rail.size.width > px(RAIL_WIDTH), "a full-width row");
+        let heading = cx.debug_bounds("rail-decks-heading").expect("the decks are headed");
+        assert!(heading.bottom() <= rail.top(), "the heading is above the decks");
         assert!(cx.debug_bounds("deck-edit-0").is_some());
     }
 

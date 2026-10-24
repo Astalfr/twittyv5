@@ -46,7 +46,6 @@ gpui_kit::assets::icon_assets!(
         PanelLeftClose,
         Pencil,
         Trash,
-        ListPlus,
         // Deck icons (`ui::deck_settings::icon`).
         LayoutGrid,
         Star,
@@ -80,11 +79,20 @@ pub const LOGO_SIZE: f32 = 18.;
 pub const HEART_FILL: &str = "twitty/icons/heart-fill.svg";
 /// Filled Lucide bookmark, for a tweet the viewer bookmarked.
 pub const BOOKMARK_FILL: &str = "twitty/icons/bookmark-fill.svg";
+/// The sidebar's **Add column**, redrawn after X Pro's: a column with a plus
+/// between two side bars.
+pub const ADD_COLUMN: &str = "twitty/icons/add-column.svg";
+/// The sidebar's **New deck**, redrawn after X Pro's: columns with a plus in
+/// the top-right corner.
+pub const ADD_DECK: &str = "twitty/icons/add-deck.svg";
 
-/// Twitty's own SVG icons: Lucide ships no filled variants.
-const OWN_ICONS: [(&str, &[u8]); 2] = [
+/// Twitty's own SVG icons: Lucide ships no filled variants, nor X Pro's
+/// sidebar icons.
+const OWN_ICONS: [(&str, &[u8]); 4] = [
     (HEART_FILL, include_bytes!("../../resources/icons/heart-fill.svg")),
     (BOOKMARK_FILL, include_bytes!("../../resources/icons/bookmark-fill.svg")),
+    (ADD_COLUMN, include_bytes!("../../resources/icons/add-column.svg")),
+    (ADD_DECK, include_bytes!("../../resources/icons/add-deck.svg")),
 ];
 
 /// The app's asset source.
@@ -143,7 +151,6 @@ mod tests {
             IconName::PanelLeftClose,
             IconName::Pencil,
             IconName::Trash,
-            IconName::ListPlus,
             // The title bar's window buttons.
             IconName::WindowMinimize,
             IconName::WindowMaximize,
@@ -169,6 +176,16 @@ mod tests {
             let bytes = Assets.load(path).unwrap().unwrap_or_else(|| panic!("missing {path}"));
             let svg = std::str::from_utf8(&bytes).unwrap();
             assert!(svg.starts_with("<svg") && svg.contains(r#"fill="currentColor""#), "{path}");
+            assert!(Assets.list("twitty/").unwrap().iter().any(|p| p.as_ref() == path));
+        }
+    }
+
+    #[test]
+    fn the_sidebar_icons_are_listed_svgs() {
+        for path in [ADD_COLUMN, ADD_DECK] {
+            let bytes = Assets.load(path).unwrap().unwrap_or_else(|| panic!("missing {path}"));
+            let svg = std::str::from_utf8(&bytes).unwrap();
+            assert!(svg.starts_with("<svg") && svg.contains(r#"stroke="currentColor""#), "{path}");
             assert!(Assets.list("twitty/").unwrap().iter().any(|p| p.as_ref() == path));
         }
     }
