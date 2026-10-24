@@ -28,6 +28,7 @@ use crate::{
         repost::RepostChoice,
         settings::Settings,
         toasts::{Notice, Toasts},
+        update::{Release, Status as UpdateStatus, Updates, Version},
     },
     ui::button::TextButton,
     ui::{
@@ -51,6 +52,7 @@ use crate::{
         title_bar, toasts as toast_view,
         user_search::{UserSearchEvent, UserSearchView},
     },
+    update::{UpdateError, UpdateServices},
 };
 
 /// Opacity of the theme's overlay colour behind the image viewer, dialogs and
@@ -78,6 +80,10 @@ const ACCOUNT_AVATAR: f32 = 30.0;
 
 /// How often polling intervals are recomputed from the backend's limits.
 const BUDGET_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// When the first update check runs after startup, and how often after that.
+const UPDATE_FIRST_CHECK: std::time::Duration = std::time::Duration::from_secs(10);
+const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 /// Shown when the session check at startup gets `Unauthorized`.
 pub const EXPIRED_NOTICE: &str = "Your Twitter session expired or was revoked. Sign in again.";
@@ -130,6 +136,9 @@ pub struct AppOptions {
     pub session: Option<SessionSource>,
     /// Sign-in support; `None` hides the account controls.
     pub account: Option<AccountServices>,
+    /// Self-update from GitHub Releases; `None` (tests, `cargo run`) never
+    /// checks.
+    pub updates: Option<UpdateServices>,
 }
 
 /// The root view.
@@ -194,6 +203,15 @@ pub struct TwittyApp {
     _user_search_sub: Option<Subscription>,
     _sheet_sub: Option<Subscription>,
     _hub_subs: Vec<Subscription>,
+    /// The update on offer, if any.
+    updates: Updates,
+    /// The periodic update check.
+    _update_checks: Option<Task<()>>,
+    /// A manual update check ("Check now").
+    update_check: Option<Task<()>>,
+    /// The download and launch of the installer. Separate from the check, so
+    /// "Check now" during a download doesn't cancel it.
+    update_install: Option<Task<()>>,
     /// Messages at the bottom of the window, and the timer that hides them.
     toasts: Toasts,
     _toast_timer: Option<Task<()>>,
@@ -264,6 +282,10 @@ impl TwittyApp {
             _user_search_sub: None,
             _sheet_sub: None,
             _hub_subs: Vec::new(),
+            updates: Updates::new(Version::current()),
+            _update_checks: None,
+            update_check: None,
+            update_install: None,
             toasts: Toasts::default(),
             _toast_timer: None,
             _subs: Vec::new(),
@@ -289,7 +311,186 @@ impl TwittyApp {
                 }
             }));
         }
+        this.schedule_update_checks(cx);
         this
+    }
+
+    /// The update banner's state.
+    pub fn updates(&self) -> &Updates {
+        &self.updates
+    }
+
+    /// Looks for a new release shortly after startup and then every few
+    /// hours, while updates are available and the setting is on.
+    fn schedule_update_checks(&mut self, cx: &mut Context<Self>) {
+        self._update_checks = None;
+        if self.options.updates.is_none() || !self.settings.check_updates() {
+            return;
+        }
+        self._update_checks = Some(cx.spawn(async move |this, cx| {
+            let mut wait = UPDATE_FIRST_CHECK;
+            loop {
+                cx.background_executor().timer(wait).await;
+                wait = UPDATE_INTERVAL;
+                let Ok(Some(latest)) = this.update(cx, |this, cx| this.fetch_latest(cx)) else {
+                    break;
+                };
+                let found = latest.await;
+                if this.update(cx, |this, cx| this.latest_found(found, false, cx)).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Asks GitHub for the latest release, on the network runtime.
+    fn fetch_latest(
+        &self,
+        cx: &gpui_kit::App,
+    ) -> Option<impl Future<Output = Result<Option<Release>, UpdateError>> + use<>> {
+        let source = Arc::clone(&self.options.updates.as_ref()?.source);
+        let task = Runtime::global(cx).spawn(async move { source.latest().await });
+        Some(async move { task.await.unwrap_or_else(|e| Err(UpdateError::Network(e.to_string()))) })
+    }
+
+    /// Settings' "Check now": like the periodic check, but it says when
+    /// Twitty is up to date or the check failed, and offers a release the
+    /// user said "Later" to.
+    pub fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+        let Some(latest) = self.fetch_latest(cx) else {
+            return;
+        };
+        self.update_check = Some(cx.spawn(async move |this, cx| {
+            let found = latest.await;
+            this.update(cx, |this, cx| this.latest_found(found, true, cx)).ok();
+        }));
+    }
+
+    fn latest_found(
+        &mut self,
+        found: Result<Option<Release>, UpdateError>,
+        manual: bool,
+        cx: &mut Context<Self>,
+    ) {
+        match found {
+            Ok(latest) => {
+                let newer = self.updates.found(latest, manual);
+                if manual && !newer {
+                    let current = self.updates.current();
+                    self.show_toast(Notice::success(format!("Twitty {current} is up to date")), cx);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("checking for updates failed: {e}");
+                if manual {
+                    self.show_toast(Notice::error(format!("Checking for updates failed: {e}")), cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The banner's "Install": downloads the installer, starts it and quits
+    /// once pending writes are done. The installer starts Twitty again.
+    pub fn install_update(&mut self, cx: &mut Context<Self>) {
+        let Some(services) = self.options.updates.clone() else {
+            return;
+        };
+        let Some(release) = self.updates.start() else {
+            return;
+        };
+        let UpdateServices { source, launch } = services;
+        let download = Runtime::global(cx).spawn(async move { source.download(&release).await });
+        self.update_install = Some(cx.spawn(async move |this, cx| {
+            let downloaded =
+                download.await.unwrap_or_else(|e| Err(UpdateError::Network(e.to_string())));
+            match downloaded.and_then(|path| launch(&path)) {
+                Ok(()) => {
+                    tracing::info!("update installer started, quitting");
+                    let pending = this
+                        .update(cx, |this, _| (this.settings_save.take(), this.deck_save.take()));
+                    if let Ok((settings, deck)) = pending {
+                        for save in [settings, deck].into_iter().flatten() {
+                            save.await;
+                        }
+                    }
+                    cx.update(|cx| cx.quit());
+                }
+                Err(e) => {
+                    tracing::error!("installing the update failed: {e}");
+                    this.update(cx, |this, cx| {
+                        this.updates.failed(e.to_string());
+                        cx.notify();
+                    })
+                    .ok();
+                }
+            }
+        }));
+        cx.notify();
+    }
+
+    /// The banner's "Later".
+    pub fn dismiss_update(&mut self, cx: &mut Context<Self>) {
+        self.updates.dismiss();
+        cx.notify();
+    }
+
+    /// The update banner, under the demo one.
+    fn render_update_banner(&self, rounded: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let theme = cx.theme().clone();
+        let (text, failed, page) = match self.updates.status() {
+            UpdateStatus::Idle => return None,
+            UpdateStatus::Available(r) => {
+                (format!("Twitty {} is available", r.version), false, Some(r.page.clone()))
+            }
+            UpdateStatus::Downloading(r) => {
+                (format!("Downloading Twitty {}…", r.version), false, None)
+            }
+            UpdateStatus::Failed(r, why) => {
+                (format!("Updating to {} failed: {why}", r.version), true, None)
+            }
+        };
+        let offering = !matches!(self.updates.status(), UpdateStatus::Downloading(_));
+        let color = if failed { theme.danger } else { theme.primary };
+        Some(
+            h_flex()
+                .debug_selector(|| "update-banner".into())
+                .w_full()
+                .justify_center()
+                .items_center()
+                .gap_3()
+                .py_1()
+                .text_xs()
+                .when(rounded, |d| d.rounded_tl(px(CHROME_RADIUS - 1.)))
+                .bg(color.opacity(0.15))
+                .text_color(color)
+                .child(div().min_w_0().truncate().child(text))
+                .when(offering, |d| {
+                    d.child(
+                        Button::new("update-install")
+                            .text_button(Size::XSmall)
+                            .label(if failed { "Retry" } else { "Install and restart" })
+                            .on_click(cx.listener(|this, _, _, cx| this.install_update(cx))),
+                    )
+                })
+                .when_some(page, |d, page| {
+                    d.child(
+                        Button::new("update-notes")
+                            .text_button(Size::XSmall)
+                            .label("What's new")
+                            .on_click(move |_, _, cx| cx.open_url(&page)),
+                    )
+                })
+                .when(offering, |d| {
+                    d.child(
+                        Button::new("update-later")
+                            .text_button(Size::XSmall)
+                            .label("Later")
+                            .on_click(cx.listener(|this, _, _, cx| this.dismiss_update(cx))),
+                    )
+                })
+                .into_any_element(),
+        )
     }
 
     pub fn deck(&self) -> &DeckFile {
@@ -1410,6 +1611,13 @@ impl TwittyApp {
         self.save_settings(cx);
     }
 
+    /// Turns the periodic update check on or off.
+    pub fn set_check_updates(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.check_updates = Some(enabled);
+        self.schedule_update_checks(cx);
+        self.save_settings(cx);
+    }
+
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.options.settings_path.clone() {
             let settings = self.settings.clone();
@@ -1500,6 +1708,8 @@ impl TwittyApp {
                         weak.update(cx, |this, cx| this.set_animations(*checked, cx)).ok();
                     }),
             )
+            .child(section("Updates"))
+            .child(self.render_update_settings(cx))
             .child(section("Keyboard shortcuts"))
             .child(v_flex().gap_1().children(shortcuts))
             .when_some(folder, |d, folder| {
@@ -1535,6 +1745,45 @@ impl TwittyApp {
                         .label("Done")
                         .on_click(cx.listener(|this, _, _, cx| this.close_overlays(cx))),
                 ),
+            )
+            .into_any_element()
+    }
+
+    /// The version, and (for an installed copy) the update setting and "Check now".
+    fn render_update_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let version = h_flex()
+            .gap_2()
+            .items_center()
+            .text_sm()
+            .child(div().flex_1().child(format!("Twitty {}", self.updates.current())));
+        if self.options.updates.is_none() {
+            return v_flex()
+                .gap_1()
+                .child(version)
+                .child(div().text_xs().text_color(theme.muted_foreground).child(
+                    "This copy wasn't installed with Twitty's installer, so it doesn't update itself.",
+                ))
+                .into_any_element();
+        }
+        let weak = cx.entity().downgrade();
+        v_flex()
+            .gap_2()
+            .child(
+                version.child(
+                    Button::new("update-check")
+                        .text_button(Size::XSmall)
+                        .label("Check now")
+                        .on_click(cx.listener(|this, _, _, cx| this.check_for_updates(cx))),
+                ),
+            )
+            .child(
+                Checkbox::new("check-updates")
+                    .checked(self.settings.check_updates())
+                    .label("Look for new versions on GitHub")
+                    .on_click(move |checked, _, cx| {
+                        weak.update(cx, |this, cx| this.set_check_updates(*checked, cx)).ok();
+                    }),
             )
             .into_any_element()
     }
@@ -2137,6 +2386,7 @@ impl Render for TwittyApp {
                         )
                     })
             });
+        let update_banner = self.render_update_banner(!demo, cx);
         // Overlays cover this part only, so the title bar always stays usable.
         let content = v_flex()
             .debug_selector(|| "app-content".into())
@@ -2201,6 +2451,7 @@ impl Render for TwittyApp {
                             .border_color(theme.border)
                             .rounded_tl(px(CHROME_RADIUS))
                             .children(banner)
+                            .children(update_banner)
                             .child(div().flex_1().min_h_0().flex().child(body)),
                     )
                     .when_some(self.sheet.as_ref().map(Sheet::view), |d, panel| {
@@ -4155,5 +4406,216 @@ mod tests {
         let saved = DeckFile::load(&path).unwrap();
         let config = saved.active().columns.iter().find(|c| c.id == id).cloned().unwrap();
         assert_eq!(config.settings.width, ColumnWidth::new(560.));
+    }
+
+    /// Releases served from memory; counts checks and records launches.
+    #[derive(Default)]
+    struct FakeReleases {
+        latest: std::sync::Mutex<Option<Release>>,
+        /// When set, downloads wait until it fires.
+        gate: std::sync::Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
+        checks: std::sync::atomic::AtomicUsize,
+        launched: std::sync::Mutex<Vec<PathBuf>>,
+    }
+
+    impl FakeReleases {
+        fn serving(version: Version) -> Arc<Self> {
+            let release = Release::from_assets(
+                &format!("v{version}"),
+                "https://example.test/notes",
+                vec![crate::state::update::Asset {
+                    name: crate::state::update::installer_name(version),
+                    url: "https://example.test/setup.exe".into(),
+                    sha256: crate::state::update::Sha256::from_hex(&"ab".repeat(32)),
+                }],
+            )
+            .unwrap();
+            Arc::new(Self { latest: std::sync::Mutex::new(Some(release)), ..Self::default() })
+        }
+
+        fn checks(&self) -> usize {
+            self.checks.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl crate::update::ReleaseSource for FakeReleases {
+        fn latest(&self) -> twitty_model::BoxFuture<'_, Result<Option<Release>, UpdateError>> {
+            self.checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let latest = self.latest.lock().unwrap().clone();
+            Box::pin(async move { Ok(latest) })
+        }
+
+        fn download<'a>(
+            &'a self,
+            release: &'a Release,
+        ) -> twitty_model::BoxFuture<'a, Result<PathBuf, UpdateError>> {
+            let path = PathBuf::from("downloads").join(&release.installer.name);
+            let gate = self.gate.lock().unwrap().take();
+            Box::pin(async move {
+                if let Some(gate) = gate {
+                    gate.await.ok();
+                }
+                Ok(path)
+            })
+        }
+    }
+
+    fn update_services(releases: &Arc<FakeReleases>, launch_works: bool) -> UpdateServices {
+        let launched = Arc::clone(releases);
+        UpdateServices {
+            source: Arc::clone(releases) as Arc<dyn crate::update::ReleaseSource>,
+            launch: Arc::new(move |path: &std::path::Path| {
+                if !launch_works {
+                    return Err(UpdateError::Launch("access denied".into()));
+                }
+                launched.launched.lock().unwrap().push(path.to_path_buf());
+                Ok(())
+            }),
+        }
+    }
+
+    fn start_with_updates(
+        cx: &mut TestAppContext,
+        services: UpdateServices,
+        settings: Settings,
+    ) -> (Entity<TwittyApp>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            theme::init(theme::NAMES[0], cx);
+            cx.set_global(Runtime::inline());
+        });
+        let options = AppOptions {
+            session: Some(SessionSource::Keyring),
+            updates: Some(services),
+            ..AppOptions::default()
+        };
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(DeckFile::default(), settings, backend, options, window, cx)
+        });
+        cx.run_until_parked();
+        (app, cx)
+    }
+
+    fn newer() -> Version {
+        let current = Version::current();
+        Version { minor: current.minor + 1, ..current }
+    }
+
+    #[gpui_kit::test]
+    fn a_newer_release_is_offered_shortly_after_startup(cx: &mut TestAppContext) {
+        let releases = FakeReleases::serving(newer());
+        let (app, cx) =
+            start_with_updates(cx, update_services(&releases, true), Settings::default());
+        assert_eq!(releases.checks(), 0, "not while the app starts");
+
+        cx.executor().advance_clock(UPDATE_FIRST_CHECK);
+        cx.run_until_parked();
+        assert_eq!(releases.checks(), 1);
+        let status = app.read_with(cx, |app, _| app.updates().status().clone());
+        assert!(
+            matches!(&status, UpdateStatus::Available(r) if r.version == newer()),
+            "{status:?}"
+        );
+        assert!(cx.debug_bounds("update-banner").is_some(), "the banner shows");
+
+        app.update(cx, |app, cx| app.dismiss_update(cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("update-banner").is_none(), "Later hides it");
+
+        cx.executor().advance_clock(UPDATE_INTERVAL);
+        cx.run_until_parked();
+        assert_eq!(releases.checks(), 2, "checked again later");
+        assert!(cx.debug_bounds("update-banner").is_none(), "without offering it again");
+    }
+
+    #[gpui_kit::test]
+    fn the_current_version_is_not_offered(cx: &mut TestAppContext) {
+        let releases = FakeReleases::serving(Version::current());
+        let (app, cx) =
+            start_with_updates(cx, update_services(&releases, true), Settings::default());
+        cx.executor().advance_clock(UPDATE_FIRST_CHECK);
+        cx.run_until_parked();
+        assert_eq!(releases.checks(), 1);
+        assert_eq!(app.read_with(cx, |app, _| app.updates().status().clone()), UpdateStatus::Idle);
+        assert!(cx.debug_bounds("update-banner").is_none());
+
+        // "Check now" says so.
+        app.update(cx, |app, cx| app.check_for_updates(cx));
+        cx.run_until_parked();
+        let toasts = app.read_with(cx, |app, _| {
+            app.toasts().items().iter().map(|t| t.text.clone()).collect::<Vec<_>>()
+        });
+        assert_eq!(toasts, vec![format!("Twitty {} is up to date", Version::current())]);
+    }
+
+    #[gpui_kit::test]
+    fn turning_the_setting_off_stops_the_checks(cx: &mut TestAppContext) {
+        let releases = FakeReleases::serving(newer());
+        let off = Settings { check_updates: Some(false), ..Settings::default() };
+        let (app, cx) = start_with_updates(cx, update_services(&releases, true), off);
+        cx.executor().advance_clock(UPDATE_INTERVAL);
+        cx.run_until_parked();
+        assert_eq!(releases.checks(), 0, "off: never checked");
+
+        app.update(cx, |app, cx| app.set_check_updates(true, cx));
+        cx.executor().advance_clock(UPDATE_FIRST_CHECK);
+        cx.run_until_parked();
+        assert_eq!(releases.checks(), 1, "on again: checked");
+    }
+
+    #[gpui_kit::test]
+    fn install_downloads_and_starts_the_installer(cx: &mut TestAppContext) {
+        let releases = FakeReleases::serving(newer());
+        let (app, cx) =
+            start_with_updates(cx, update_services(&releases, true), Settings::default());
+        cx.executor().advance_clock(UPDATE_FIRST_CHECK);
+        cx.run_until_parked();
+
+        app.update(cx, |app, cx| app.install_update(cx));
+        cx.run_until_parked();
+        let expected =
+            PathBuf::from("downloads").join(crate::state::update::installer_name(newer()));
+        assert_eq!(*releases.launched.lock().unwrap(), vec![expected]);
+    }
+
+    #[gpui_kit::test]
+    fn check_now_during_a_download_does_not_cancel_it(cx: &mut TestAppContext) {
+        let releases = FakeReleases::serving(newer());
+        let (release_download, gate) = futures::channel::oneshot::channel();
+        *releases.gate.lock().unwrap() = Some(gate);
+        let (app, cx) =
+            start_with_updates(cx, update_services(&releases, true), Settings::default());
+        cx.executor().advance_clock(UPDATE_FIRST_CHECK);
+        cx.run_until_parked();
+
+        app.update(cx, |app, cx| app.install_update(cx));
+        cx.run_until_parked();
+        let status = app.read_with(cx, |app, _| app.updates().status().clone());
+        assert!(matches!(status, UpdateStatus::Downloading(_)), "{status:?}");
+
+        app.update(cx, |app, cx| app.check_for_updates(cx));
+        cx.run_until_parked();
+        release_download.send(()).unwrap();
+        cx.run_until_parked();
+        assert_eq!(releases.launched.lock().unwrap().len(), 1, "the installer still started");
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_install_can_be_retried(cx: &mut TestAppContext) {
+        let releases = FakeReleases::serving(newer());
+        let (app, cx) =
+            start_with_updates(cx, update_services(&releases, false), Settings::default());
+        cx.executor().advance_clock(UPDATE_FIRST_CHECK);
+        cx.run_until_parked();
+
+        app.update(cx, |app, cx| app.install_update(cx));
+        cx.run_until_parked();
+        let status = app.read_with(cx, |app, _| app.updates().status().clone());
+        assert!(
+            matches!(&status, UpdateStatus::Failed(_, why) if why.contains("access denied")),
+            "{status:?}"
+        );
+        assert!(cx.debug_bounds("update-banner").is_some(), "the banner says why, with Retry");
     }
 }

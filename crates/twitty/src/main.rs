@@ -35,6 +35,7 @@ use twitty::{
         self,
         app::{AppOptions, TwittyApp},
     },
+    update::{self, GitHubReleases, UpdateServices},
     video::{SystemVideo, Video},
 };
 
@@ -119,6 +120,7 @@ fn main() -> anyhow::Result<()> {
         poll: true,
         session,
         account: Some(AccountServices { connect, store }),
+        updates: update_services(),
     };
 
     gpui_kit::application().with_assets(ui::assets::Assets).run(move |cx| {
@@ -166,6 +168,34 @@ fn main() -> anyhow::Result<()> {
         }
     });
     Ok(())
+}
+
+/// Self-update from GitHub Releases, for a copy installed by the installer
+/// only: a `cargo run` build never offers to replace itself.
+fn update_services() -> Option<UpdateServices> {
+    let exe = std::env::current_exe().ok()?;
+    if !update::installed_by_setup(&exe) {
+        tracing::info!("not installed by the installer: no update checks");
+        return None;
+    }
+    let downloads = directories::ProjectDirs::from("", "", "Twitty")
+        .map_or_else(std::env::temp_dir, |d| d.cache_dir().to_path_buf())
+        .join("updates");
+    match GitHubReleases::new(
+        update::GITHUB_API,
+        update::REPOSITORY,
+        downloads,
+        update::STALL_TIMEOUT,
+    ) {
+        Ok(source) => Some(UpdateServices {
+            source: Arc::new(source),
+            launch: Arc::new(update::launch_installer),
+        }),
+        Err(e) => {
+            tracing::error!("update checks unavailable: {e}");
+            None
+        }
+    }
 }
 
 /// Builds Twitter backends for the sign-in dialog. Their rotated cookies go to the keyring.

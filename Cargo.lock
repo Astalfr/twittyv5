@@ -7942,7 +7942,7 @@ dependencies = [
 
 [[package]]
 name = "twitty"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7955,9 +7955,11 @@ dependencies = [
  "keyring",
  "pretty_assertions",
  "proptest",
+ "reqwest",
  "rodio",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -7969,11 +7971,12 @@ dependencies = [
  "twitty-x",
  "unicode-properties",
  "unicode-segmentation",
+ "wiremock",
 ]
 
 [[package]]
 name = "twitty-media"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.21",
  "windows 0.62.2",
@@ -7981,7 +7984,7 @@ dependencies = [
 
 [[package]]
 name = "twitty-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "pretty_assertions",
@@ -7996,7 +7999,7 @@ dependencies = [
 
 [[package]]
 name = "twitty-x"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

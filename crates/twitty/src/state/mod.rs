@@ -26,4 +26,5 @@ pub mod sources;
 pub mod thread;
 pub mod toasts;
 pub mod translation;
+pub mod update;
 pub mod user_search;

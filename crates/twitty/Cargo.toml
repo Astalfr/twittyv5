@@ -20,6 +20,10 @@ rodio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+# Updates: GitHub's release API and the installer download (both already
+# built for twitty-x), checked against GitHub's SHA-256 digest.
+reqwest.workspace = true
+sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
@@ -38,6 +42,7 @@ pretty_assertions.workspace = true
 proptest.workspace = true
 ttf-parser.workspace = true
 tempfile = "3"
+wiremock.workspace = true
 gpui-kit = { workspace = true, features = ["test-support"] }
 
 [lints]

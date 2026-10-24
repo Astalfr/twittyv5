@@ -37,6 +37,9 @@ pub struct Settings {
     /// off: icons only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_expanded: Option<bool>,
+    /// Whether Twitty looks for new releases on GitHub (default on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_updates: Option<bool>,
 }
 
 impl Default for Settings {
@@ -48,6 +51,7 @@ impl Default for Settings {
             animations: None,
             gif_autoplay: None,
             sidebar_expanded: None,
+            check_updates: None,
         }
     }
 }
@@ -106,6 +110,10 @@ impl Settings {
         self.animations.unwrap_or(true)
     }
 
+    pub fn check_updates(&self) -> bool {
+        self.check_updates.unwrap_or(true)
+    }
+
     pub fn sidebar_expanded(&self) -> bool {
         self.sidebar_expanded.unwrap_or(false)
     }
@@ -142,6 +150,7 @@ mod tests {
         assert!(s.animations_enabled(), "and animations on");
         assert_eq!(s.gif_autoplay(), Autoplay::Off, "and GIFs wait for a click");
         assert!(!s.sidebar_expanded(), "and the sidebar shows icons only");
+        assert!(s.check_updates(), "and updates are looked for");
     }
 
     #[test]
@@ -169,6 +178,7 @@ mod tests {
             animations: Some(false),
             gif_autoplay: Some(true),
             sidebar_expanded: Some(true),
+            check_updates: Some(false),
             ..Settings::default()
         };
         s.save(&path).unwrap();

@@ -47,6 +47,8 @@ depends on nothing else of ours.
 | `audio` | `AudioShared` (the sound queue, the generation of the latest seek, pause, gain, the clock) and `AudioOut`, the rodio source playing it on the audio thread: one lock per chunk, silence without consuming while paused or dry |
 | `format` | Relative times and compact counters |
 | `runtime` | `Runtime::Tokio` (production) / `Runtime::Inline` (tests) |
+| `state::update` | Self-update decisions: `Version` (parse, compare), which release asset is the installer (`twitty-setup-<version>-x64.exe`, with GitHub's SHA-256 `digest`), and the banner's `Updates` state (available, downloading, failed, dismissed for the session) |
+| `update` | Self-update I/O behind `UpdateServices` (`ReleaseSource` + `Launcher`): `GitHubReleases` reads `/releases/latest` from the public API and downloads the installer to the cache dir, hashing it as it streams (a mismatch deletes it); `launch_installer` runs it silently. `main.rs` provides the services only when `unins000.exe` sits next to the exe ([development.md](development.md#releases-and-self-update)) |
 | `ui::app` | Root view: rail + horizontally scrolling deck, persists deck changes |
 | `ui::column` | Column view: header, `list()` + `ListState`, footer row, polling, "new tweets" pill |
 | `ui::post` | Row rendering: tweets, retweets, threads, media, quotes, link cards, polls, action bar |
@@ -102,5 +104,5 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - Inline GIFs: `ui::post::media_grid` adds `ui::gif::inline_gif` over each GIF tile, keyed by the tweet and media index inside `RowCtx::scope` (one per list: a column, the thread panel, the profile sheet), so the same tweet in two columns plays separately. Whether it plays is `state::playback::gif_plays` (the viewer's choice, else the autoplay setting).
 - Video: the image viewer creates a `VideoPlayer` when it shows a GIF or a video (`TwittyApp::sync_media_player`) and drops it when it steps away or closes; dropping it hangs up the channel, which stops the decoder thread. Without a `video::Video` global (tests, by default) the player fails at once and the viewer keeps the poster and "Play on Twitter"; `FakeVideo` stands in for tests.
 - Credentials (`twitty::account`): the sign-in dialog stores the session in Windows Credential Manager (`keyring`, entry `Twitty` / `x-session`, a versioned JSON payload). `main.rs` gives the app an `AccountServices` (a `Connector` that turns `Credentials` into an `Arc<dyn Backend>`, plus the `CredentialStore`), so the UI never sees `twitty-x`. Startup order and sign-out rules: "Signing in" in [x-api.md](x-api.md).
-- Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; it holds the theme and the polling and animations switches.
+- Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; it holds the theme and the polling, animations and update-check switches.
 - Signing in or out replaces the backend: `TwittyApp` rebuilds the hub and every column (old views are dropped, which cancels their loads and polling).

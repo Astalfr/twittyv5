@@ -56,6 +56,15 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; An update started from Twitty runs silently and asks for Twitty back.
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: Relaunch
 
 ; Uninstall leaves the user's data (%APPDATA%\Twitty, logs, the session in
 ; Credential Manager) in place, so a reinstall keeps decks and sign-in.
+
+[Code]
+// Twitty's updater passes /relaunch=1 (see crates/twitty/src/update.rs).
+function Relaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:relaunch|0}') = '1');
+end;

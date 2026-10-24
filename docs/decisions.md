@@ -4,6 +4,11 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Self-update from GitHub Releases, unsigned
+- **Decision**: An installed copy checks the repository's latest GitHub Release (public API, no token) and, on the user's click, downloads its Inno Setup installer, checks it against GitHub's SHA-256 `digest`, runs it silently and quits; the installer restarts Twitty. CI publishes a release for each `v*` tag, only after tests and build pass. Nothing installs without a click.
+- **Why**: The repository is public, so releases need no credentials, and the installer already handles upgrades (same `AppId`, previous folder and install mode, closing a running copy). GitHub's own digest avoids a checksum file of our own. Only copies installed by the installer update, so a `cargo run` build never replaces itself.
+- **Consequences**: There's no signature (no minisign key, no code-signing certificate): the digest comes from the same place as the file, so it catches corruption, not a compromised account or repository. Signing releases would be the next step. Unauthenticated API calls are limited to 60 an hour per IP; a check every 6 hours stays far below. Pre-releases are never offered. The banner's "Later" lasts for the session.
+
 ### 2026-10-24: Windows installer built with Inno Setup
 - **Decision**: CI builds a per-user Inno Setup installer (`installer/twitty.iss`) next to the raw exe on every run.
 - **Why**: Twitty is a single self-contained exe, so the installer only needs to copy it, add shortcuts and register an uninstaller. Inno Setup does that in one short script, installs without admin rights, and closes a running app on upgrade. WiX/MSI would need a heavier toolchain and authoring for no gain here.
