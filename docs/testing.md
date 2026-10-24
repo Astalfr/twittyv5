@@ -40,7 +40,7 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 - 160 in `twitty-x`: 111 unit tests (incl. health counters, Grok translations and Community Notes), 19 transport and 23 backend mock-server tests, and 7 fixture translation tests over 15 fixtures.
 - 24 in `twitty-media`: the row copier (crop, bottom-up rows, short buffers), exact-seek helpers, COM start-up, and 14 decoder tests over the synthetic `bars.mp4` and `tone.mp4` (skipped where Media Foundation is missing, as on CI).
 - 28 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging, notifications and community notes.
-- 332 in `twitty`: state (translated tweets, Community Notes, paging, hold-off, end-of-feed, selection, polling, animation timing, diagnostics, settings, login form, decks, tabs, add-column parsing, compose length, thread rows), credentials, logging, formatting, runtime, themes, icons, GPUI view tests, and session discovery/rotation in `main.rs`. No test touches the real Credential Manager or writes to Twitter.
+- 332 in `twitty`: state (translated tweets, Community Notes, paging, hold-off, end-of-feed, selection, polling, animation timing, diagnostics, settings, login form, decks, tabs, add-column parsing, compose length, thread rows, emoji ranges), credentials, logging, formatting, runtime, themes, icons, the bundled emoji font, GPUI view tests, and session discovery/rotation in `main.rs`. No test touches the real Credential Manager or writes to Twitter.
 
 ## Manual check
 

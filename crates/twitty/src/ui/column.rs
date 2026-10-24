@@ -28,6 +28,7 @@ use crate::{
     },
     ui::button::TextButton,
     ui::{
+        emoji,
         hub::InteractionsHub,
         post::{RowCtx, render_item},
     },
@@ -449,7 +450,7 @@ impl ColumnView {
                                     .line_height(gpui_kit::relative(1.2))
                                     .font_weight(FontWeight::EXTRA_BOLD)
                                     .debug_selector(|| "column-title".into())
-                                    .child(self.title()),
+                                    .child(emoji::text(self.title())),
                             ),
                     )
                     .child(

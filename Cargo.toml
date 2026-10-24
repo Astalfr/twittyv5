@@ -54,6 +54,12 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 base64 = "0.22"
 html-escape = "0.2"
+# Finding the emoji drawn with the bundled Twemoji font (grapheme clusters and
+# Unicode's emoji properties). GPUI already builds both, so they add no code.
+unicode-segmentation = "1.12"
+unicode-properties = { version = "0.1.3", default-features = false, features = ["emoji"] }
+# Tests only: checks the bundled emoji font (GPUI already builds it).
+ttf-parser = "0.25"
 
 # Errors / logging.
 thiserror = "2"

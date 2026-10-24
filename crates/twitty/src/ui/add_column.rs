@@ -22,6 +22,7 @@ use crate::{
     state::add_column::{self, ColumnKind, Parsed, ViewerLists},
     ui::button::TextButton,
     ui::column::source_icon,
+    ui::emoji,
 };
 
 /// One of the viewer's lists in the picker.
@@ -48,7 +49,7 @@ impl SelectItem for ListChoice {
             .w_full()
             .gap_2()
             .justify_between()
-            .child(div().min_w_0().truncate().child(self.title()))
+            .child(div().min_w_0().truncate().child(emoji::text(self.title())))
             .child(
                 div().flex_none().text_sm().text_color(cx.theme().muted_foreground).child(details),
             )

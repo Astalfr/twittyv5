@@ -22,6 +22,7 @@ use crate::{
     },
     ui::button::TextButton,
     ui::{
+        emoji,
         hub::{InteractionsHub, Navigate},
         post::{RowCtx, avatar, fmt_duration, render_item, rich_text, verified_badge, video_badge},
         remote_image,
@@ -391,7 +392,7 @@ impl ProfilePanel {
                                     div()
                                         .text_xl()
                                         .font_weight(FontWeight::EXTRA_BOLD)
-                                        .child(p.display_name.clone()),
+                                        .child(emoji::text(p.display_name.clone())),
                                 )
                                 .children(p.badges.verified.map(|v| verified_badge(v, &theme))),
                         )
@@ -585,7 +586,7 @@ impl Render for ProfilePanel {
                             .truncate()
                             .text_lg()
                             .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(self.profile.display_name.clone()),
+                            .child(emoji::text(self.profile.display_name.clone())),
                     )
                     .child(
                         Button::new("profile-add-column")

@@ -8,6 +8,7 @@ pub mod community_note;
 pub mod compose;
 pub mod deck;
 pub mod diagnostics;
+pub mod emoji;
 pub mod follow;
 pub mod image_scale;
 pub mod interactions;

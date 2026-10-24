@@ -54,6 +54,10 @@
 
 Icons come from GPUI Kit's Lucide catalog. Only the ones listed in `crates/twitty/src/ui/assets.rs` (`icon_assets!`) are embedded. A new icon must be added there, or it renders blank. The `every_used_icon_resolves` test checks a sample.
 
+## Emoji font
+
+`crates/twitty/resources/fonts/Twemoji.Mozilla.ttf` is Mozilla's COLR build of Twemoji, patched by `fill_base_glyphs.py` in the same folder (the README there has the source, checksums and licence). To update it, download the new release, run the script on it, and check that `ui::emoji`'s tests pass: `emoji_glyphs_have_outlines` fails on an unpatched font.
+
 ## Pinning and upgrading GPUI Kit
 
 - `gpui-kit = "=0.8.0"` pins `gpui-pre =0.3.9`. `gpui-pre-reqwest-client` must use the **same** snapshot version.

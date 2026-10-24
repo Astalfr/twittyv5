@@ -127,6 +127,7 @@ fn main() -> anyhow::Result<()> {
         cx.set_app_identity("Twitty.Twitty", "Twitty");
         gpui_kit::init(cx);
         ui::theme::init(theme_name, cx);
+        ui::emoji::load_font(cx);
         ui::keys::bind(cx);
         cx.set_global(runtime);
         cx.set_global(Sound(Arc::new(SystemSound)));

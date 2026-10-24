@@ -37,6 +37,7 @@ use crate::{
         column_settings::{ColumnSettingsEvent, ColumnSettingsView},
         compose::{ComposeEvent, ComposeView},
         deck_settings::{self, DeckSettingsEvent, DeckSettingsView, DeckTarget},
+        emoji,
         gif::GifAutoplay,
         hub::{InteractionsHub, Navigate},
         keys,
@@ -1672,7 +1673,7 @@ impl TwittyApp {
                         .truncate()
                         .font_weight(FontWeight::BOLD)
                         .debug_selector(|| "account-name".into())
-                        .child(v.display_name.clone()),
+                        .child(emoji::text(v.display_name.clone())),
                 )
                 .child(
                     div()

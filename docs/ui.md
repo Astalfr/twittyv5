@@ -14,6 +14,7 @@
 - **Lists**: each column owns a `ListState` (`gpui::list`), which measures rows of different heights and only renders what's visible. When items are added or removed, use `ListState::splice`. To keep the reading position when newer tweets are inserted at the top, adjust the scroll offset by the new items' height. Use `ListState::reset` only on a full reload.
 - **Images**: `img(url)` with a fixed size from `ImageRef.size` hints, so rows don't jump when images load. Show a placeholder until the image is ready.
 - **Remote images in fixed boxes** (media tiles, quote and link-card images, profile gallery) use `ui::remote_image::source(url, w, h)`, never `img(url)`. GPUI draws bitmaps with no mipmaps, so a 1200 px photo shrunk into a 400 px tile looks jagged. `remote_image` fetches and decodes the image itself and shrinks it on the CPU (Catmull-Rom) to just cover the box in device pixels, rounded up to a bucket (`state::image_scale`, steps of 1.25×) so resizing a column doesn't reload every image; while a new size loads, the previous copy stays on screen. Images are never enlarged. The image viewer still uses `img(url)` because it sizes from the bitmap's own size. Embedded images drawn much smaller than their bitmap (the title bar logo) use `remote_image::asset(path, w, h)`, which does the same from the app's asset source.
+- **Per-range fonts**: `StyledText::with_font_family_overrides` only changes runs that lie entirely inside an override, and runs are only cut where highlights start and end. Every overridden range must therefore also be a highlight (see `ui::emoji::styled`). `FontFallbacks` can't point at a bundled font: on Windows it only searches installed fonts.
 - **Actions/keybindings**: declared in `ui/keys.rs` with `actions!(twitty, [...])` and bound by `keys::bind` (called from `main.rs` and keyboard tests). Deck shortcuts live in the `Deck` key context on the rail/columns/thread container; dialogs are rendered outside it (with an `Overlay` context that only binds Esc), so typing in a text field never triggers a shortcut. When no dialog is open, `TwittyApp::render` gives focus back to the deck.
 
 ## TweetDeck look (spec)
@@ -84,6 +85,8 @@ These are gpui-kit theme JSON files in `crates/twitty/themes/`, following gpui-c
 Views read colours from `cx.theme()` only. Never hard-code hex in a view.
 
 Font: Segoe UI / system UI. Chirp, Twitter's own font, isn't bundled.
+
+Emoji use Twitter's own artwork: the bundled **Twemoji** font (`crates/twitty/resources/fonts/`, registered by `ui::emoji::load_font` at start-up). Text from Twitter that can hold emoji (tweet bodies, Community Notes, bios, display names, "X retweeted", link-card titles, poll choices, list and column names) goes through `ui::emoji::text` / `ui::emoji::styled`, never a bare string child: they find the emoji (`state::emoji`) and give those ranges the Twemoji family. Emoji the font lacks (Unicode 15+), keycaps (1️⃣) and text fields (compose, inputs) use Segoe UI Emoji.
 
 ## Animations
 

@@ -16,6 +16,7 @@ use crate::{
     runtime::Runtime,
     state::user_search::{self, UserSearch},
     ui::button::TextButton,
+    ui::emoji,
     ui::post::{avatar, verified_badge},
 };
 
@@ -148,7 +149,7 @@ impl Render for UserSearchView {
                         .text_sm()
                         .font_weight(FontWeight::BOLD)
                         .truncate()
-                        .child(profile.display_name.clone()),
+                        .child(emoji::text(profile.display_name.clone())),
                 )
                 .when_some(profile.badges.verified, |d, kind| {
                     d.child(verified_badge(kind, &theme))

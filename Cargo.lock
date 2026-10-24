@@ -7963,9 +7963,12 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ttf-parser",
  "twitty-media",
  "twitty-model",
  "twitty-x",
+ "unicode-properties",
+ "unicode-segmentation",
 ]
 
 [[package]]

@@ -13,7 +13,7 @@ use gpui_kit::{
     Animation, AnimationExt, AnyElement, App, ClickEvent, ClipboardItem, Div, ElementId, Entity,
     FontWeight, HighlightStyle, Hsla, ImageSource, Img, InteractiveText, IntoElement, ObjectFit,
     ParentElement, Pixels, SharedString, StatefulInteractiveElement, Styled, StyledImage,
-    StyledText, UnderlineStyle, Window,
+    UnderlineStyle, Window,
     component::avatar::Avatar,
     component::button::*,
     component::hover_card::HoverCard,
@@ -41,6 +41,7 @@ use crate::{
     ui::button::TextButton,
     ui::{
         assets::{BOOKMARK_FILL, HEART_FILL},
+        emoji,
         gif::inline_gif,
         hub::{InteractionsHub, Navigate},
         remote_image,
@@ -295,12 +296,18 @@ fn profile_hover(
             .child(avatar(&p, 56.0))
             .child(
                 v_flex()
-                    .child(div().font_weight(FontWeight::BOLD).child(p.display_name.clone()))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .child(emoji::text(p.display_name.clone())),
+                    )
                     .child(
                         div().text_color(theme.muted_foreground).child(format!("@{}", p.handle)),
                     ),
             )
-            .when(!p.bio.is_empty(), |d| d.child(div().text_sm().child(p.bio.text().to_owned())))
+            .when(!p.bio.is_empty(), |d| {
+                d.child(div().text_sm().child(emoji::text(p.bio.text().to_owned())))
+            })
             .child(
                 h_flex()
                     .gap_3()
@@ -417,7 +424,7 @@ fn post_row(
                 .truncate()
                 .hover(|s| s.underline())
                 .on_click(open_profile(&post.author, &rcx.hub))
-                .child(post.author.display_name.clone()),
+                .child(emoji::text(post.author.display_name.clone())),
         )
         .children(post.author.badges.verified.map(|v| verified_badge(v, &theme)))
         .child(
@@ -557,7 +564,7 @@ fn post_row(
                             .debug_selector(|| format!("post-reposter-{key}"))
                             .hover(|s| s.underline())
                             .on_click(open_profile(by, &rcx.hub))
-                            .child(format!("{} retweeted", by.display_name)),
+                            .child(emoji::text(format!("{} retweeted", by.display_name))),
                     ),
             )
         })
@@ -733,17 +740,15 @@ pub(crate) fn rich_text(
     );
     let hovered_span = *hovered.read(cx);
     let spans = text.spans().to_vec();
-    let highlights = spans.iter().enumerate().map(|(ix, s)| {
+    let ranges: Vec<_> = spans.iter().map(|s| s.range.clone()).collect();
+    let styled = emoji::styled(SharedString::from(text.text().to_owned()), &ranges, |ix| {
         let underline = (hovered_span == Some(ix)).then_some(UnderlineStyle {
             thickness: px(1.),
             color: Some(link),
             wavy: false,
         });
-        (s.range.clone(), HighlightStyle { color: Some(link), underline, ..Default::default() })
+        HighlightStyle { color: Some(link), underline, ..Default::default() }
     });
-    let styled =
-        StyledText::new(SharedString::from(text.text().to_owned())).with_highlights(highlights);
-    let ranges = spans.iter().map(|s| s.range.clone()).collect();
     let hover_spans = spans.clone();
     let on_text = hovered.clone();
     let hub = hub.clone();
@@ -1035,7 +1040,7 @@ fn quote_card(
                                 .truncate()
                                 .hover(|s| s.underline())
                                 .on_click(open_profile(&q.author, hub))
-                                .child(q.author.display_name.clone()),
+                                .child(emoji::text(q.author.display_name.clone())),
                         )
                         .child(div().text_color(theme.muted_foreground).truncate().child(format!(
                             "@{} · {}",
@@ -1096,7 +1101,7 @@ pub(crate) fn post_preview(
                             div()
                                 .font_weight(FontWeight::BOLD)
                                 .truncate()
-                                .child(post.author.display_name.clone()),
+                                .child(emoji::text(post.author.display_name.clone())),
                         )
                         .child(div().text_color(theme.muted_foreground).truncate().child(format!(
                             "@{} · {}",
@@ -1170,7 +1175,12 @@ fn link_card(
                 .child(
                     div().text_sm().text_color(theme.muted_foreground).child(card.domain.clone()),
                 )
-                .child(div().text_color(theme.foreground).truncate().child(card.title.clone())),
+                .child(
+                    div()
+                        .text_color(theme.foreground)
+                        .truncate()
+                        .child(emoji::text(card.title.clone())),
+                ),
         )
 }
 
@@ -1205,7 +1215,7 @@ fn poll_view(poll: &Poll, theme: &gpui_kit::component::Theme) -> impl IntoElemen
                         .px_3()
                         .justify_between()
                         .when(lead, |d| d.font_weight(FontWeight::BOLD))
-                        .child(o.label.clone())
+                        .child(emoji::text(o.label.clone()))
                         .child(format!("{:.0}%", pct * 100.0)),
                 )
         }))

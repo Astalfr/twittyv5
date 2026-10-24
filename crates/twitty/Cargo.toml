@@ -27,6 +27,8 @@ directories.workspace = true
 keyring.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+unicode-segmentation.workspace = true
+unicode-properties.workspace = true
 
 [build-dependencies]
 embed-resource.workspace = true
@@ -34,6 +36,7 @@ embed-resource.workspace = true
 [dev-dependencies]
 pretty_assertions.workspace = true
 proptest.workspace = true
+ttf-parser.workspace = true
 tempfile = "3"
 gpui-kit = { workspace = true, features = ["test-support"] }
 
