@@ -11,10 +11,15 @@ use twitty_model::FeedSource;
 use crate::{
     sound,
     state::deck::{ColumnId, ColumnSettings, ColumnWidth, Volume},
+    ui::column,
 };
 
 /// Volume slider granularity, in percent.
 const VOLUME_STEP: f32 = 5.0;
+
+/// The text of the notification the Test button sends.
+pub const TEST_NOTIFICATION: &str =
+    "Test notification: new posts in this column show up like this.";
 
 /// What the dialog reports to the app.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +36,8 @@ impl EventEmitter<ColumnSettingsEvent> for ColumnSettingsView {}
 /// The column settings dialog's view.
 pub struct ColumnSettingsView {
     id: ColumnId,
+    /// The column's source, whose title stands in for a blank name.
+    source: FeedSource,
     settings: ColumnSettings,
     name: Entity<InputState>,
     width: Entity<SliderState>,
@@ -101,7 +108,7 @@ impl ColumnSettingsView {
             }),
         ];
         name.update(cx, |s, cx| s.focus(window, cx));
-        Self { id, settings, name, width, volume, _subs: subs }
+        Self { id, source: source.clone(), settings, name, width, volume, _subs: subs }
     }
 
     pub fn id(&self) -> ColumnId {
@@ -157,6 +164,12 @@ impl ColumnSettingsView {
     pub fn set_desktop(&mut self, on: bool, cx: &mut Context<Self>) {
         self.settings.alerts.desktop = on;
         self.report(true, cx);
+    }
+
+    /// Sends a sample notification the way new posts will, switched on or not.
+    pub fn test_notification(&self, cx: &mut Context<Self>) {
+        let title = self.settings.title(&self.source);
+        column::show_notification(self.id, title, TEST_NOTIFICATION.to_owned(), cx);
     }
 }
 
@@ -223,12 +236,25 @@ impl Render for ColumnSettingsView {
                 )
             })
             .child(
-                Switch::new("column-desktop")
-                    .checked(alerts.desktop)
-                    .label(DESKTOP_LABEL)
-                    .on_click(move |on, _, cx| {
-                        weak.update(cx, |this, cx| this.set_desktop(*on, cx)).ok();
-                    }),
+                h_flex()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        Switch::new("column-desktop")
+                            .checked(alerts.desktop)
+                            .label(DESKTOP_LABEL)
+                            .on_click(move |on, _, cx| {
+                                weak.update(cx, |this, cx| this.set_desktop(*on, cx)).ok();
+                            }),
+                    )
+                    .child(
+                        Button::new("column-test-notification")
+                            .debug_selector(|| "column-test-notification".into())
+                            .xsmall()
+                            .label("Test")
+                            .tooltip("Send a test notification")
+                            .on_click(cx.listener(|this, _, _, cx| this.test_notification(cx))),
+                    ),
             )
             .child(
                 h_flex().justify_end().pt_2().child(
@@ -300,6 +326,31 @@ mod tests {
         };
         assert_eq!(*id, ColumnId(3));
         assert_eq!(last.name.as_deref(), Some("Saved"));
+    }
+
+    #[gpui_kit::test]
+    fn the_test_button_sends_a_notification(cx: &mut TestAppContext) {
+        // Like Windows, GPUI only posts notifications for an identified app.
+        cx.update(|cx| cx.set_app_identity("Twitty.Test", "Twitty"));
+        let (view, events, cx) = open(ColumnSettings::default(), cx);
+        let button = cx.debug_bounds("column-test-notification").expect("the Test button is drawn");
+        cx.simulate_click(button.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+
+        let shown = cx.shown_system_notifications();
+        assert_eq!(shown.len(), 1, "sent even while the switch is off");
+        assert_eq!(shown[0].tag.as_ref(), "column-3", "replaces the column's own toast");
+        assert_eq!(shown[0].title.as_ref(), "Bookmarks", "the column's title");
+        assert_eq!(shown[0].body.as_ref(), TEST_NOTIFICATION);
+        assert!(
+            !view.read_with(cx, |v, _| v.settings().alerts.desktop),
+            "the setting is untouched"
+        );
+        assert!(events.lock().unwrap().is_empty(), "nothing to save");
+
+        view.update(cx, |v, cx| v.set_name("Saved", cx));
+        view.update(cx, |v, cx| v.test_notification(cx));
+        assert_eq!(cx.shown_system_notifications()[1].title.as_ref(), "Saved");
     }
 
     #[gpui_kit::test]

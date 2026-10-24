@@ -6,7 +6,7 @@ use std::{
 };
 
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, Context, ElementId, Entity, EventEmitter, FontWeight,
+    Animation, AnimationExt, AnyElement, App, Context, ElementId, Entity, EventEmitter, FontWeight,
     IntoElement, ListAlignment, ListOffset, ListState, ParentElement, Render, SharedString, Styled,
     Subscription, SystemNotification, Task, Window, assets::IconName, base, component::button::*,
     component::scroll::ScrollableElement, component::skeleton::Skeleton,
@@ -239,13 +239,7 @@ impl ColumnView {
             sound::play(alerts.volume, cx);
         }
         if alerts.desktop {
-            // One tag per column: a newer batch replaces the column's last toast.
-            cx.show_system_notification(SystemNotification {
-                tag: format!("column-{}", self.id.0).into(),
-                title: self.title().into(),
-                body: news.body.into(),
-                actions: Vec::new(),
-            });
+            show_notification(self.id, self.title(), news.body, cx);
         }
     }
 
@@ -570,6 +564,17 @@ fn arriving(key: &str, entrance: Entrance, row: AnyElement, tint: gpui_kit::Hsla
             },
         )
         .into_any_element()
+}
+
+/// Shows column `id`'s system notification. One tag per column: a newer
+/// one replaces the column's last toast.
+pub fn show_notification(id: ColumnId, title: String, body: String, cx: &App) {
+    cx.show_system_notification(SystemNotification {
+        tag: format!("column-{}", id.0).into(),
+        title: title.into(),
+        body: body.into(),
+        actions: Vec::new(),
+    });
 }
 
 /// Header icon for a source.
