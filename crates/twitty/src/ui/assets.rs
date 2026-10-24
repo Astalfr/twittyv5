@@ -87,6 +87,11 @@ mod tests {
             IconName::CircleUser,
             IconName::LogIn,
             IconName::LogOut,
+            // The title bar's window buttons.
+            IconName::WindowMinimize,
+            IconName::WindowMaximize,
+            IconName::WindowRestore,
+            IconName::WindowClose,
         ] {
             let path = name.path();
             assert!(Assets.load(&path).unwrap().is_some(), "missing icon {path}");

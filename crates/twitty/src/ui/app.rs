@@ -38,6 +38,9 @@ const BACKDROP_ALPHA: f32 = 0.7;
 
 /// Height of the strip under the deck reserved for its horizontal scrollbar.
 const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
+/// Radius of the deck area's top-left corner, where the title bar and the
+/// rail meet. At most the deck bar's padding, so a hovered tab stays inside it.
+const CHROME_RADIUS: f32 = 8.0;
 
 /// How often polling intervals are recomputed from the backend's limits.
 const BUDGET_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
@@ -1152,7 +1155,6 @@ impl TwittyApp {
     }
 
     fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
         let rail_button = |name: &'static str, icon: IconName, tip: &'static str| {
             Button::new(name)
                 .ghost()
@@ -1169,16 +1171,6 @@ impl TwittyApp {
             .items_center()
             .py_2()
             .gap_1()
-            .border_r_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .size(px(52.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(img(crate::ui::assets::LOGO).size(px(30.))),
-            )
             // One button per column; clicking scrolls the deck until the whole
             // column is visible. Scrolls itself when the deck is taller than the rail.
             .child(
@@ -1312,34 +1304,32 @@ impl Render for TwittyApp {
         };
         let demo = self.options.session.is_none();
         let can_sign_in = self.options.account.is_some();
-        v_flex()
+        // At the top of the deck area, so the rail and the title bar still meet.
+        let banner = demo.then(|| {
+            h_flex()
+                .w_full()
+                .justify_center()
+                .items_center()
+                .gap_3()
+                .py_1()
+                .text_xs()
+                .rounded_tl(px(CHROME_RADIUS - 1.))
+                .bg(theme.primary.opacity(0.15))
+                .text_color(theme.primary)
+                .child("Demo mode: showing generated posts")
+                .when(can_sign_in, |d| {
+                    d.child(Button::new("banner-sign-in").xsmall().label("Sign in").on_click(
+                        cx.listener(|this, _, window, cx| this.open_login(None, window, cx)),
+                    ))
+                })
+        });
+        // Overlays cover this part only, so the title bar always stays usable.
+        let content = v_flex()
+            .debug_selector(|| "app-content".into())
             .relative()
-            .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .when(demo, |d| {
-                d.child(
-                    h_flex()
-                        .w_full()
-                        .justify_center()
-                        .items_center()
-                        .gap_3()
-                        .py_1()
-                        .text_xs()
-                        .bg(theme.primary.opacity(0.15))
-                        .text_color(theme.primary)
-                        .child("Demo mode: showing generated posts")
-                        .when(can_sign_in, |d| {
-                            d.child(
-                                Button::new("banner-sign-in").xsmall().label("Sign in").on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.open_login(None, window, cx)
-                                    }),
-                                ),
-                            )
-                        }),
-                )
-            })
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .child(
                 h_flex()
                     .id("deck-root")
@@ -1389,10 +1379,18 @@ impl Render for TwittyApp {
                     .min_h_0()
                     .child(self.render_rail(cx))
                     .child(
+                        // One border along the title bar and the rail, rounded
+                        // where they meet.
                         v_flex()
+                            .debug_selector(|| "deck-area".into())
                             .flex_1()
                             .min_w_0()
                             .h_full()
+                            .border_t_1()
+                            .border_l_1()
+                            .border_color(theme.border)
+                            .rounded_tl(px(CHROME_RADIUS))
+                            .children(banner)
                             .child(self.render_deck_bar(cx))
                             .child(div().flex_1().min_h_0().flex().child(body)),
                     )
@@ -1504,8 +1502,41 @@ impl Render for TwittyApp {
                         .child(centered().child(content)),
                 )
             })
-            .children(leaving)
+            .children(leaving);
+        v_flex()
+            .size_full()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .child(render_title_bar(&theme))
+            .child(content)
     }
+}
+
+/// The window's title bar, in place of the system one: the app's background
+/// colour, the logo and name centred, and the native minimise / maximise /
+/// close buttons on the right (on Windows they are real caption buttons, so
+/// Snap layouts work). Dragging it moves the window. It has no border of its
+/// own: the deck's top border runs under it (see `CHROME_RADIUS`).
+fn render_title_bar(theme: &gpui_kit::component::Theme) -> impl IntoElement {
+    // Centred on the whole window, not on the space left of the buttons. The
+    // layer has no handlers, so drags and clicks reach the bar under it.
+    let title = h_flex()
+        .debug_selector(|| "window-title".into())
+        .gap_1p5()
+        .items_center()
+        .child(img(crate::ui::assets::LOGO).size(px(16.)))
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.muted_foreground)
+                .child("Twitty"),
+        );
+    div()
+        .relative()
+        .flex_none()
+        .child(TitleBar::new().bg(theme.background).border_b_0())
+        .child(centered().child(title))
 }
 
 /// Id of the animation `what` of the overlay `name` (e.g. "overlay-in", "compose").
@@ -1635,6 +1666,45 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(deck_x(cx) < px(0.), "horizontal wheel still scrolls the deck");
+    }
+
+    #[gpui_kit::test]
+    fn the_app_draws_its_own_title_bar_above_dialogs(cx: &mut TestAppContext) {
+        use gpui_kit::test::TestWindowExt as _;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(crate::runtime::Runtime::inline());
+        });
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(
+                DeckFile::default(),
+                Settings::default(),
+                backend,
+                AppOptions::default(),
+                window,
+                cx,
+            )
+        });
+        // A dialog's backdrop must not cover the title bar.
+        app.update(cx, |app, cx| app.open_settings(cx));
+        cx.run_until_parked();
+        let content = cx.debug_bounds("app-content").expect("content is drawn");
+        let title = cx.debug_bounds("window-title").expect("the title is drawn");
+        let deck = cx.debug_bounds("deck-area").expect("the deck is drawn");
+        cx.update(|window, _| {
+            let bar = window.find("title-bar");
+            assert!(bar.visible());
+            assert_eq!(bar.bounds().top(), px(0.), "the bar is at the very top");
+            assert!(content.top() >= bar.bounds().bottom(), "dialogs live below the bar");
+            let middle = window.viewport_size().width / 2.;
+            assert!((title.center().x - middle).abs() < px(1.), "title centred on the window");
+            assert_eq!(deck.top(), bar.bounds().bottom(), "the deck's border meets the bar");
+            #[cfg(target_os = "windows")]
+            for id in ["minimize", "maximize", "close"] {
+                assert!(window.within("window-controls").find(id).visible(), "{id}");
+            }
+        });
     }
 
     #[gpui_kit::test]
@@ -2181,9 +2251,9 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(index(cx), Some(1), "the button steps and keeps the viewer open");
 
-        // The padding around everything is backdrop.
+        // The padding around everything (below the title bar) is backdrop.
         cx.simulate_click(
-            point(px(viewer::PADDING / 2.), px(viewer::PADDING / 2.)),
+            point(px(viewer::PADDING / 2.), TITLE_BAR_HEIGHT + px(viewer::PADDING / 2.)),
             Modifiers::default(),
         );
         cx.run_until_parked();
@@ -2232,7 +2302,7 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(panel_root(&app, cx), None, "the leaving panel's posts don't react");
         // ...but the deck beside it does: a post opens its thread.
-        cx.simulate_click(point(px(250.), px(200.)), Modifiers::default());
+        cx.simulate_click(point(px(250.), TITLE_BAR_HEIGHT + px(200.)), Modifiers::default());
         cx.run_until_parked();
         assert!(panel_root(&app, cx).is_some(), "the leaving panel doesn't block the deck");
         assert!(!app.read_with(cx, |app, _| app.is_leaving()), "reopening drops the old one");

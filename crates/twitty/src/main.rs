@@ -11,7 +11,10 @@ use std::{
 };
 
 use anyhow::Context as _;
-use gpui_kit::{AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
+use gpui_kit::{
+    AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, component::TitleBar, px,
+    size,
+};
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use twitty_model::{Backend, FeedSource, HomeMode, mock::MockBackend};
 use twitty_x::{Session, SessionError, XBackend, XClient, transport::RotateHook};
@@ -136,10 +139,15 @@ fn main() -> anyhow::Result<()> {
         }
 
         let bounds = Bounds::centered(None, size(px(1480.), px(920.)), cx);
+        // No system title bar: `TwittyApp` draws its own in the theme's
+        // colours, with the native window buttons (`ui::app::render_title_bar`).
         let window = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: Some(TitlebarOptions { title: Some("Twitty".into()), ..Default::default() }),
-            ..Default::default()
+            titlebar: Some(TitlebarOptions {
+                title: Some("Twitty".into()),
+                ..TitleBar::title_bar_options()
+            }),
+            ..TitleBar::window_options()
         };
         if let Err(e) = gpui_kit::open_window(window, cx, |window, cx| {
             cx.new(|cx| TwittyApp::new(deck, settings, backend, options, window, cx))
