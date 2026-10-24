@@ -1,0 +1,600 @@
+{
+  "data": {
+    "viewer": {
+      "list_management_timeline": {
+        "timeline": {
+          "instructions": [
+            {
+              "type": "TimelineClearCache"
+            },
+            {
+              "direction": "Top",
+              "type": "TimelineTerminateTimeline"
+            },
+            {
+              "direction": "Bottom",
+              "type": "TimelineTerminateTimeline"
+            },
+            {
+              "entries": [
+                {
+                  "content": {
+                    "__typename": "TimelineTimelineModule",
+                    "clientEventInfo": {
+                      "component": "suggest_list_to_follow",
+                      "details": {
+                        "timelinesDetails": {
+                          "controllerData": "TRDITHEFUPWJDuYQ1TybianLcOrHJAVJ",
+                          "injectionType": "ListToFollow"
+                        }
+                      }
+                    },
+                    "displayType": "Vertical",
+                    "entryType": "TimelineTimelineModule",
+                    "footer": {
+                      "displayType": "Classic",
+                      "landingUrl": {
+                        "url": "https://twitter.com/i/mesuq/tbvprxmrp",
+                        "urlType": "ExternalUrl"
+                      },
+                      "text": "Gmft mycc"
+                    },
+                    "header": {
+                      "displayType": "Classic",
+                      "sticky": true,
+                      "text": "Dhbwwius sfm Mesuq"
+                    },
+                    "items": [
+                      {
+                        "entryId": "list-to-follow-module-5747525356539115026-list-4334102138574574158",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_list_to_follow",
+                            "details": {
+                              "timelinesDetails": {
+                                "controllerData": "TRDITHEFUPWJDuYQ1TybianLcOrHJAVJ",
+                                "injectionType": "ListToFollow"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithSubscribe",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600717785000,
+                              "default_banner_media": {
+                                "media_info": {
+                                  "original_img_height": 375,
+                                  "original_img_url": "https://pbs.twimg.com/media/VlTZxJ0NeDAsBma.png",
+                                  "original_img_width": 1125,
+                                  "salient_rect": {
+                                    "height": 1,
+                                    "left": 562,
+                                    "top": 187,
+                                    "width": 1
+                                  }
+                                }
+                              },
+                              "default_banner_media_results": {},
+                              "description": "",
+                              "facepile_urls": [
+                                "https://pbs.twimg.com/profile_images/1533792007143263972/_ud8PNaQ_mini.jpg",
+                                "https://pbs.twimg.com/profile_images/846530056454074121/4G0r4G4s_mini.jpg",
+                                "https://pbs.twimg.com/profile_images/9720053756623478313/_uAzJp6-_mini.jpg"
+                              ],
+                              "followers_context": "961 mribmwdyq lczceopnt @fzqbqbfysykcx",
+                              "following": false,
+                              "id": "RLvoaAaoMvK4DQUlLgIqCIv6WGD6WDmy",
+                              "id_str": "4334102138574574158",
+                              "is_member": false,
+                              "member_count": 29,
+                              "members_context": "91 tnefcym",
+                              "mode": "Public",
+                              "muting": false,
+                              "name": "HZKC KOAD C.M CNLE KT",
+                              "pinning": false,
+                              "subscriber_count": 125,
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "action_counts": {
+                                    "favorites_count": 11
+                                  },
+                                  "affiliates_highlighted_label": {},
+                                  "avatar": {
+                                    "image_url": "https://pbs.twimg.com/profile_images/7358401091360568339/xc9h6HbF_normal.jpg"
+                                  },
+                                  "banner": {
+                                    "image_url": ""
+                                  },
+                                  "can_pay": false,
+                                  "core": {
+                                    "created_at": "Wed Oct 28 08:06:15 +0000 2015",
+                                    "name": "Sihumpf Dpzljt",
+                                    "screen_name": "NyBfpkfj"
+                                  },
+                                  "follow_request_sent": false,
+                                  "has_graduated_access": true,
+                                  "id": "VLQuhzk3MLT4NfJcVxI4",
+                                  "is_blue_verified": false,
+                                  "location": {
+                                    "location": "Jzwxko"
+                                  },
+                                  "media_permissions": {
+                                    "can_media_tag": true
+                                  },
+                                  "notifications_settings": {
+                                    "notifications_enabled": false
+                                  },
+                                  "parody_commentary_fan_label": "None",
+                                  "pinned_items": {},
+                                  "possibly_sensitive": false,
+                                  "privacy": {
+                                    "protected": false
+                                  },
+                                  "profile_bio": {
+                                    "description": "Xfkxyaiinpb oあjvzzrae psk. Sauvbzntgwlb xfkxyaiinpb zhsyzzc @fs_vzv_axxggows, losyن い l'@YXS_Yoadeixv. Sihumpf.Dpzljt@Gmtblqkh.xbg",
+                                    "entities": {
+                                      "description": {},
+                                      "url": {
+                                        "urls": [
+                                          {
+                                            "display_url": "pslfmonc.com/xg/sihumpf-kib…",
+                                            "expanded_url": "https://www.pslfmonc.com/xg/sihumpf-dpzljt/",
+                                            "indices": [
+                                              0,
+                                              23
+                                            ],
+                                            "url": "https://t.co/eWdfK9XOpC"
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "profile_description_language": "fr",
+                                  "profile_image_shape": "Circle",
+                                  "profile_metadata": {
+                                    "profile_interstitial_type": ""
+                                  },
+                                  "profile_translation": {
+                                    "translator_type": "none"
+                                  },
+                                  "relationship_counts": {
+                                    "followers": 70,
+                                    "following": 755
+                                  },
+                                  "relationship_perspectives": {
+                                    "blocked_by": false,
+                                    "blocking": false,
+                                    "dm_blocked_by": false,
+                                    "dm_blocking": false,
+                                    "followed_by": false,
+                                    "following": false,
+                                    "live_following": false,
+                                    "muting": false
+                                  },
+                                  "rest_id": "2866559175",
+                                  "super_follow_eligible": false,
+                                  "super_followed_by": false,
+                                  "super_following": false,
+                                  "tipjar_settings": {},
+                                  "tweet_counts": {
+                                    "media_tweets": 8,
+                                    "tweets": 49
+                                  },
+                                  "verification": {
+                                    "verified": false
+                                  },
+                                  "website": {
+                                    "url": "https://t.co/eWdfK9XOpC"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "entryId": "list-to-follow-module-5747525356539115026-list-5058998966440722102",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_list_to_follow",
+                            "details": {
+                              "timelinesDetails": {
+                                "controllerData": "TRDITHEFUPWJDuYQ1TybianLcOrHJAVJ",
+                                "injectionType": "ListToFollow"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithSubscribe",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1620976087000,
+                              "custom_banner_media": {
+                                "media_info": {
+                                  "original_img_height": 267,
+                                  "original_img_url": "https://pbs.twimg.com/bxwx_gmqibg_img/8968945581772081882/d0S_XCQr?format=jpg&name=orig",
+                                  "original_img_width": 802,
+                                  "salient_rect": {
+                                    "height": 1,
+                                    "left": 668,
+                                    "top": 133,
+                                    "width": 1
+                                  }
+                                }
+                              },
+                              "custom_banner_media_results": {
+                                "result": {
+                                  "__typename": "ApiMedia",
+                                  "id": "IZIeBJCkmRJ6PNZILiSFK5ZJXgtIRQFOFW==",
+                                  "media_id": "8968945581772081882",
+                                  "media_info": {
+                                    "__typename": "ApiImage",
+                                    "color_info": {
+                                      "palette": [
+                                        {
+                                          "percentage": 27.36,
+                                          "rgb": {
+                                            "blue": 248,
+                                            "green": 250,
+                                            "red": 250
+                                          }
+                                        },
+                                        {
+                                          "percentage": 11.08,
+                                          "rgb": {
+                                            "blue": 130,
+                                            "green": 50,
+                                            "red": 144
+                                          }
+                                        },
+                                        {
+                                          "percentage": 10.96,
+                                          "rgb": {
+                                            "blue": 45,
+                                            "green": 48,
+                                            "red": 201
+                                          }
+                                        },
+                                        {
+                                          "percentage": 10.79,
+                                          "rgb": {
+                                            "blue": 68,
+                                            "green": 207,
+                                            "red": 197
+                                          }
+                                        },
+                                        {
+                                          "percentage": 8.07,
+                                          "rgb": {
+                                            "blue": 58,
+                                            "green": 159,
+                                            "red": 230
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    "original_img_height": 267,
+                                    "original_img_url": "https://pbs.twimg.com/bxwx_gmqibg_img/8968945581772081882/d0S_XCQr?format=jpg&name=orig",
+                                    "original_img_width": 802,
+                                    "salient_rect": {
+                                      "height": 1,
+                                      "left": 668,
+                                      "top": 133,
+                                      "width": 1
+                                    }
+                                  },
+                                  "media_key": "18_8968945581772081882"
+                                }
+                              },
+                              "default_banner_media": {
+                                "media_info": {
+                                  "original_img_height": 375,
+                                  "original_img_url": "https://pbs.twimg.com/media/GyYABFKEOEArbO3.png",
+                                  "original_img_width": 1125,
+                                  "salient_rect": {
+                                    "height": 1,
+                                    "left": 562,
+                                    "top": 187,
+                                    "width": 1
+                                  }
+                                }
+                              },
+                              "default_banner_media_results": {},
+                              "description": "Jhcm muu twvw okhck lehvu",
+                              "facepile_urls": [
+                                "https://pbs.twimg.com/profile_images/9024424535603554771/DhOcEb3H_mini.jpg",
+                                "https://pbs.twimg.com/profile_images/3435919026815761025/_1ojzYKS_mini.jpg",
+                                "https://pbs.twimg.com/profile_images/6775552622543420051/HkmdmPZe_mini.jpg"
+                              ],
+                              "followers_context": "462 mribmwdyq lczceopnt @hsvefebe55",
+                              "following": false,
+                              "id": "JMmufCezDagvOFEyUrd8GQOmPVp3QGVn",
+                              "id_str": "5058998966440722102",
+                              "is_member": false,
+                              "member_count": 39,
+                              "members_context": "61 tnefcym",
+                              "mode": "Public",
+                              "muting": false,
+                              "name": "Twvw okhck hzkc",
+                              "pinning": false,
+                              "subscriber_count": 148,
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "action_counts": {
+                                    "favorites_count": 490
+                                  },
+                                  "affiliates_highlighted_label": {},
+                                  "avatar": {
+                                    "image_url": "https://pbs.twimg.com/profile_images/2965892618258427621/SWTFoXyE_normal.jpg"
+                                  },
+                                  "banner": {
+                                    "image_url": "https://pbs.twimg.com/profile_banners/56608962/6850373582"
+                                  },
+                                  "can_pay": false,
+                                  "core": {
+                                    "created_at": "Mon Feb 02 17:29:54 +0000 2009",
+                                    "name": "Pmjmik",
+                                    "screen_name": "Pmjmik"
+                                  },
+                                  "follow_request_sent": false,
+                                  "has_graduated_access": true,
+                                  "id": "YFHgvhxsAAxnKsyrSO==",
+                                  "is_blue_verified": false,
+                                  "location": {
+                                    "location": "Jzwxko"
+                                  },
+                                  "media_permissions": {
+                                    "can_media_tag": false
+                                  },
+                                  "notifications_settings": {
+                                    "notifications_enabled": false
+                                  },
+                                  "parody_commentary_fan_label": "None",
+                                  "pinned_items": {},
+                                  "possibly_sensitive": false,
+                                  "privacy": {
+                                    "protected": false
+                                  },
+                                  "professional": {
+                                    "category": [
+                                      {
+                                        "icon_name": "XmelAoxsontbuStmjck",
+                                        "id": 713,
+                                        "name": "Gbrcalp & Vyulqwalew"
+                                      }
+                                    ],
+                                    "professional_type": "Creator",
+                                    "rest_id": "9048953672103912664"
+                                  },
+                                  "profile_bio": {
+                                    "description": "Kybhxp njokqlyzdxa - Wymnt - #Pzourkzf #Peflcve #Nrxbw #Wosore #Lzf #Uoshvpsnkezb https://t.co/yIRltgCnFh - Ophzoq @FbsgtnUPG | #zeollxeadtg",
+                                    "entities": {
+                                      "description": {
+                                        "urls": [
+                                          {
+                                            "display_url": "Jekzsbmxs.com/cjhmktxjqhh",
+                                            "expanded_url": "http://Jekzsbmxs.com/cjhmktxjqhh",
+                                            "indices": [
+                                              82,
+                                              105
+                                            ],
+                                            "url": "https://t.co/yIRltgCnFh"
+                                          }
+                                        ]
+                                      },
+                                      "url": {
+                                        "urls": [
+                                          {
+                                            "display_url": "uetpxnpajklaar.com",
+                                            "expanded_url": "http://uetpxnpajklaar.com/",
+                                            "indices": [
+                                              0,
+                                              23
+                                            ],
+                                            "url": "https://t.co/1KLgawLuTH"
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "profile_image_shape": "Circle",
+                                  "profile_metadata": {
+                                    "profile_interstitial_type": ""
+                                  },
+                                  "profile_translation": {
+                                    "translator_type": "none"
+                                  },
+                                  "relationship_counts": {
+                                    "followers": 174,
+                                    "following": 827
+                                  },
+                                  "relationship_perspectives": {
+                                    "blocked_by": false,
+                                    "blocking": false,
+                                    "dm_blocked_by": false,
+                                    "dm_blocking": false,
+                                    "followed_by": false,
+                                    "following": false,
+                                    "live_following": false,
+                                    "muting": false
+                                  },
+                                  "rest_id": "56608962",
+                                  "super_follow_eligible": false,
+                                  "super_followed_by": false,
+                                  "super_following": false,
+                                  "tipjar_settings": {
+                                    "is_enabled": true
+                                  },
+                                  "tweet_counts": {
+                                    "media_tweets": 490,
+                                    "tweets": 3247
+                                  },
+                                  "verification": {
+                                    "verified": false
+                                  },
+                                  "website": {
+                                    "url": "https://t.co/1KLgawLuTH"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "entryId": "list-to-follow-module-5747525356539115026",
+                  "sortIndex": "5747525356539115026"
+                },
+                {
+                  "content": {
+                    "__typename": "TimelineTimelineModule",
+                    "clientEventInfo": {
+                      "component": "suggest_owned_subscribed_list",
+                      "details": {
+                        "timelinesDetails": {
+                          "injectionType": "OwnedSubscribedList"
+                        }
+                      }
+                    },
+                    "displayType": "Vertical",
+                    "entryType": "TimelineTimelineModule",
+                    "header": {
+                      "displayType": "Classic",
+                      "sticky": false,
+                      "text": "Fxwf Mesuq"
+                    },
+                    "items": [
+                      {
+                        "entryId": "owned-subscribed-list-module-1873659959731341740-messageprompt-OwnedSubscribedListsEmptyPrompt",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_owned_subscribed_list",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "OwnedSubscribedList"
+                              }
+                            },
+                            "element": "message"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineMessagePrompt",
+                            "content": {
+                              "bodyText": "Krd azykt'j ctzmorl qn tjozlnau glq Mesuq. Ikxo krd cq, udxe'tk gmft fd cpab.",
+                              "contentType": "TimelineInlinePrompt",
+                              "headerText": ""
+                            },
+                            "itemType": "TimelineMessagePrompt"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "entryId": "owned-subscribed-list-module-1873659959731341740",
+                  "sortIndex": "3958490535154640218"
+                },
+                {
+                  "content": {
+                    "__typename": "TimelineTimelineCursor",
+                    "cursorType": "Bottom",
+                    "entryType": "TimelineTimelineCursor",
+                    "value": "XCQLDnWINPbkhJF___9NHEGNVOWOJXzHIqQPSZASGR"
+                  },
+                  "entryId": "cursor-bottom-7180559097681956657",
+                  "sortIndex": "7180559097681956657"
+                }
+              ],
+              "type": "TimelineAddEntries"
+            }
+          ],
+          "metadata": {
+            "scribeConfig": {
+              "page": "list_management"
+            }
+          }
+        }
+      }
+    }
+  },
+  "errors": [
+    {
+      "code": 214,
+      "extensions": {
+        "code": 214,
+        "kind": "Validation",
+        "name": "VhqUoysjtrIriyw",
+        "source": "Client"
+      },
+      "kind": "Validation",
+      "locations": [
+        {
+          "column": 3,
+          "line": 1643
+        }
+      ],
+      "message": "ZygZufggmt: xbg.agmiwqe.pnnyhb.hffgzaowprxkf.MoujzgFjqtwvsnk",
+      "name": "VhqUoysjtrIriyw",
+      "path": [
+        "viewer",
+        "list_management_timeline",
+        "timeline",
+        "instructions",
+        3,
+        "entries",
+        0,
+        "content",
+        "items",
+        0,
+        "item",
+        "itemContent",
+        "list",
+        "default_banner_media_results",
+        "result"
+      ],
+      "source": "Client"
+    },
+    {
+      "code": 214,
+      "extensions": {
+        "code": 214,
+        "kind": "Validation",
+        "name": "VhqUoysjtrIriyw",
+        "source": "Client"
+      },
+      "kind": "Validation",
+      "locations": [
+        {
+          "column": 3,
+          "line": 1643
+        }
+      ],
+      "message": "ZygZufggmt: xbg.agmiwqe.pnnyhb.hffgzaowprxkf.MoujzgFjqtwvsnk",
+      "name": "VhqUoysjtrIriyw",
+      "path": [
+        "viewer",
+        "list_management_timeline",
+        "timeline",
+        "instructions",
+        3,
+        "entries",
+        0,
+        "content",
+        "items",
+        1,
+        "item",
+        "itemContent",
+        "list",
+        "default_banner_media_results",
+        "result"
+      ],
+      "source": "Client"
+    }
+  ]
+}

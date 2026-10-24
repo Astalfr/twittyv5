@@ -26,6 +26,7 @@ So Twitty has an **anti-corruption layer**:
 | `Embed` | `Quote(PostOrGone)`, `LinkCard`, `Poll` |
 | `FeedItem` | `Post`, `Repost { by, post }`, `Thread(Vec<Post>)`, `Notification`, `Unavailable`, `Unsupported { reason }` |
 | `FeedPage` | `items` + `newer`/`older` page tokens |
+| `ListSummary` | A list the viewer owns or follows: `id` (`ListId`), `name`, `members`, `visibility` (`ListVisibility::Public` / `Private`) |
 | `FeedSource` | What a column shows: `Home`, `Notifications`, `Search`, `List`, `User`, `Bookmarks`, `Thread`. It's **persisted**. |
 | `PostAction` | `Like`, `Unlike`, `Repost`, `Unrepost`, `Bookmark`, `Unbookmark`, … |
 | `Draft` | Text, reply target, quote target |
@@ -33,7 +34,7 @@ So Twitty has an **anti-corruption layer**:
 | `RequestHealth` | Per request type since startup: ok responses, rows, unsupported rows, warnings, errors, last warning/error (diagnostics) |
 | `BackendError` | `Unauthorized`, `RateLimited { reset_at }`, `NotFound`, `Upstream`, `Network`, `Decode` |
 
-The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `search_users` (one page of accounts matching a query, best match first), `act`, `set_following` (a `FollowAction` → the resulting `FollowStatus`: `NotFollowing`, `Following` or `Requested`), `publish`, and `rate_budget` / `health` with empty defaults) is the only way the app reaches a network.
+The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `search_users` (one page of accounts matching a query, best match first), `viewer_lists` (the lists the viewer owns or follows, without suggested ones), `act`, `set_following` (a `FollowAction` → the resulting `FollowStatus`: `NotFollowing`, `Following` or `Requested`), `publish`, and `rate_budget` / `health` with empty defaults) is the only way the app reaches a network.
 
 ## Translation rules (`twitty-x::translate`)
 

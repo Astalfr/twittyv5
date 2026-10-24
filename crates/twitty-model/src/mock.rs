@@ -14,10 +14,10 @@ use url::Url;
 
 use crate::{
     Backend, BackendError, Badges, BoxFuture, CommunityNote, Draft, Embed, FeedItem, FeedPage,
-    FeedSource, FollowAction, FollowStatus, ImageRef, LinkCard, Media, Metrics, PageRequest,
-    PageToken, Poll, PollOption, Post, PostAction, PostId, PostOrGone, Profile, ProfileCounts,
-    RichText, Span, SpanKind, ThreadView, Translation, UnavailableReason, UserId, UserRef, UserTab,
-    VerifiedKind, ViewerPostState,
+    FeedSource, FollowAction, FollowStatus, ImageRef, LinkCard, ListId, ListSummary,
+    ListVisibility, Media, Metrics, PageRequest, PageToken, Poll, PollOption, Post, PostAction,
+    PostId, PostOrGone, Profile, ProfileCounts, RichText, Span, SpanKind, ThreadView, Translation,
+    UnavailableReason, UserId, UserRef, UserTab, VerifiedKind, ViewerPostState,
 };
 use crate::{Notification, NotificationId, NotificationKind};
 
@@ -41,6 +41,7 @@ struct State {
     follows: Vec<(UserId, FollowAction)>,
     /// Accounts the viewer followed or asked to follow.
     following: HashMap<UserId, FollowStatus>,
+    lists: Vec<ListSummary>,
 }
 
 impl Default for MockBackend {
@@ -67,6 +68,7 @@ impl MockBackend {
                 viewer: HashMap::new(),
                 follows: Vec::new(),
                 following: HashMap::new(),
+                lists: sample_lists(),
                 base: base_time(),
             })),
         }
@@ -94,6 +96,11 @@ impl MockBackend {
             feed.splice(0..0, fresh);
         }
         ids
+    }
+
+    /// Replaces the lists the viewer owns or follows.
+    pub fn set_lists(&self, lists: Vec<ListSummary>) {
+        self.lock().lists = lists;
     }
 
     /// Actions received so far.
@@ -491,6 +498,13 @@ impl Backend for MockBackend {
         })
     }
 
+    fn viewer_lists(&self) -> BoxFuture<'_, Result<Vec<ListSummary>, BackendError>> {
+        Box::pin(async move {
+            self.take_failure()?;
+            Ok(self.lock().lists.clone())
+        })
+    }
+
     fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>> {
         Box::pin(async move {
             self.take_failure()?;
@@ -589,6 +603,19 @@ fn photo(n: usize, k: usize, w: u32, h: u32) -> Media {
 
 fn post_url(handle: &str, id: &PostId) -> Url {
     url(&format!("https://x.com/{handle}/status/{id}"))
+}
+
+fn sample_lists() -> Vec<ListSummary> {
+    [("Rustaceans", 42, ListVisibility::Public), ("Close friends", 7, ListVisibility::Private)]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, members, visibility))| ListSummary {
+            id: ListId::new(format!("{}", 9_000 + i)),
+            name: name.into(),
+            members,
+            visibility,
+        })
+        .collect()
 }
 
 fn sample_authors() -> Vec<Arc<Profile>> {
@@ -800,6 +827,16 @@ mod tests {
         let post = block_on(backend.publish(draft)).unwrap();
         let Some(Embed::Quote { quoted: embed }) = post.embed else { panic!("{:?}", post.embed) };
         assert_eq!(*embed, PostOrGone::Post(quoted));
+    }
+
+    #[test]
+    fn viewer_lists_can_be_replaced() {
+        let b = MockBackend::new();
+        let names: Vec<_> =
+            block_on(b.viewer_lists()).unwrap().into_iter().map(|l| l.name).collect();
+        assert_eq!(names, ["Rustaceans", "Close friends"]);
+        b.set_lists(Vec::new());
+        assert!(block_on(b.viewer_lists()).unwrap().is_empty());
     }
 
     #[test]

@@ -10,7 +10,7 @@
 use std::fmt::Write as _;
 
 use twitty_model::{Embed, FeedItem, FeedPage, FollowAction, Media, Post, PostOrGone, SpanKind};
-use twitty_x::translate::{Translated, feed_page, follow_status, users};
+use twitty_x::translate::{Translated, feed_page, follow_status, lists, users};
 
 const FIXTURES: &[&str] = &[
     "home",
@@ -325,4 +325,24 @@ fn people_search_lists_accounts() {
         );
     }
     insta::assert_snapshot!("search-people", out);
+}
+
+/// `ListsManagementPageTimeline`: the viewer's own and followed lists, without
+/// the "Discover new Lists" suggestions on the same page.
+#[test]
+fn the_viewers_lists_leave_out_suggestions() {
+    let body = |name: &str| -> serde_json::Value {
+        let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
+    };
+    let empty = lists(&body("lists-management-empty"));
+    assert!(empty.lists.is_empty() && empty.warnings.is_empty(), "{:#?}", empty.warnings);
+    assert!(empty.found_module, "an account without lists still has the module");
+    let t = lists(&body("lists-management"));
+    assert!(t.warnings.is_empty() && t.found_module, "{:#?}", t.warnings);
+    let mut out = String::new();
+    for l in &t.lists {
+        let _ = writeln!(out, "{} \"{}\" {:?} members={}", l.id, l.name, l.visibility, l.members);
+    }
+    insta::assert_snapshot!("lists-management", out);
 }

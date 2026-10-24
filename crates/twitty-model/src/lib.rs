@@ -11,6 +11,7 @@ mod backend;
 mod error;
 mod feed;
 mod ids;
+mod list;
 mod media;
 #[cfg(feature = "mock")]
 pub mod mock;
@@ -26,6 +27,7 @@ pub use backend::{
 pub use error::BackendError;
 pub use feed::{FeedItem, FeedPage, FeedSource, HomeMode, NotificationFilter, SearchSort, UserTab};
 pub use ids::{ListId, NotificationId, PageToken, PostId, UserId};
+pub use list::{ListSummary, ListVisibility};
 pub use media::{AspectRatio, ImageRef, Media, VideoVariant};
 pub use notification::{Notification, NotificationKind};
 pub use post::{

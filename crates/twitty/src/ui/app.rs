@@ -2988,6 +2988,12 @@ mod tests {
         ) -> twitty_model::BoxFuture<'a, Result<Vec<Profile>, BackendError>> {
             self.0.search_users(query)
         }
+        fn viewer_lists(
+            &self,
+        ) -> twitty_model::BoxFuture<'_, Result<Vec<twitty_model::ListSummary>, BackendError>>
+        {
+            self.0.viewer_lists()
+        }
         fn set_following<'a>(
             &'a self,
             user: &'a twitty_model::UserId,

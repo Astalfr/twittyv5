@@ -310,6 +310,19 @@ async fn people_search_asks_for_the_people_tab_and_lists_accounts() {
 }
 
 #[tokio::test]
+async fn viewer_lists_come_from_the_lists_page() {
+    let server = MockServer::start().await;
+    serve(&server, "ListsManagementPageTimeline", fixture("lists-management")).await;
+    let b = backend(&server);
+    let lists = b.viewer_lists().await.unwrap();
+    assert_eq!(lists.len(), 1, "same lists as the translate snapshot");
+    assert_eq!(sent_variables(&server).await, json!({"count": 100}));
+    let health = b.health();
+    let page = health.iter().find(|h| h.name == "ListsManagementPageTimeline").unwrap();
+    assert_eq!((page.ok, page.rows, page.unsupported, page.warnings), (1, 1, 0, 0));
+}
+
+#[tokio::test]
 async fn an_unreadable_account_is_skipped_and_counted() {
     let server = MockServer::start().await;
     let mut body = fixture("search-people");

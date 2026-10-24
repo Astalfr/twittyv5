@@ -1,7 +1,10 @@
 //! The "Add column" dialog: which kinds of column exist, and how what the user
-//! typed (a query, `@handle`, list or tweet link) becomes a `FeedSource`.
+//! typed (a query, `@handle`, list or tweet link) or picked (one of their
+//! lists) becomes a `FeedSource`.
 
-use twitty_model::{FeedSource, HomeMode, ListId, NotificationFilter, PostId, SearchSort, UserTab};
+use twitty_model::{
+    FeedSource, HomeMode, ListId, ListSummary, NotificationFilter, PostId, SearchSort, UserTab,
+};
 
 /// A kind of column the user can add.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +72,8 @@ pub enum InputError {
     BadHandle,
     #[error("Paste a list link like x.com/i/lists/123…")]
     BadList,
+    #[error("Pick one of your lists or paste a list link.")]
+    NoList,
     #[error("Paste a tweet link like x.com/user/status/123…")]
     BadPost,
 }
@@ -96,6 +101,48 @@ pub fn parse(kind: ColumnKind, input: &str) -> Result<Parsed, InputError> {
             root: PostId::new(id_after(input, &["status", "statuses"]).ok_or(InputError::BadPost)?),
         },
     }))
+}
+
+/// The viewer's lists, which the dialog offers for list columns. Loaded the
+/// first time the List kind is chosen.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ViewerLists {
+    #[default]
+    NotLoaded,
+    Loading,
+    Loaded(Vec<ListSummary>),
+    /// Why loading failed; choosing List again retries.
+    Failed(String),
+}
+
+impl ViewerLists {
+    /// Whether choosing List should (re)load them.
+    pub fn needs_load(&self) -> bool {
+        matches!(self, ViewerLists::NotLoaded | ViewerLists::Failed(_))
+    }
+
+    /// The loaded list with `id`.
+    pub fn find(&self, id: &ListId) -> Option<&ListSummary> {
+        match self {
+            ViewerLists::Loaded(lists) => lists.iter().find(|l| &l.id == id),
+            _ => None,
+        }
+    }
+}
+
+/// A list column, named after the list.
+pub fn list_source(list: &ListSummary) -> FeedSource {
+    FeedSource::List { id: list.id.clone(), name: Some(list.name.clone()) }
+}
+
+/// A list column from the picked list, unless a link or id was typed: what the
+/// user typed wins, so any list (not only their own) can be added.
+pub fn parse_list(picked: Option<&ListSummary>, input: &str) -> Result<Parsed, InputError> {
+    match picked {
+        _ if !input.trim().is_empty() => parse(ColumnKind::List, input),
+        Some(list) => Ok(Parsed::Source(list_source(list))),
+        None => Err(InputError::NoList),
+    }
 }
 
 /// A user column once the handle was resolved.
@@ -199,6 +246,46 @@ mod tests {
         }
         assert_eq!(parse(ColumnKind::List, "https://x.com/i/lists/abc"), Err(InputError::BadList));
         assert_eq!(parse(ColumnKind::List, "rust people"), Err(InputError::BadList));
+    }
+
+    fn list(id: &str, name: &str) -> ListSummary {
+        ListSummary {
+            id: ListId::new(id),
+            name: name.into(),
+            members: 3,
+            visibility: twitty_model::ListVisibility::Private,
+        }
+    }
+
+    #[test]
+    fn a_picked_list_is_added_with_its_name_unless_a_link_is_typed() {
+        let mine = list("7", "Friends");
+        assert_eq!(
+            parse_list(Some(&mine), "  "),
+            Ok(Parsed::Source(FeedSource::List {
+                id: ListId::new("7"),
+                name: Some("Friends".into())
+            }))
+        );
+        assert_eq!(
+            parse_list(Some(&mine), "x.com/i/lists/42"),
+            Ok(Parsed::Source(FeedSource::List { id: ListId::new("42"), name: None })),
+            "the typed link wins"
+        );
+        assert_eq!(parse_list(Some(&mine), "nope"), Err(InputError::BadList));
+        assert_eq!(parse_list(None, ""), Err(InputError::NoList));
+    }
+
+    #[test]
+    fn viewer_lists_load_once_and_retry_after_a_failure() {
+        assert!(ViewerLists::NotLoaded.needs_load());
+        assert!(!ViewerLists::Loading.needs_load());
+        assert!(ViewerLists::Failed("down".into()).needs_load());
+        let loaded = ViewerLists::Loaded(vec![list("7", "Friends")]);
+        assert!(!loaded.needs_load());
+        assert_eq!(loaded.find(&ListId::new("7")).map(|l| l.name.as_str()), Some("Friends"));
+        assert_eq!(loaded.find(&ListId::new("8")), None);
+        assert_eq!(ViewerLists::Loading.find(&ListId::new("7")), None);
     }
 
     #[test]

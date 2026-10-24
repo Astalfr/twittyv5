@@ -187,6 +187,12 @@ pub(crate) fn search_users_variables(query: &str) -> Value {
     })
 }
 
+/// Variables of `ListsManagementPageTimeline` (the viewer's lists page). One
+/// page of 100 holds every list but the rarest collections.
+pub(crate) fn lists_management_variables() -> Value {
+    json!({"count": 100})
+}
+
 /// Variables of `UserByScreenName`.
 pub(crate) fn user_by_screen_name_variables(handle: &str) -> Value {
     json!({"screen_name": handle.trim_start_matches('@')})

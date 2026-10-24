@@ -1,7 +1,8 @@
 use std::{future::Future, pin::Pin};
 
 use crate::{
-    BackendError, FeedItem, FeedPage, FeedSource, PageToken, Post, PostId, Profile, UserId,
+    BackendError, FeedItem, FeedPage, FeedSource, ListSummary, PageToken, Post, PostId, Profile,
+    UserId,
 };
 
 /// A boxed, sendable future, so [`Backend`] stays object safe.
@@ -133,6 +134,10 @@ pub trait Backend: Send + Sync + 'static {
         &'a self,
         query: &'a str,
     ) -> BoxFuture<'a, Result<Vec<Profile>, BackendError>>;
+
+    /// The lists the viewer owns or follows, in the provider's order. Lists
+    /// it only suggests are left out.
+    fn viewer_lists(&self) -> BoxFuture<'_, Result<Vec<ListSummary>, BackendError>>;
 
     /// Applies a viewer action to a tweet.
     fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>>;

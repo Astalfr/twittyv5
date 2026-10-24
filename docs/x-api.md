@@ -91,6 +91,8 @@ A session file is `{"auth_token": "…", "ct0": "…"}`. Unusable sources are lo
 | `List { id }` | `ListLatestTweetsTimeline` | |
 | `Bookmarks` | `Bookmarks` | |
 
+`Backend::viewer_lists` (the list picker of the **Add column** dialog) calls `ListsManagementPageTimeline` with `{"count":100}`. The response has two modules: `owned-subscribed-list-module-…` ("Your Lists": owned and followed lists, or a `TimelineMessagePrompt` when there are none) and `list-to-follow-module-…` ("Discover new Lists": suggestions). `translate::lists` reads only the first module, by its entry id; an item there that isn't a readable `TimelineTwitterList` is skipped with a warning. Only the first page is read (its bottom cursor is ignored). The response usually carries partial `errors` (a `DecodeException` on `default_banner_media_results`) next to the data; they don't affect the lists. A response without the "Your Lists" module (an account without lists still has it, holding the prompt) adds a health warning. Health counters are kept as `ListsManagementPageTimeline`.
+
 `Backend::search_users` (the **Search people** dialog) calls `SearchTimeline` (POST) with `product: "People"`. The response is a timeline of `TimelineUser` items whose `user_results.result` has the same shape as `UserByScreenName`, so `translate::users` reuses the profile translation. An entry that isn't a readable account is skipped with a warning. Its health counters are kept as `SearchTimeline (People)`, apart from the search columns, but it spends the same `SearchTimeline` rate budget.
 | `Thread { root }` | `TweetDetail` | |
 
@@ -290,6 +292,7 @@ Variables that worked live (2026-10-24):
 | `UserTweetsAndReplies` | `{"userId":"…","count":20,"includePromotedContent":true,"withCommunity":true,"withVoice":true}` |
 | `UserMedia`, `Likes` | `{"userId":"…","count":20,"includePromotedContent":false,"withClientEventToken":false,"withBirdwatchNotes":false,"withVoice":true}` |
 | `ListLatestTweetsTimeline` | `{"listId":"…","count":20}` |
+| `ListsManagementPageTimeline` | `{"count":100}` (the viewer's lists page; same feature switches and field toggles as `ListLatestTweetsTimeline`) |
 | `SearchTimeline` with `"product":"Lists"` | finds public lists (`TimelineTwitterList` items; used to find a list id for the fixture) |
 
 `capture` writes the raw response (to the gitignored `dumps/` by default) and prints the instruction types, entry count and rate-limit budget.

@@ -1,21 +1,65 @@
 //! The "Add column" dialog: pick a kind, type a query / handle / link when the
-//! kind needs one, then confirm. Handles are resolved with `Backend::profile` first.
+//! kind needs one, then confirm. Handles are resolved with `Backend::profile`
+//! first; list columns also offer the viewer's lists (`Backend::viewer_lists`).
 
 use std::sync::Arc;
 
 use gpui_kit::{
-    Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render, Styled,
-    Subscription, Task, Window, component::button::*, component::input::*, component::*, div,
-    prelude::*, px,
+    AnyElement, App, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Task, Window,
+    component::button::*,
+    component::input::*,
+    component::select::{Select, SelectEvent, SelectItem, SelectState},
+    component::*,
+    div,
+    prelude::*,
+    px,
 };
-use twitty_model::{Backend, BackendError, FeedSource};
+use twitty_model::{Backend, BackendError, FeedSource, ListId, ListSummary, ListVisibility};
 
 use crate::{
     runtime::Runtime,
-    state::add_column::{self, ColumnKind, Parsed},
+    state::add_column::{self, ColumnKind, Parsed, ViewerLists},
     ui::button::TextButton,
     ui::column::source_icon,
 };
+
+/// One of the viewer's lists in the picker.
+#[derive(Debug, Clone)]
+struct ListChoice(ListSummary);
+
+impl SelectItem for ListChoice {
+    type Value = ListId;
+
+    fn title(&self) -> SharedString {
+        self.0.name.clone().into()
+    }
+
+    fn render(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let members = match self.0.members {
+            1 => "1 member".to_owned(),
+            n => format!("{n} members"),
+        };
+        let details = match self.0.visibility {
+            ListVisibility::Public => members,
+            ListVisibility::Private => format!("Private · {members}"),
+        };
+        h_flex()
+            .w_full()
+            .gap_2()
+            .justify_between()
+            .child(div().min_w_0().truncate().child(self.title()))
+            .child(
+                div().flex_none().text_sm().text_color(cx.theme().muted_foreground).child(details),
+            )
+    }
+
+    fn value(&self) -> &ListId {
+        &self.0.id
+    }
+}
+
+type ListPicker = SelectState<Vec<ListChoice>>;
 
 /// What the dialog reports to the app.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,6 +77,9 @@ pub struct AddColumnView {
     error: Option<String>,
     backend: Arc<dyn Backend>,
     lookup: Option<Task<()>>,
+    lists: ViewerLists,
+    list_picker: Entity<ListPicker>,
+    lists_load: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
@@ -41,6 +88,7 @@ impl std::fmt::Debug for AddColumnView {
         f.debug_struct("AddColumnView")
             .field("kind", &self.kind)
             .field("error", &self.error)
+            .field("lists", &self.lists)
             .finish_non_exhaustive()
     }
 }
@@ -53,13 +101,28 @@ impl AddColumnView {
                 this.submit(window, cx);
             }
         });
+        let list_picker = cx.new(|cx| SelectState::new(Vec::new(), None, window, cx));
+        // Picking a list replaces a typed link, which would otherwise win.
+        let picked = cx.subscribe_in(
+            &list_picker,
+            window,
+            |this, _, e: &SelectEvent<Vec<ListChoice>>, window, cx| {
+                let SelectEvent::Confirm(Some(_)) = e else { return };
+                this.error = None;
+                this.input.update(cx, |s, cx| s.set_value("", window, cx));
+                cx.notify();
+            },
+        );
         Self {
             kind: ColumnKind::Search,
             input,
             error: None,
             backend,
             lookup: None,
-            _subs: vec![sub],
+            lists: ViewerLists::default(),
+            list_picker,
+            lists_load: None,
+            _subs: vec![sub, picked],
         }
         .with_prompt(window, cx)
     }
@@ -85,6 +148,52 @@ impl AddColumnView {
         self.lookup.is_some()
     }
 
+    pub fn lists(&self) -> &ViewerLists {
+        &self.lists
+    }
+
+    /// The list picked in the picker.
+    pub fn picked_list(&self, cx: &App) -> Option<&ListSummary> {
+        self.list_picker.read(cx).selected_value().and_then(|id| self.lists.find(id))
+    }
+
+    /// Picks one of the loaded lists (tests).
+    pub fn pick_list(&mut self, id: &ListId, window: &mut Window, cx: &mut Context<Self>) {
+        self.list_picker.update(cx, |p, cx| p.set_selected_value(id, window, cx));
+        cx.notify();
+    }
+
+    /// Loads the viewer's lists into the picker, first one picked.
+    fn load_lists(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.lists = ViewerLists::Loading;
+        let backend = Arc::clone(&self.backend);
+        let result = Runtime::global(cx).spawn(async move { backend.viewer_lists().await });
+        self.lists_load = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = match result.await {
+                Ok(r) => r,
+                Err(e) => Err(BackendError::Network(e.to_string())),
+            };
+            this.update_in(cx, |this, window, cx| {
+                this.lists_load = None;
+                this.lists = match result {
+                    Ok(lists) => {
+                        let choices = lists.iter().cloned().map(ListChoice).collect();
+                        this.list_picker.update(cx, |p, cx| {
+                            p.set_items(choices, window, cx);
+                            if !lists.is_empty() {
+                                p.set_selected_index(Some(IndexPath::new(0)), window, cx);
+                            }
+                        });
+                        ViewerLists::Loaded(lists)
+                    }
+                    Err(e) => ViewerLists::Failed(e.to_string()),
+                };
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
     /// Selects a kind. Nothing is added until the dialog is confirmed.
     pub fn choose(&mut self, kind: ColumnKind, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
@@ -99,6 +208,9 @@ impl AddColumnView {
             });
         }
         self.kind = kind;
+        if kind == ColumnKind::List && self.lists.needs_load() {
+            self.load_lists(window, cx);
+        }
         cx.notify();
     }
 
@@ -114,7 +226,11 @@ impl AddColumnView {
             return;
         }
         let text = self.input.read(cx).value();
-        match add_column::parse(self.kind, &text) {
+        let parsed = match self.kind {
+            ColumnKind::List => add_column::parse_list(self.picked_list(cx), &text),
+            kind => add_column::parse(kind, &text),
+        };
+        match parsed {
             Err(e) => self.error = Some(e.to_string()),
             Ok(Parsed::Source(source)) => cx.emit(AddColumnEvent::Add(source)),
             Ok(Parsed::LookUpUser(handle)) => {
@@ -184,6 +300,7 @@ impl Render for AddColumnView {
             .text_color(theme.foreground)
             .child(div().text_xl().font_weight(FontWeight::BOLD).child("Add column"))
             .child(h_flex().flex_wrap().gap_2().children(kinds))
+            .when(selected == ColumnKind::List, |d| d.children(self.render_lists(cx)))
             .when(selected.prompt().is_some(), |d| {
                 d.child(
                     div()
@@ -219,6 +336,30 @@ impl Render for AddColumnView {
     }
 }
 
+impl AddColumnView {
+    /// The picker of the viewer's lists, or why it can't be shown.
+    fn render_lists(&self, cx: &App) -> Option<AnyElement> {
+        let theme = cx.theme();
+        let note = |text: String, color| div().text_sm().text_color(color).child(text);
+        Some(match &self.lists {
+            ViewerLists::NotLoaded => return None,
+            ViewerLists::Loading => {
+                note("Loading your lists…".into(), theme.muted_foreground).into_any_element()
+            }
+            ViewerLists::Failed(e) => {
+                note(format!("Couldn't load your lists: {e}"), theme.danger).into_any_element()
+            }
+            ViewerLists::Loaded(lists) if lists.is_empty() => {
+                note("You have no lists.".into(), theme.muted_foreground).into_any_element()
+            }
+            ViewerLists::Loaded(_) => div()
+                .debug_selector(|| "add-column-lists".into())
+                .child(Select::new(&self.list_picker).placeholder("Your lists"))
+                .into_any_element(),
+        })
+    }
+}
+
 /// Four tiles per row in the 460px dialog.
 const KIND_TILE_WIDTH: f32 = 96.;
 const KIND_TILE_HEIGHT: f32 = 68.;
@@ -235,7 +376,7 @@ fn sample_source(kind: ColumnKind) -> FeedSource {
 mod tests {
     use super::*;
     use gpui_kit::{TestAppContext, VisualTestContext};
-    use twitty_model::{HomeMode, mock::MockBackend};
+    use twitty_model::{HomeMode, ListId, mock::MockBackend};
 
     fn open(
         cx: &mut TestAppContext,
@@ -346,5 +487,86 @@ mod tests {
         });
         assert!(events.lock().unwrap().is_empty());
         assert!(view.read_with(cx, |v, _| v.error().is_some()));
+    }
+
+    fn list_column(id: &str, name: Option<&str>) -> AddColumnEvent {
+        AddColumnEvent::Add(FeedSource::List { id: ListId::new(id), name: name.map(Into::into) })
+    }
+
+    #[gpui_kit::test]
+    fn lists_load_into_a_picker_with_the_first_picked(cx: &mut TestAppContext) {
+        let (view, cx, events) = open(cx, MockBackend::new());
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("add-column-lists").is_none(), "not loaded before List");
+
+        view.update_in(cx, |v, window, cx| v.choose(ColumnKind::List, window, cx));
+        cx.run_until_parked();
+        assert!(
+            matches!(view.read_with(cx, |v, _| v.lists().clone()), ViewerLists::Loaded(l) if l.len() == 2)
+        );
+        assert!(cx.debug_bounds("add-column-lists").is_some());
+        assert!(cx.debug_bounds("add-column-input").is_some(), "links still work");
+
+        view.update_in(cx, |v, window, cx| v.submit(window, cx));
+        assert_eq!(events.lock().unwrap().as_slice(), [list_column("9000", Some("Rustaceans"))]);
+    }
+
+    #[gpui_kit::test]
+    fn the_picked_list_is_added_unless_a_link_is_typed(cx: &mut TestAppContext) {
+        let (view, cx, events) = open(cx, MockBackend::new());
+        view.update_in(cx, |v, window, cx| v.choose(ColumnKind::List, window, cx));
+        cx.run_until_parked();
+        view.update_in(cx, |v, window, cx| {
+            v.pick_list(&ListId::new("9001"), window, cx);
+            v.submit(window, cx);
+            v.set_text("x.com/i/lists/42", window, cx);
+            v.submit(window, cx);
+        });
+        assert_eq!(
+            events.lock().unwrap().as_slice(),
+            [list_column("9001", Some("Close friends")), list_column("42", None)]
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_list_load_says_why_and_retries(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        backend.fail_next(BackendError::Network("down".into()));
+        let (view, cx, events) = open(cx, backend);
+        view.update_in(cx, |v, window, cx| v.choose(ColumnKind::List, window, cx));
+        cx.run_until_parked();
+        assert!(matches!(view.read_with(cx, |v, _| v.lists().clone()), ViewerLists::Failed(_)));
+        assert!(cx.debug_bounds("add-column-lists").is_none());
+        view.update_in(cx, |v, window, cx| v.submit(window, cx));
+        assert!(events.lock().unwrap().is_empty(), "nothing picked, nothing typed");
+        assert!(view.read_with(cx, |v, _| v.error().is_some()));
+
+        view.update_in(cx, |v, window, cx| {
+            v.choose(ColumnKind::Search, window, cx);
+            v.choose(ColumnKind::List, window, cx);
+        });
+        cx.run_until_parked();
+        assert!(matches!(view.read_with(cx, |v, _| v.lists().clone()), ViewerLists::Loaded(_)));
+    }
+
+    #[gpui_kit::test]
+    fn without_lists_only_a_link_can_be_added(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        backend.set_lists(Vec::new());
+        let (view, cx, events) = open(cx, backend);
+        view.update_in(cx, |v, window, cx| v.choose(ColumnKind::List, window, cx));
+        cx.run_until_parked();
+        assert_eq!(view.read_with(cx, |v, _| v.lists().clone()), ViewerLists::Loaded(Vec::new()));
+        assert!(cx.debug_bounds("add-column-lists").is_none());
+        view.update_in(cx, |v, window, cx| v.submit(window, cx));
+        assert_eq!(
+            view.read_with(cx, |v, _| v.error().map(str::to_owned)).as_deref(),
+            Some("Pick one of your lists or paste a list link.")
+        );
+        view.update_in(cx, |v, window, cx| {
+            v.set_text("42", window, cx);
+            v.submit(window, cx);
+        });
+        assert_eq!(events.lock().unwrap().as_slice(), [list_column("42", None)]);
     }
 }

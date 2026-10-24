@@ -5,7 +5,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use twitty_model::{
     Backend, BackendError, BoxFuture, Draft, FeedPage, FeedSource, FollowAction, FollowStatus,
-    PageRequest, Post, PostAction, PostId, Profile, RateBudget, RequestHealth, ThreadView, UserId,
+    ListSummary, PageRequest, Post, PostAction, PostId, Profile, RateBudget, RequestHealth,
+    ThreadView, UserId,
 };
 
 use crate::{XClient, XError, health::Health, requests, translate};
@@ -25,6 +26,9 @@ const ALREADY_REQUESTED: i64 = 160;
 /// Health label of account searches, kept apart from the search columns'
 /// `SearchTimeline` counters (both share Twitter's rate limit).
 const PEOPLE_SEARCH: &str = "SearchTimeline (People)";
+
+/// The viewer's lists page (owned, followed and suggested lists).
+const LISTS_MANAGEMENT: &str = "ListsManagementPageTimeline";
 
 /// Twitter as a [`Backend`]. Cheap to clone; clones share the client.
 #[derive(Debug, Clone)]
@@ -163,6 +167,35 @@ impl Backend for XBackend {
                 }
                 Err(e) => {
                     self.health.error(PEOPLE_SEARCH, &e);
+                    Err(e.into())
+                }
+            }
+        })
+    }
+
+    fn viewer_lists(&self) -> BoxFuture<'_, Result<Vec<ListSummary>, BackendError>> {
+        Box::pin(async move {
+            let variables = requests::lists_management_variables();
+            match self.client.graphql(LISTS_MANAGEMENT, variables).await {
+                Ok(body) => {
+                    let translated = translate::lists(&body);
+                    if !translated.found_module {
+                        self.health.warning(
+                            LISTS_MANAGEMENT,
+                            "response has no 'Your Lists' module".into(),
+                        );
+                    }
+                    let unreadable = translated.warnings.len();
+                    self.health.rows(
+                        LISTS_MANAGEMENT,
+                        translated.lists.len() + unreadable,
+                        unreadable,
+                        &translated.warnings,
+                    );
+                    Ok(translated.lists)
+                }
+                Err(e) => {
+                    self.health.error(LISTS_MANAGEMENT, &e);
                     Err(e.into())
                 }
             }

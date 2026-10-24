@@ -311,15 +311,16 @@ impl Anonymiser {
 /// of `scrubbed` (case-insensitive). Empty means the scrub worked.
 ///
 /// Display names count only on objects that also have a `screen_name`
-/// (users and mentions), so card names and labels don't raise false alarms.
+/// (users and mentions) or a `member_count` (lists), so card names and labels
+/// don't raise false alarms.
 pub fn leaks(original: &Value, scrubbed: &Value) -> Vec<String> {
     fn identifying(v: &Value, out: &mut Vec<String>) {
         match v {
             Value::Object(map) => {
-                let is_user = map.contains_key("screen_name");
+                let named = map.contains_key("screen_name") || map.contains_key("member_count");
                 for (k, v) in map {
                     if let Some(s) = v.as_str()
-                        && (k == "screen_name" || (k == "name" && is_user))
+                        && (k == "screen_name" || (k == "name" && named))
                         && s.chars().count() >= 4
                     {
                         out.push(s.to_lowercase());
@@ -518,6 +519,19 @@ mod tests {
         assert!(leaks(&original, &scrubbed).is_empty());
         let leaked = json!({"text": "hello grok"});
         assert_eq!(leaks(&original, &leaked), vec!["grok".to_owned()]);
+    }
+
+    #[test]
+    fn list_names_are_scrubbed_and_checked() {
+        let original = json!({"list": {"name": "Rustaceans", "member_count": 3, "mode": "Private",
+            "members_context": "3 members", "description": "People who write Rust"}});
+        let mut scrubbed = original.clone();
+        Anonymiser::with_key(7).anonymise(&mut scrubbed);
+        assert_ne!(scrubbed["list"]["name"], "Rustaceans");
+        assert_ne!(scrubbed["list"]["description"], "People who write Rust");
+        assert_eq!(scrubbed["list"]["mode"], "Private", "structural values are kept");
+        assert!(leaks(&original, &scrubbed).is_empty());
+        assert_eq!(leaks(&original, &original), vec!["rustaceans".to_owned()]);
     }
 
     #[test]

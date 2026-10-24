@@ -82,6 +82,17 @@ async fn people_search_finds_accounts() {
 }
 
 #[tokio::test]
+#[ignore = "calls the real X API; needs TWITTY_LIVE=1 and a session"]
+async fn viewer_lists_are_readable() {
+    let backend = twitty_x::XBackend::new(Arc::new(live_client()));
+    // The account may have no lists; what matters is that the page still parses.
+    twitty_model::Backend::viewer_lists(&backend).await.unwrap();
+    let health = twitty_model::Backend::health(&backend);
+    let page = health.iter().find(|h| h.name == "ListsManagementPageTimeline").unwrap();
+    assert_eq!((page.ok, page.unsupported, page.warnings), (1, 0, 0), "{page:#?}");
+}
+
+#[tokio::test]
 #[ignore = "downloads x.com's public bundles; needs TWITTY_LIVE=1"]
 async fn discovery_logged_out_finds_operations() {
     assert_eq!(std::env::var("TWITTY_LIVE").as_deref(), Ok("1"), "set TWITTY_LIVE=1");
