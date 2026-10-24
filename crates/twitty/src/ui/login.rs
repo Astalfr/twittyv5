@@ -176,7 +176,7 @@ impl Render for LoginView {
             .border_color(theme.border)
             .bg(theme.popover)
             .text_color(theme.foreground)
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Sign in to X"))
+            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Sign in to Twitter"))
             .when_some(self.form.notice().map(str::to_owned), |d, notice| {
                 d.child(div().text_sm().text_color(theme.warning).child(notice))
             })
@@ -223,8 +223,8 @@ impl Render for LoginView {
                     ),
             )
             .child(div().text_xs().text_color(theme.muted_foreground).child(
-                "The cookies are kept in Windows Credential Manager. Using X's internal API is \
-                 against X's terms; a secondary account is safer.",
+                "The cookies are kept in Windows Credential Manager. Using Twitter's internal API is \
+                 against Twitter's terms; a secondary account is safer.",
             ))
     }
 }

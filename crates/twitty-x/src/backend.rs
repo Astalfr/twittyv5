@@ -1,4 +1,4 @@
-//! [`XBackend`]: the `twitty-model` [`Backend`] port implemented over X.
+//! [`XBackend`]: the `twitty-model` [`Backend`] port implemented over Twitter.
 
 use std::sync::Arc;
 
@@ -10,23 +10,23 @@ use twitty_model::{
 
 use crate::{XClient, XError, health::Health, requests, translate};
 
-/// X's rate-limit window.
+/// Twitter's rate-limit window.
 const WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
-/// Assumed limit before X reported one (the lowest seen for timelines is 50).
+/// Assumed limit before Twitter reported one (the lowest seen for timelines is 50).
 const ASSUMED_LIMIT: u32 = 50;
 
-/// X error codes meaning the action already happened ("already favorited",
+/// Twitter error codes meaning the action already happened ("already favorited",
 /// "already retweeted"). The request is idempotent from the UI's view.
 const ALREADY_DONE: [i64; 2] = [139, 327];
 
-/// X's code for "you've already requested to follow" (a protected account).
+/// Twitter's code for "you've already requested to follow" (a protected account).
 const ALREADY_REQUESTED: i64 = 160;
 
 /// Health label of account searches, kept apart from the search columns'
-/// `SearchTimeline` counters (both share X's rate limit).
+/// `SearchTimeline` counters (both share Twitter's rate limit).
 const PEOPLE_SEARCH: &str = "SearchTimeline (People)";
 
-/// X as a [`Backend`]. Cheap to clone; clones share the client.
+/// Twitter as a [`Backend`]. Cheap to clone; clones share the client.
 #[derive(Debug, Clone)]
 pub struct XBackend {
     client: Arc<XClient>,
@@ -74,12 +74,12 @@ impl XBackend {
     }
 }
 
-/// Whether `body` lacks any `instructions` array: a sign X moved the timeline.
+/// Whether `body` lacks any `instructions` array: a sign Twitter moved the timeline.
 fn wire_has_no_timeline(body: &Value) -> bool {
     crate::wire::find_instructions(body).is_none()
 }
 
-/// A mutation succeeded unless X sent errors with empty `data` (the transport
+/// A mutation succeeded unless Twitter sent errors with empty `data` (the transport
 /// keeps such bodies because queries use them for partial results).
 fn mutation_outcome(body: &Value) -> Result<(), BackendError> {
     let errors = body.get("errors").and_then(Value::as_array).filter(|e| !e.is_empty());
@@ -91,7 +91,7 @@ fn mutation_outcome(body: &Value) -> Result<(), BackendError> {
                 return Ok(());
             }
             let message = first.get("message").and_then(Value::as_str).unwrap_or("unknown error");
-            Err(BackendError::Upstream(format!("X error {code}: {message}")))
+            Err(BackendError::Upstream(format!("Twitter error {code}: {message}")))
         }
         _ => Ok(()),
     }

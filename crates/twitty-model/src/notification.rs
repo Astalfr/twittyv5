@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NotificationId, Post, Profile, RichText};
 
-/// An activity notification (likes, follows, reposts…).
+/// An activity notification (likes, follows, retweets…).
 ///
 /// Replies and mentions are delivered as [`crate::FeedItem::Post`] instead.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,9 +15,9 @@ pub struct Notification {
     pub created_at: DateTime<Utc>,
     /// Who did it, most recent first. May be empty for system notices.
     pub actors: Vec<Arc<Profile>>,
-    /// Summary line, e.g. "Alice and 3 others liked your post".
+    /// Summary line, e.g. "Alice and 3 others liked your tweet".
     pub text: RichText,
-    /// The post the notification is about, when there is one.
+    /// The tweet the notification is about, when there is one.
     pub target: Option<Box<Post>>,
 }
 

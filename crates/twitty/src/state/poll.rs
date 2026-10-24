@@ -1,4 +1,4 @@
-//! How often each column checks for new posts, within the provider's limits.
+//! How often each column checks for new tweets, within the provider's limits.
 //!
 //! Polling may use a third of a feed's budget; the rest stays for scrolling,
 //! refreshes and other columns' first loads. Columns that hit the same feed

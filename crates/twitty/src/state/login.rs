@@ -72,7 +72,7 @@ impl LoginForm {
     pub fn check_failed(&mut self, error: &BackendError) {
         let message = match error {
             BackendError::Unauthorized => {
-                "X didn't accept these cookies. Copy them again from a logged-in x.com tab."
+                "Twitter didn't accept these cookies. Copy them again from a logged-in x.com tab."
                     .to_owned()
             }
             other => format!("Couldn't check the session: {other}"),

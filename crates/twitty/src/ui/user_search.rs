@@ -191,7 +191,7 @@ impl Render for UserSearchView {
             )
             .when(self.demo, |d| {
                 d.child(div().text_xs().text_color(theme.muted_foreground).child(
-                    "Demo mode: only the sample accounts can be found. Sign in to search X.",
+                    "Demo mode: only the sample accounts can be found. Sign in to search Twitter.",
                 ))
             })
             .when_some(self.search.message(), |d, message| {

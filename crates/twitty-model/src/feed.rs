@@ -8,7 +8,7 @@ use crate::{ListId, Notification, PageToken, Post, PostId, Profile, UnavailableR
 #[derive(Debug, Clone, PartialEq)]
 pub enum FeedItem {
     Post(Post),
-    /// `by` reposted `post`.
+    /// `by` retweeted `post`.
     Repost {
         by: Arc<Profile>,
         post: Post,
@@ -16,10 +16,10 @@ pub enum FeedItem {
     /// A conversation shown as a connected group, oldest first.
     Thread(Vec<Post>),
     Notification(Notification),
-    /// A post that exists but cannot be shown.
+    /// A tweet that exists but cannot be shown.
     Unavailable {
         /// Backend-supplied row identity (e.g. a timeline entry id), unique within a feed.
-        /// Needed because tombstones often carry no post id.
+        /// Needed because tombstones often carry no tweet id.
         entry: String,
         id: Option<PostId>,
         reason: UnavailableReason,
@@ -48,7 +48,7 @@ impl FeedItem {
         }
     }
 
-    /// Every post contained in this item, in display order.
+    /// Every tweet contained in this item, in display order.
     pub fn posts(&self) -> Vec<&Post> {
         match self {
             FeedItem::Post(p) | FeedItem::Repost { post: p, .. } => vec![p],
@@ -113,7 +113,7 @@ impl FeedSource {
             FeedSource::List { name, .. } => name.clone().unwrap_or_else(|| "List".into()),
             FeedSource::User { handle, .. } => format!("@{handle}"),
             FeedSource::Bookmarks => "Bookmarks".into(),
-            FeedSource::Thread { .. } => "Post".into(),
+            FeedSource::Thread { .. } => "Tweet".into(),
         }
     }
 }

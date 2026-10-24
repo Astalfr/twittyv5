@@ -207,7 +207,7 @@ async fn thread_splits_around_the_focal_post() {
 
 #[tokio::test]
 async fn thread_rows_before_the_focal_post_are_ancestors() {
-    // Turn the capture into a reply: put the first reply's tweet above the focal post.
+    // Turn the capture into a reply: put the first reply's tweet above the focal tweet.
     let mut body = fixture("tweetdetail");
     let entries = body["data"]["threaded_conversation_with_injections_v2"]["instructions"]
         .as_array_mut()
@@ -380,7 +380,7 @@ async fn rate_budget_uses_the_limit_x_reported() {
 async fn health_counts_rows_errors_and_drift() {
     let server = MockServer::start().await;
     serve(&server, "HomeTimeline", fixture("home")).await;
-    // A timeline whose entries X renamed: one unknown item type.
+    // A timeline whose entries Twitter renamed: one unknown item type.
     serve(
         &server,
         "Bookmarks",
@@ -448,7 +448,7 @@ async fn failed_actions_report_xs_message() {
     )
     .await;
     let err = backend(&server).act(PostAction::Bookmark(PostId::new("1"))).await.unwrap_err();
-    assert_eq!(err, BackendError::Upstream("X error 999: nope".into()));
+    assert_eq!(err, BackendError::Upstream("Twitter error 999: nope".into()));
 }
 
 /// Serves `status` and `body` for every POST to the v1.1 REST `path`.

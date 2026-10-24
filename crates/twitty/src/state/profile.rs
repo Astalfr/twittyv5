@@ -1,5 +1,5 @@
 //! The profile sheet: its tabs, the media gallery and how its list rows map
-//! to the header, posts and gallery rows.
+//! to the header, tweets and gallery rows.
 
 use std::{ops::Range, sync::Arc};
 
@@ -44,8 +44,8 @@ pub struct Tile {
     pub index: usize,
 }
 
-/// Every media of the posts in `items`, newest post first, in each post's
-/// order. Reposts are left out: their media is someone else's.
+/// Every media of the tweets in `items`, newest tweet first, in each tweet's
+/// order. Retweets are left out: their media is someone else's.
 pub fn tiles(items: &[FeedItem]) -> Vec<Tile> {
     let posts = items.iter().flat_map(|item| match item {
         FeedItem::Post(p) => vec![p],
@@ -159,7 +159,7 @@ mod tests {
         for t in &tiles {
             assert!(t.index < t.post.media.len(), "{t:?} points at a media");
         }
-        // A post's media stay together, in their order.
+        // A tweet's media stay together, in their order.
         for pair in tiles.windows(2) {
             if pair[0].post.id == pair[1].post.id {
                 assert_eq!(pair[1].index, pair[0].index + 1);
@@ -179,7 +179,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(!reposted.is_empty(), "the mock has reposts");
+        assert!(!reposted.is_empty(), "the mock has retweets");
         assert!(tiles(&items).iter().all(|t| !reposted.contains(&t.post.id)));
     }
 
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn splices_replace_changed_rows_and_the_footer() {
-        // Two posts appended to three: rows from the old footer on.
+        // Two tweets appended to three: rows from the old footer on.
         assert_eq!(splice(ProfileTab::Tweets, 3, 3, 5), (5..6, 3));
         // Everything replaced.
         assert_eq!(splice(ProfileTab::Tweets, 0, 3, 1), (2..6, 2));

@@ -33,7 +33,7 @@ use crate::{
 const PREFETCH_ROWS: usize = 5;
 /// Space between gallery tiles.
 const TILE_GAP: f32 = 2.0;
-/// The banner spans the panel (inside its 1px left border), at X's 3:1.
+/// The banner spans the panel (inside its 1px left border), at Twitter's 3:1.
 const BANNER_W: f32 = PANEL_WIDTH - 1.0;
 const BANNER_H: f32 = BANNER_W / 3.0;
 /// Diameter of the profile's avatar.
@@ -50,7 +50,7 @@ pub struct CloseProfile;
 
 impl EventEmitter<CloseProfile> for ProfilePanel {}
 
-/// An account's profile, posts and media.
+/// An account's profile, tweets and media.
 pub struct ProfilePanel {
     profile: Arc<Profile>,
     /// The signed-in account, which has no Follow button on its own profile.
@@ -80,7 +80,7 @@ impl std::fmt::Debug for ProfilePanel {
 }
 
 impl ProfilePanel {
-    /// Shows `profile` at once, then refreshes it and loads its posts.
+    /// Shows `profile` at once, then refreshes it and loads its tweets.
     /// `viewer` is the signed-in account, if any.
     pub fn new(
         profile: Arc<Profile>,
@@ -156,7 +156,7 @@ impl ProfilePanel {
         }
     }
 
-    /// The profile in a post may lack its bio or counts: fetch it whole.
+    /// The profile in a tweet may lack its bio or counts: fetch it whole.
     fn refresh_profile(&mut self, cx: &mut Context<Self>) {
         let backend = Arc::clone(&self.backend);
         let handle = self.profile.handle.to_string();
@@ -339,7 +339,7 @@ impl ProfilePanel {
                 )
                 .child(label)
         };
-        // X's banners are 3:1. The avatar overlaps the banner's bottom edge,
+        // Twitter's banners are 3:1. The avatar overlaps the banner's bottom edge,
         // ringed in the background colour.
         let banner = p.banner.as_ref().map(|b| {
             img(remote_image::source(b.url.as_str(), BANNER_W, BANNER_H))
@@ -405,7 +405,7 @@ impl ProfilePanel {
                                         .child(format!("@{}", p.handle)),
                                 )
                                 .when(p.viewer.followed_by, |d| {
-                                    // X's small "Follows you" tag.
+                                    // Twitter's small "Follows you" tag.
                                     d.child(
                                         div()
                                             .debug_selector(|| "profile-follows-you".into())
@@ -548,7 +548,7 @@ impl ProfilePanel {
             Status::Idle if model.loaded_once() && self.content(tab) == 0 => div()
                 .text_color(theme.muted_foreground)
                 .child(match tab {
-                    ProfileTab::Tweets => "No posts yet",
+                    ProfileTab::Tweets => "No tweets yet",
                     ProfileTab::Media => "No photos or videos yet",
                 })
                 .into_any_element(),

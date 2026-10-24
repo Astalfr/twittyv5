@@ -8,7 +8,7 @@ use gpui_kit::{App, Global};
 
 use crate::state::deck::Volume;
 
-/// The sound columns play when new posts arrive.
+/// The sound columns play when new tweets arrive.
 const NOTIFICATION: &[u8] = include_bytes!("../resources/notification.mp3");
 
 /// Something that plays the notification sound.

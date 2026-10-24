@@ -1,7 +1,7 @@
-//! Composing a post: what it answers or quotes, X's weighted length limit and
+//! Composing a tweet: what it answers or quotes, Twitter's weighted length limit and
 //! the draft sent to the backend.
 //!
-//! X counts text with twitter-text's weighting: characters in the ranges below
+//! Twitter counts text with twitter-text's weighting: characters in the ranges below
 //! count 1, everything else (CJK, emoji…) counts 2, and every link counts 23
 //! whatever its length. The limit is 280. Emoji sequences joined with ZWJ are
 //! counted per code point here, so they can read slightly high.
@@ -10,20 +10,20 @@ use std::sync::Arc;
 
 use twitty_model::{Draft, Post};
 
-/// What a post being composed is about.
+/// What a tweet being composed is about.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ComposeTarget {
-    /// A new post on its own.
+    /// A new tweet on its own.
     #[default]
     New,
-    /// A reply to this post.
+    /// A reply to this tweet.
     Reply(Arc<Post>),
-    /// A quote of this post: the new post embeds it.
+    /// A quote of this tweet: the new tweet embeds it.
     Quote(Arc<Post>),
 }
 
 impl ComposeTarget {
-    /// The post replied to, if any.
+    /// The tweet replied to, if any.
     pub fn reply_to(&self) -> Option<&Arc<Post>> {
         match self {
             Self::Reply(post) => Some(post),
@@ -31,7 +31,7 @@ impl ComposeTarget {
         }
     }
 
-    /// The post quoted, if any.
+    /// The tweet quoted, if any.
     pub fn quoted(&self) -> Option<&Arc<Post>> {
         match self {
             Self::Quote(post) => Some(post),
@@ -40,7 +40,7 @@ impl ComposeTarget {
     }
 }
 
-/// Maximum weighted length of a post.
+/// Maximum weighted length of a tweet.
 pub const MAX_LENGTH: usize = 280;
 /// Weighted length of any link.
 const LINK_LENGTH: usize = 23;
@@ -58,7 +58,7 @@ fn is_link(word: &str) -> bool {
     rest.is_some_and(|r| r.contains('.'))
 }
 
-/// The length X counts for `text`.
+/// The length Twitter counts for `text`.
 pub fn weighted_length(text: &str) -> usize {
     let mut total = 0;
     let mut word = String::new();
@@ -84,12 +84,12 @@ pub fn remaining(text: &str) -> isize {
     isize::try_from(MAX_LENGTH).unwrap_or(isize::MAX) - used
 }
 
-/// Whether `text` can be posted.
+/// Whether `text` can be tweeted.
 pub fn can_post(text: &str) -> bool {
     !text.trim().is_empty() && remaining(text) >= 0
 }
 
-/// The draft for `text`, replying to or quoting `target`'s post.
+/// The draft for `text`, replying to or quoting `target`'s tweet.
 pub fn draft(text: &str, target: &ComposeTarget) -> Draft {
     Draft {
         text: text.trim().to_owned(),

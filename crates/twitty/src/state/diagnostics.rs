@@ -17,10 +17,10 @@ pub enum Verdict {
 impl Verdict {
     pub fn text(&self) -> String {
         match self {
-            Verdict::Nothing => "Nothing to report (no X requests yet, or demo data).".into(),
-            Verdict::Healthy => "Every row X sent was understood.".into(),
+            Verdict::Nothing => "Nothing to report (no Twitter requests yet, or demo data).".into(),
+            Verdict::Healthy => "Every row Twitter sent was understood.".into(),
             Verdict::Drift { unreadable } => format!(
-                "{unreadable} row(s) couldn't be read: X may have changed its format (see the runbook in docs/x-api.md)."
+                "{unreadable} row(s) couldn't be read: Twitter may have changed its format (see the runbook in docs/x-api.md)."
             ),
         }
     }

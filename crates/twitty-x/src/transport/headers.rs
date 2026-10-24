@@ -1,4 +1,4 @@
-//! Request headers X's web client sends.
+//! Request headers Twitter's web client sends.
 
 use std::path::Path;
 

@@ -11,7 +11,7 @@ use crate::state::compose::ComposeTarget;
 
 /// How long a success stays up.
 pub const SUCCESS_TTL: Duration = Duration::from_millis(3000);
-/// How long an error stays up: long enough to read X's reason.
+/// How long an error stays up: long enough to read Twitter's reason.
 pub const ERROR_TTL: Duration = Duration::from_millis(6000);
 /// How long a toast takes to fade out once it's done.
 pub const EXIT: Duration = Duration::from_millis(200);
@@ -40,36 +40,36 @@ impl Notice {
         Self { kind: ToastKind::Error, text: text.into() }
     }
 
-    /// What a post action that went through says. Likes say nothing: the
+    /// What a tweet action that went through says. Likes say nothing: the
     /// heart already shows it, and a toast per like would be noise.
     pub fn action_done(action: &PostAction) -> Option<Self> {
         let text = match action {
             PostAction::Like(_) | PostAction::Unlike(_) => return None,
-            PostAction::Repost(_) => "Reposted",
-            PostAction::Unrepost(_) => "Repost undone",
+            PostAction::Repost(_) => "Retweeted",
+            PostAction::Unrepost(_) => "Retweet undone",
             PostAction::Bookmark(_) => "Added to Bookmarks",
             PostAction::Unbookmark(_) => "Removed from Bookmarks",
         };
         Some(Self::success(text))
     }
 
-    /// Why a post action was undone.
+    /// Why a tweet action was undone.
     pub fn action_failed(action: &PostAction, error: &BackendError, now: DateTime<Utc>) -> Self {
         let what = match action {
             PostAction::Like(_) => "like",
             PostAction::Unlike(_) => "unlike",
-            PostAction::Repost(_) => "repost",
-            PostAction::Unrepost(_) => "undo the repost",
+            PostAction::Repost(_) => "retweet",
+            PostAction::Unrepost(_) => "undo the retweet",
             PostAction::Bookmark(_) => "bookmark",
             PostAction::Unbookmark(_) => "remove the bookmark",
         };
         Self::error(format!("Couldn't {what}: {}", reason(error, now)))
     }
 
-    /// A post, reply or quote of `target` was sent.
+    /// A tweet, reply or quote of `target` was sent.
     pub fn published(target: &ComposeTarget) -> Self {
         Self::success(match target {
-            ComposeTarget::New => "Post sent",
+            ComposeTarget::New => "Tweet sent",
             ComposeTarget::Reply(_) => "Reply sent",
             ComposeTarget::Quote(_) => "Quote sent",
         })
@@ -206,7 +206,7 @@ mod tests {
     fn toasts_hide_then_fade_out_then_go() {
         let t0 = Instant::now();
         let mut toasts = Toasts::default();
-        toasts.push(Notice::success("Reposted"), t0);
+        toasts.push(Notice::success("Retweeted"), t0);
         toasts.push(Notice::error("Couldn't like: nope"), t0);
         assert_eq!(toasts.next_change(t0), Some(t0 + SUCCESS_TTL));
 
@@ -227,12 +227,12 @@ mod tests {
     fn the_same_message_is_shown_once_and_kept_up() {
         let t0 = Instant::now();
         let mut toasts = Toasts::default();
-        let a = toasts.push(Notice::success("Reposted"), t0);
-        let b = toasts.push(Notice::success("Reposted"), t0 + ms(1000));
+        let a = toasts.push(Notice::success("Retweeted"), t0);
+        let b = toasts.push(Notice::success("Retweeted"), t0 + ms(1000));
         assert_eq!(a, b);
         assert_eq!(toasts.items().len(), 1);
         assert_eq!(toasts.items()[0].hides_at, t0 + ms(1000) + SUCCESS_TTL);
-        assert_ne!(toasts.push(Notice::error("Reposted"), t0), a, "another kind is another toast");
+        assert_ne!(toasts.push(Notice::error("Retweeted"), t0), a, "another kind is another toast");
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
         assert_eq!(Notice::action_done(&PostAction::Like(id.clone())), None);
         assert_eq!(
             Notice::action_done(&PostAction::Repost(id.clone())),
-            Some(Notice::success("Reposted"))
+            Some(Notice::success("Retweeted"))
         );
         assert_eq!(
             Notice::action_done(&PostAction::Unbookmark(id.clone())),
@@ -275,10 +275,10 @@ mod tests {
         assert_eq!(
             Notice::action_failed(
                 &PostAction::Repost(id),
-                &BackendError::Upstream("X error 226: automated".into()),
+                &BackendError::Upstream("Twitter error 226: automated".into()),
                 now
             ),
-            Notice::error("Couldn't repost: X error 226: automated")
+            Notice::error("Couldn't retweet: Twitter error 226: automated")
         );
     }
 
@@ -304,7 +304,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let post = rt.block_on(backend.publish(Draft::default())).unwrap();
         let post = std::sync::Arc::new(post);
-        assert_eq!(Notice::published(&ComposeTarget::New), Notice::success("Post sent"));
+        assert_eq!(Notice::published(&ComposeTarget::New), Notice::success("Tweet sent"));
         let reply = ComposeTarget::Reply(std::sync::Arc::clone(&post));
         assert_eq!(Notice::published(&reply), Notice::success("Reply sent"));
         let quote = ComposeTarget::Quote(post);

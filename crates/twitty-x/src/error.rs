@@ -1,28 +1,28 @@
 use chrono::{DateTime, Utc};
 use twitty_model::BackendError;
 
-/// Failure of a call to X.
+/// Failure of a call to Twitter.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum XError {
-    /// Missing, expired or revoked session (HTTP 401/403, X codes 32, 89, 215).
+    /// Missing, expired or revoked session (HTTP 401/403, Twitter codes 32, 89, 215).
     #[error("not authorized (HTTP {status}{})", code.map(|c| format!(", X code {c}")).unwrap_or_default())]
     Unauthorized { status: u16, code: Option<i64> },
     /// Rate limit exhausted for this operation.
     #[error("rate limited on {operation} until {reset_at}")]
     RateLimited { operation: String, reset_at: DateTime<Utc> },
-    /// X requires a real `x-client-transaction-id` (error code 353).
+    /// Twitter requires a real `x-client-transaction-id` (error code 353).
     #[error(
         "X rejected the client transaction id (code 353); a real transaction id is now required"
     )]
     TransactionIdRequired,
-    /// The operation's query id is unknown to X, even after refreshing ids.
+    /// The operation's query id is unknown to Twitter, even after refreshing ids.
     #[error("query id {query_id} for {operation} is stale (HTTP 404) and no newer id was found")]
     StaleQueryId { operation: String, query_id: String },
     /// No query id is known for the operation.
     #[error("no query id known for operation {0}")]
     UnknownOperation(String),
-    /// X returned errors and no data.
-    #[error("X error {code}: {message}")]
+    /// Twitter returned errors and no data.
+    #[error("Twitter error {code}: {message}")]
     Api { code: i64, message: String },
     /// Unexpected HTTP status.
     #[error("unexpected HTTP {status}: {snippet}")]

@@ -1,5 +1,5 @@
-//! The repost dialog, from a post's repost button or `t`: a preview of the
-//! post, then **Repost** (or **Undo repost**), **Quote** or **Cancel**.
+//! The retweet dialog, from a tweet's retweet button or `t`: a preview of the
+//! tweet, then **Retweet** (or **Undo retweet**), **Quote** or **Cancel**.
 //! Enter confirms and `q` quotes.
 
 use std::sync::Arc;
@@ -23,20 +23,20 @@ const PADDING: f32 = 24.;
 /// What the dialog reports to the app.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RepostEvent {
-    /// Repost, or undo the repost, as the dialog offered.
+    /// Retweet, or undo the retweet, as the dialog offered.
     Confirm(RepostChoice),
-    /// Write a quote of the post instead.
+    /// Write a quote of the tweet instead.
     Quote,
     Dismissed,
 }
 
 impl EventEmitter<RepostEvent> for RepostView {}
 
-/// The repost dialog's view.
+/// The retweet dialog's view.
 pub struct RepostView {
     post: Arc<Post>,
     choice: RepostChoice,
-    /// Whether the viewer switched this translated post to its original.
+    /// Whether the viewer switched this translated tweet to its original.
     showing_original: bool,
     focus: FocusHandle,
 }
@@ -181,7 +181,7 @@ mod tests {
     #[gpui_kit::test]
     fn shows_the_post_and_enter_confirms(cx: &mut TestAppContext) {
         let (view, cx, events) = open(cx, RepostChoice::Repost);
-        let body = cx.debug_bounds("repost-preview-body").expect("the post's text is shown");
+        let body = cx.debug_bounds("repost-preview-body").expect("the tweet's text is shown");
         assert!(body.size.height > px(0.));
         let text = view.read_with(cx, |v, _| v.post().body.text().to_owned());
         assert!(!text.is_empty());

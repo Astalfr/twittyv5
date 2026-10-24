@@ -97,7 +97,7 @@ impl ColumnModel {
         self.selected = None;
     }
 
-    /// The first post of the selected row (a thread's first post, a
+    /// The first tweet of the selected row (a thread's first tweet, a
     /// notification's target).
     pub fn selected_post(&self) -> Option<&twitty_model::Post> {
         self.items.get(self.selected?)?.posts().into_iter().next()
@@ -205,7 +205,7 @@ impl ColumnModel {
                 ListChange::Reset { count: self.items.len() }
             }
             LoadKind::Older => {
-                // An exhausted feed returns no cursor, or (X) a fresh cursor
+                // An exhausted feed returns no cursor, or (Twitter) a fresh cursor
                 // with no rows; either way stop asking.
                 self.older = if page.items.is_empty() { None } else { page.older };
                 let fresh = self.dedup(page.items);
@@ -393,7 +393,7 @@ mod tests {
         backend.push_new(&home(), 2);
         load(&mut m, &backend, LoadKind::Newer);
         assert_eq!(m.selected(), Some(MockBackend::PAGE_SIZE + 1));
-        assert_eq!(m.selected_post().map(|p| p.id.clone()), selected, "same post");
+        assert_eq!(m.selected_post().map(|p| p.id.clone()), selected, "same tweet");
         load(&mut m, &backend, LoadKind::Refresh);
         assert_eq!(m.selected(), None);
     }

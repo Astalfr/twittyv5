@@ -1,6 +1,6 @@
 //! Best-effort discovery of GraphQL query ids from x.com's JavaScript bundles.
 //!
-//! X ships two web clients (as of 2026-10):
+//! Twitter ships two web clients (as of 2026-10):
 //! - the legacy `responsive-web/client-web` bundles, with objects like
 //!   `{queryId:"…",operationName:"HomeTimeline",operationType:"query",metadata:{featureSwitches:[…],fieldToggles:[…]}}`;
 //! - the newer Relay-based `x-web` bundles, with persisted queries like

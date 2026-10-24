@@ -1,4 +1,4 @@
-//! The thread panel: the conversation around one post.
+//! The thread panel: the conversation around one tweet.
 
 use twitty_model::{BackendError, FeedItem, PostId, ThreadView};
 
@@ -10,7 +10,7 @@ pub enum ThreadState {
     Failed(BackendError),
 }
 
-/// Rows of a loaded thread: ancestors and the focused post as one connected
+/// Rows of a loaded thread: ancestors and the focused tweet as one connected
 /// thread, then each reply.
 pub fn rows(view: &ThreadView) -> Vec<FeedItem> {
     let head = if view.ancestors.is_empty() {
@@ -23,7 +23,7 @@ pub fn rows(view: &ThreadView) -> Vec<FeedItem> {
     std::iter::once(head).chain(view.replies.iter().cloned()).collect()
 }
 
-/// The post a panel for `view` is about.
+/// The tweet a panel for `view` is about.
 pub fn focus_id(view: &ThreadView) -> &PostId {
     &view.focus.id
 }

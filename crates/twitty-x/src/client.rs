@@ -1,5 +1,5 @@
 //! GraphQL calls on top of [`Transport`]: resolves query ids, builds the
-//! request, and self-heals once when X rotated an id.
+//! request, and self-heals once when Twitter rotated an id.
 
 use std::{
     collections::HashSet,
@@ -16,7 +16,7 @@ use crate::{
     transport::{ApiRequest, Body, ClientIds, RetryPolicy, RotateHook, Transport},
 };
 
-/// Client for X's internal GraphQL API. Returns raw JSON; translation into
+/// Client for Twitter's internal GraphQL API. Returns raw JSON; translation into
 /// `twitty-model` happens in a separate layer.
 #[derive(Debug)]
 pub struct XClient {
@@ -24,7 +24,7 @@ pub struct XClient {
     catalog: Arc<Catalog>,
     discovery: Option<Discovery>,
     refreshing: tokio::sync::Mutex<()>,
-    /// Queries X only serves over POST (learned from a GET 404 + POST success).
+    /// Queries Twitter only serves over POST (learned from a GET 404 + POST success).
     post_only: Mutex<HashSet<String>>,
 }
 
@@ -42,7 +42,7 @@ impl XClient {
 
     /// A client against x.com with the production defaults: query-id cache and
     /// client ids under the user's cache directory, live discovery enabled.
-    /// `on_rotate` receives the session whenever X rotates a cookie.
+    /// `on_rotate` receives the session whenever Twitter rotates a cookie.
     pub fn production(session: Session, on_rotate: Option<RotateHook>) -> Result<Self, XError> {
         let catalog = Arc::new(Catalog::new(Catalog::default_cache_path()));
         let ids_path = directories::ProjectDirs::from("", "", "Twitty")
@@ -204,8 +204,8 @@ impl XClient {
         self.transport.send(&request).await
     }
 
-    /// POSTs `fields` as a form to the v1.1 REST endpoint at `path` (e.g.
-    /// `1.1/friendships/create.json`). X's web client still uses these for
+    /// Tweets `fields` as a form to the v1.1 REST endpoint at `path` (e.g.
+    /// `1.1/friendships/create.json`). Twitter's web client still uses these for
     /// some actions; they have no query id to refresh.
     pub async fn rest_post(
         &self,

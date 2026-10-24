@@ -1,7 +1,7 @@
 //! A deterministic in-memory [`Backend`] for UI development and tests.
 //!
-//! Every feed is a fixed list of generated posts, served newest first in
-//! pages of [`MockBackend::PAGE_SIZE`]. Tests can push new posts to the top,
+//! Every feed is a fixed list of generated tweets, served newest first in
+//! pages of [`MockBackend::PAGE_SIZE`]. Tests can push new tweets to the top,
 //! inject failures, and observe actions.
 
 use std::{
@@ -29,7 +29,7 @@ pub struct MockBackend {
 
 #[derive(Debug)]
 struct State {
-    /// Timestamp of the newest generated post.
+    /// Timestamp of the newest generated tweet.
     base: DateTime<Utc>,
     authors: Vec<Arc<Profile>>,
     /// Feed contents, newest first.
@@ -77,7 +77,7 @@ impl MockBackend {
         self.lock().failures.push_back(error);
     }
 
-    /// Adds `count` new posts to the top of `source`, returning their ids.
+    /// Adds `count` new tweets to the top of `source`, returning their ids.
     pub fn push_new(&self, source: &FeedSource, count: usize) -> Vec<PostId> {
         let mut st = self.lock();
         st.ensure_feed(source);
@@ -203,7 +203,7 @@ impl State {
         self.feeds.insert(source.clone(), items);
     }
 
-    /// A known author's posts are theirs; their media tab only has posts
+    /// A known author's tweets are theirs; their media tab only has tweets
     /// with media.
     fn user_feed(&self, id: &UserId, tab: UserTab, items: Vec<FeedItem>) -> Vec<FeedItem> {
         let Some(user) = self.authors.iter().find(|a| &a.id == id) else {
@@ -245,7 +245,7 @@ impl State {
                 FeedItem::Thread(vec![a, b])
             }
             16 => {
-                // Tombstones frequently come without a post id.
+                // Tombstones frequently come without a tweet id.
                 let entry = format!("tombstone-{}", self.next_post_id());
                 FeedItem::Unavailable { entry, id: None, reason: UnavailableReason::Deleted }
             }
@@ -259,7 +259,7 @@ impl State {
             1 => NotificationKind::Repost,
             2 => NotificationKind::Follow,
             3 => NotificationKind::Quote,
-            // Replies and mentions arrive as plain posts.
+            // Replies and mentions arrive as plain tweets.
             _ => return FeedItem::Post(self.make_post(at)),
         };
         let actors: Vec<Arc<Profile>> = (0..1 + i % 3).map(|k| self.author(i + k)).collect();
@@ -270,10 +270,10 @@ impl State {
             n => format!("{first} and {} others", n - 1),
         };
         let what = match kind {
-            NotificationKind::Like => "liked your post",
-            NotificationKind::Repost => "reposted your post",
+            NotificationKind::Like => "liked your tweet",
+            NotificationKind::Repost => "retweeted your tweet",
             NotificationKind::Follow => "followed you",
-            NotificationKind::Quote => "quoted your post",
+            NotificationKind::Quote => "quoted your tweet",
             NotificationKind::Other => "did something",
         };
         let target = (kind != NotificationKind::Follow).then(|| {
@@ -307,16 +307,16 @@ impl State {
         let n = self.next_id as usize;
         let author = self.author(n);
         let (body, lang, translation) = if n % 10 == 5 {
-            // A post in another language, with the translation a provider sends.
+            // A tweet in another language, with the translation a provider sends.
             let translated = Translation {
                 body: RichText::plain(
-                    "Native rendering makes scrolling smooth, even with thousands of posts.",
+                    "Native rendering makes scrolling smooth, even with thousands of tweets.",
                 ),
                 from: Some("fr".into()),
                 to: Some("en".into()),
             };
             let original =
-                "Le rendu natif rend le défilement fluide, même avec des milliers de posts.";
+                "Le rendu natif rend le défilement fluide, même avec des milliers de tweets.";
             (RichText::plain(original), Some("fr".into()), Some(translated))
         } else {
             (sample_body(n, &self.authors), Some("en".into()), None)
@@ -361,7 +361,7 @@ impl State {
                         url: post_url(&quoted_author.handle, &quoted_id),
                         author: quoted_author,
                         created_at: at - Duration::hours(2),
-                        body: RichText::plain("The quoted post, which has its own text."),
+                        body: RichText::plain("The quoted tweet, which has its own text."),
                         media: Vec::new(),
                         embed: None,
                         reply_to: None,
@@ -404,9 +404,9 @@ impl State {
     }
 }
 
-/// The context readers might add to a mock post, with a link.
+/// The context readers might add to a mock tweet, with a link.
 fn community_note(n: usize) -> CommunityNote {
-    let text = "The benchmark in this post was run on a debug build; release builds are                 about ten times faster. example.com/bench";
+    let text = "The benchmark in this tweet was run on a debug build; release builds are                 about ten times faster. example.com/bench";
     let link = text.len() - "example.com/bench".len()..text.len();
     let body = RichText::new(
         text,
@@ -624,13 +624,13 @@ fn sample_body(n: usize, authors: &[Arc<Profile>]) -> RichText {
     const PLAIN: [&str; 6] = [
         "Shipping a native client feels so good. Frame times under 4ms!",
         "Short one.",
-        "Multi-line post\n\nwith a blank line in between,\nand a third line.",
+        "Multi-line tweet\n\nwith a blank line in between,\nand a third line.",
         "Emoji test 🦀🚀👩‍👩‍👧 and CJK 日本語のテキスト and RTL שלום.",
-        "A longer post that goes on for a while to check wrapping inside a narrow column: the quick brown fox jumps over the lazy dog, again and again, until the text needs at least four or five lines to fit.",
+        "A longer tweet that goes on for a while to check wrapping inside a narrow column: the quick brown fox jumps over the lazy dog, again and again, until the text needs at least four or five lines to fit.",
         "Hello from the mock backend.",
     ];
     if n % 4 == 2 {
-        // Rich post: mention + hashtag + link.
+        // Rich tweet: mention + hashtag + link.
         let mention = &authors[(n + 2) % authors.len()];
         let m = format!("@{}", mention.handle);
         let text = format!("{m} have you seen #gpui yet? https://gpui.rs is great");
@@ -867,6 +867,6 @@ mod tests {
             assert!(!n.actors.is_empty());
             assert_eq!(n.target.is_none(), n.kind == NotificationKind::Follow);
         }
-        assert!(page.items.iter().any(|i| matches!(i, FeedItem::Post(_))), "mentions as posts");
+        assert!(page.items.iter().any(|i| matches!(i, FeedItem::Post(_))), "mentions as tweets");
     }
 }

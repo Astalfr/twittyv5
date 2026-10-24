@@ -71,7 +71,7 @@ pub(crate) fn feed(source: &FeedSource, page: &PageRequest) -> (&'static str, Va
                 "withVoice": true,
             }),
         ),
-        // X only serves likes of the signed-in account; others' come back empty.
+        // Twitter only serves likes of the signed-in account; others' come back empty.
         FeedSource::User { id, tab: tab @ (UserTab::Media | UserTab::Likes), .. } => (
             if *tab == UserTab::Media { "UserMedia" } else { "Likes" },
             json!({
@@ -177,7 +177,7 @@ pub(crate) fn create_tweet(draft: &Draft) -> Value {
     v
 }
 
-/// Variables of `SearchTimeline` for its "People" tab: accounts, not posts.
+/// Variables of `SearchTimeline` for its "People" tab: accounts, not tweets.
 pub(crate) fn search_users_variables(query: &str) -> Value {
     json!({
         "rawQuery": query,

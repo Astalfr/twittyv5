@@ -29,7 +29,7 @@ pub(crate) fn item(content: &Value, entry: &str, ctx: &mut Ctx) -> FeedItem {
         .filter_map(|u| at(u, &["user_results", "result"]))
         .filter_map(|u| ctx.profile(u))
         .collect();
-    // The message is localized by X ("Alice liked your post", "Alice a aimé…").
+    // The message is localized by Twitter ("Alice liked your tweet", "Alice a aimé…").
     let text = RichText::plain(str_at(content, &["rich_message", "text"]).unwrap_or_default());
     let target = array_at(content, &["template", "target_objects"])
         .iter()

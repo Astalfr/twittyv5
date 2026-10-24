@@ -1,4 +1,4 @@
-//! Rendering of feed rows: posts, reposts, threads and their embeds.
+//! Rendering of feed rows: tweets, retweets, threads and their embeds.
 
 use std::{
     hash::{DefaultHasher, Hash as _, Hasher as _},
@@ -53,7 +53,7 @@ const AVATAR: f32 = 40.0;
 /// Gap between avatar and content.
 const GAP: f32 = 12.0;
 
-/// Width available to post content (text, media) in a column of `column_width`.
+/// Width available to tweet content (text, media) in a column of `column_width`.
 pub fn content_width(column_width: f32) -> f32 {
     (column_width - 2.0 * PAD_X - AVATAR - GAP).max(0.0)
 }
@@ -65,10 +65,10 @@ pub struct RowCtx {
     pub column_width: f32,
     pub hub: Entity<InteractionsHub>,
     /// Unique to the list the row is in (a column, the thread panel, …), so
-    /// state kept per row (a playing GIF) isn't shared with the same post
+    /// state kept per row (a playing GIF) isn't shared with the same tweet
     /// shown in another list.
     pub scope: ElementId,
-    /// The post a thread panel is about: it shows its Community Note in
+    /// The tweet a thread panel is about: it shows its Community Note in
     /// full. `None` outside the panel.
     pub focus: Option<PostId>,
 }
@@ -197,14 +197,14 @@ fn notice(text: impl Into<SharedString>, bg: &Hsla, fg: Hsla) -> impl IntoElemen
 
 fn unavailable_text(reason: &UnavailableReason) -> String {
     match reason {
-        UnavailableReason::Deleted => "This post was deleted by the author.".into(),
-        UnavailableReason::Suspended => "This post is from a suspended account.".into(),
+        UnavailableReason::Deleted => "This tweet was deleted by the author.".into(),
+        UnavailableReason::Suspended => "This tweet is from a suspended account.".into(),
         UnavailableReason::Protected => {
-            "You're unable to view this post because the account owner limits who can view their posts.".into()
+            "You're unable to view this tweet because the account owner limits who can view their tweets.".into()
         }
-        UnavailableReason::Withheld => "This post is withheld in your country.".into(),
+        UnavailableReason::Withheld => "This tweet is withheld in your country.".into(),
         UnavailableReason::Other(Some(msg)) => msg.clone(),
-        UnavailableReason::Other(None) => "This post is unavailable.".into(),
+        UnavailableReason::Other(None) => "This tweet is unavailable.".into(),
     }
 }
 
@@ -254,7 +254,7 @@ fn handle_lift(window: &Window, family: &SharedString) -> Pixels {
     (lift + px(HANDLE_RAISE)).max(px(0.))
 }
 
-/// A click handler that opens `profile` (instead of the post's thread).
+/// A click handler that opens `profile` (instead of the tweet's thread).
 fn open_profile(
     profile: &Arc<Profile>,
     hub: &Entity<InteractionsHub>,
@@ -269,7 +269,7 @@ fn open_profile(
 }
 
 /// An avatar that opens the account's profile on click and shows its card
-/// on hover, with a button to add a column of its posts.
+/// on hover, with a button to add a column of its tweets.
 fn profile_hover(
     key: usize,
     profile: &Arc<Profile>,
@@ -318,7 +318,7 @@ fn profile_hover(
     })
 }
 
-/// Where a post sits in a chain of connected posts (a thread), which decides
+/// Where a tweet sits in a chain of connected tweets (a thread), which decides
 /// the line drawn through its avatar column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Chain {
@@ -329,7 +329,7 @@ pub(crate) enum Chain {
 }
 
 impl Chain {
-    /// The position of post `k` of `len`.
+    /// The position of tweet `k` of `len`.
     pub(crate) fn at(k: usize, len: usize) -> Self {
         match (k, len) {
             (_, 0 | 1) => Chain::Alone,
@@ -339,18 +339,18 @@ impl Chain {
         }
     }
 
-    /// Whether a post above leads into this one.
+    /// Whether a tweet above leads into this one.
     fn joined_above(self) -> bool {
         matches!(self, Chain::Middle | Chain::Last)
     }
 
-    /// Whether this post leads into one below.
+    /// Whether this tweet leads into one below.
     fn joined_below(self) -> bool {
         matches!(self, Chain::First | Chain::Middle)
     }
 }
 
-/// Padding above a post's avatar and content.
+/// Padding above a tweet's avatar and content.
 const ROW_TOP: f32 = 12.0;
 /// Space between the thread line and the avatar it leads into or out of.
 const LINE_GAP: f32 = 4.0;
@@ -366,7 +366,7 @@ enum LineEnd {
 }
 
 /// One segment of a thread's line. Only the end facing the avatar is rounded:
-/// the other meets the next post's segment at the row edge, and rounding it
+/// the other meets the next tweet's segment at the row edge, and rounding it
 /// would pinch the line there.
 fn thread_line(end: LineEnd, color: Hsla) -> Div {
     let line = div().flex_none().w(px(LINE_W)).bg(color);
@@ -494,7 +494,7 @@ fn post_row(
 
     // The row stretches the avatar column to its full height, so a thread's
     // line runs from the row's top edge into the avatar and from the avatar
-    // to the row's bottom edge, meeting the next post's line without a break.
+    // to the row's bottom edge, meeting the next tweet's line without a break.
     let top = if reposted_by.is_some() { 0.0 } else { ROW_TOP };
     let avatar_col = v_flex()
         .items_center()
@@ -548,7 +548,7 @@ fn post_row(
                             .debug_selector(|| format!("post-reposter-{key}"))
                             .hover(|s| s.underline())
                             .on_click(open_profile(by, &rcx.hub))
-                            .child(format!("{} reposted", by.display_name)),
+                            .child(format!("{} retweeted", by.display_name)),
                     ),
             )
         })
@@ -564,7 +564,7 @@ fn post_row(
         .into_any_element()
 }
 
-/// "Translated from Japanese · Show original" above a translated post's text.
+/// "Translated from Japanese · Show original" above a translated tweet's text.
 fn translation_note(
     id: (&'static str, usize),
     post: &PostId,
@@ -590,7 +590,7 @@ fn translation_note(
                 .cursor_pointer()
                 .hover(|s| s.underline())
                 .on_click(move |_, _, cx| {
-                    // Switching the text must not also open the post's thread.
+                    // Switching the text must not also open the tweet's thread.
                     cx.stop_propagation();
                     hub.update(cx, |hub, cx| hub.toggle_original(&post, cx));
                 })
@@ -598,8 +598,8 @@ fn translation_note(
         )
 }
 
-/// The alert under a post's text saying it has a Community Note. Clicking it
-/// opens the post, where the note is shown in full.
+/// The alert under a tweet's text saying it has a Community Note. Clicking it
+/// opens the tweet, where the note is shown in full.
 fn note_marker(
     id: (&'static str, usize),
     theme: &gpui_kit::component::Theme,
@@ -622,7 +622,7 @@ fn note_marker(
         .child(div().min_w_0().truncate().child(community_note::MARKER))
 }
 
-/// A Community Note in full, under the post a thread panel is about.
+/// A Community Note in full, under the tweet a thread panel is about.
 fn note_box(
     id: (&'static str, usize),
     note: &CommunityNote,
@@ -643,7 +643,7 @@ fn note_box(
         .border_1()
         .border_color(theme.border)
         .text_color(theme.foreground)
-        // Reading or selecting the note must not reopen the post.
+        // Reading or selecting the note must not reopen the tweet.
         .on_click(|_, _, cx| cx.stop_propagation())
         .child(
             h_flex()
@@ -716,7 +716,7 @@ pub(crate) fn rich_text(
     let text = InteractiveText::new(id, styled)
         .on_click(ranges, move |ix, _, cx| {
             let Some(span) = spans.get(ix) else { return };
-            // A link click must not also open the post's thread.
+            // A link click must not also open the tweet's thread.
             cx.stop_propagation();
             match &span.kind {
                 SpanKind::Mention(user) => {
@@ -838,7 +838,7 @@ fn media_grid(
         }))
 }
 
-/// Tells a post's GIF tiles apart in a list (without reading the opaque id).
+/// Tells a tweet's GIF tiles apart in a list (without reading the opaque id).
 fn gif_key(post: &Post, index: usize) -> u64 {
     let mut hasher = DefaultHasher::new();
     (&post.id, index).hash(&mut hasher);
@@ -1021,7 +1021,7 @@ fn quote_card(
                 .w_full()
                 .h(px(h))
                 .on_click(move |_, _, cx| {
-                    // The media opens fullscreen, not the quoted post.
+                    // The media opens fullscreen, not the quoted tweet.
                     cx.stop_propagation();
                     let to = Navigate::Media { post: Arc::clone(&post), index: 0 };
                     hub.update(cx, |hub, cx| hub.navigate(to, cx));
@@ -1036,7 +1036,7 @@ fn quote_card(
         }))
 }
 
-/// A post as a dialog shows it (the repost dialog, a quote being written):
+/// A tweet as a dialog shows it (the retweet dialog, a quote being written):
 /// bordered like a quote card, with its author, text and first media, but
 /// inert, since a click there must not open anything behind the dialog.
 /// `name` makes its debug selectors (`{name}-body`, `{name}-media`) unique.
@@ -1208,7 +1208,7 @@ impl IfEmpty for String {
 enum Click {
     Toggle(Toggle),
     Reply,
-    /// Opens the repost dialog, which reposts, undoes or quotes.
+    /// Opens the retweet dialog, which retweets, undoes or quotes.
     Repost,
     Nothing,
 }
@@ -1229,7 +1229,7 @@ fn action_icon(path: SharedString, popping: bool) -> impl IntoElement {
 }
 
 /// The icon an action shows: like and bookmark fill in when on. Lucide's
-/// repost arrows are bare strokes with nothing to fill, so only its colour
+/// retweet arrows are bare strokes with nothing to fill, so only its colour
 /// changes.
 fn action_icon_path(icon: IconName, on: Click, active: bool) -> SharedString {
     match on {
@@ -1239,7 +1239,7 @@ fn action_icon_path(icon: IconName, on: Click, active: bool) -> SharedString {
     }
 }
 
-/// Like and repost hover in the colour they turn when on; the rest in blue.
+/// Like and retweet hover in the colour they turn when on; the rest in blue.
 fn hover_color(on: Click, theme: &gpui_kit::component::Theme) -> Hsla {
     match on {
         Click::Toggle(Toggle::Like) => theme.red,
@@ -1329,7 +1329,7 @@ fn action_bar(
         .child(action(
             "repost",
             IconName::Repeat2,
-            Some((m.reposts + m.quotes, ("Repost", "Reposts"))),
+            Some((m.reposts + m.quotes, ("Retweet", "Retweets"))),
             eff.viewer.reposted.then_some(theme.green),
             Click::Repost,
         ))
@@ -1420,7 +1420,7 @@ mod tests {
         assert_eq!(unavailable_text(&UnavailableReason::Other(Some("x".into()))), "x");
     }
 
-    /// Renders one post in the narrowest column width.
+    /// Renders one tweet in the narrowest column width.
     struct OnePost {
         item: FeedItem,
         hub: Entity<InteractionsHub>,
@@ -1443,7 +1443,7 @@ mod tests {
         }
     }
 
-    /// The first post of the mock's bookmarks.
+    /// The first tweet of the mock's bookmarks.
     fn mock_post() -> (Post, Arc<dyn twitty_model::Backend>) {
         use twitty_model::{Backend, FeedSource, PageRequest, mock::MockBackend};
         let backend = MockBackend::new();
@@ -1519,7 +1519,7 @@ mod tests {
         assert!(cx.debug_bounds("count-tooltip").is_some(), "the full count shows on hover");
     }
 
-    /// A mock post whose only media is a GIF, rendered with `FakeVideo` and
+    /// A mock tweet whose only media is a GIF, rendered with `FakeVideo` and
     /// the given autoplay setting. Counts the hub's navigation requests.
     fn gif_post(
         autoplay: crate::state::playback::Autoplay,
@@ -1834,14 +1834,14 @@ mod tests {
         assert_eq!(asked.id, id);
     }
 
-    /// The mock post translated from French.
+    /// The mock tweet translated from French.
     fn translated_post() -> Post {
         mock_items(twitty_model::FeedSource::Bookmarks)
             .iter()
             .flat_map(|i| i.posts())
             .find(|p| p.translation.is_some())
             .cloned()
-            .expect("the mock has a translated post")
+            .expect("the mock has a translated tweet")
     }
 
     #[gpui_kit::test]
@@ -1913,14 +1913,14 @@ mod tests {
         assert!(note.bottom() <= body.top(), "the note sits above the text: {note:?} {body:?}");
     }
 
-    /// The mock post with a Community Note.
+    /// The mock tweet with a Community Note.
     fn noted_post() -> Post {
         mock_items(twitty_model::FeedSource::Bookmarks)
             .iter()
             .flat_map(|i| i.posts())
             .find(|p| p.community_note.is_some())
             .cloned()
-            .expect("the mock has a noted post")
+            .expect("the mock has a noted tweet")
     }
 
     fn one_post(post: Post, cx: &mut gpui_kit::TestAppContext) -> &mut gpui_kit::VisualTestContext {
@@ -1966,7 +1966,7 @@ mod tests {
         let body = cx.debug_bounds("quote-body-0").expect("the quote's text");
         assert!(card.contains(&marker.center()));
         assert!(marker.top() >= body.bottom(), "under the quote's text");
-        assert!(cx.debug_bounds("note-marker-0").is_none(), "the quoting post has no note");
+        assert!(cx.debug_bounds("note-marker-0").is_none(), "the quoting tweet has no note");
     }
 
     #[gpui_kit::test]
@@ -2004,15 +2004,15 @@ mod tests {
     fn clicking_a_mention_opens_the_profile_in_the_app(cx: &mut gpui_kit::TestAppContext) {
         use twitty_model::FeedSource;
         cx.update(gpui_kit::init);
-        // The mock's rich posts start with a mention.
+        // The mock's rich tweets start with a mention.
         let post = mock_items(FeedSource::Bookmarks)
             .iter()
             .flat_map(|i| i.posts())
             .find(|p| p.body.spans().first().is_some_and(|s| s.range.start == 0))
             .cloned()
-            .expect("the mock has a post starting with a mention");
+            .expect("the mock has a tweet starting with a mention");
         let SpanKind::Mention(user) = &post.body.spans()[0].kind else {
-            panic!("the post starts with a mention")
+            panic!("the tweet starts with a mention")
         };
         let user = user.clone();
         let start =
@@ -2069,7 +2069,7 @@ mod tests {
         assert_eq!(
             navigations(cx, FeedItem::Post(quoting), "quote-author-0"),
             vec![Navigate::Profile(quoted)],
-            "not the quoted post"
+            "not the quoted tweet"
         );
 
         let notification =
@@ -2113,7 +2113,7 @@ mod tests {
         assert_eq!(
             navigations(cx, FeedItem::Post(quoting), "quote-media-0"),
             vec![Navigate::Media { post: Arc::new(quoted), index: 0 }],
-            "not the quoted post"
+            "not the quoted tweet"
         );
     }
 
@@ -2204,16 +2204,16 @@ mod tests {
         .map(|name| cx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn")));
         let [first, second, below, above, avatar_0, avatar_1, like_0, like_1] = drawn;
         let near = |a: Pixels, b: Pixels| (a - b).abs() < px(0.5);
-        assert!(near(first.bottom(), second.top()), "the posts touch");
+        assert!(near(first.bottom(), second.top()), "the tweets touch");
         assert!(near(below.top(), avatar_0.bottom() + px(LINE_GAP)), "starts under the avatar");
-        assert!(near(below.bottom(), first.bottom()), "runs to the post's edge: {below:?}");
-        assert!(near(above.top(), second.top()), "picks up at the next post's edge");
+        assert!(near(below.bottom(), first.bottom()), "runs to the tweet's edge: {below:?}");
+        assert!(near(above.top(), second.top()), "picks up at the next tweet's edge");
         assert!(near(above.bottom(), avatar_1.top() - px(LINE_GAP)), "and stops at its avatar");
         assert!(near(below.center().x, above.center().x), "one straight line");
-        assert!(cx.debug_bounds("line-above-0").is_none(), "nothing above the first post");
+        assert!(cx.debug_bounds("line-above-0").is_none(), "nothing above the first tweet");
         assert!(cx.debug_bounds("line-below-1").is_none(), "nor below the last");
 
-        // Every post keeps room under its actions, so the hover tint never
+        // Every tweet keeps room under its actions, so the hover tint never
         // ends flush with them.
         for (row, like) in [(first, like_0), (second, like_1)] {
             assert!(row.bottom() - like.bottom() >= px(8.), "room under {like:?} in {row:?}");

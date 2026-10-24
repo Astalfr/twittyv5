@@ -1,4 +1,4 @@
-//! Optimistic like / repost / bookmark state shared by every column.
+//! Optimistic like / retweet / bookmark state shared by every column.
 //!
 //! The viewer's own changes are kept as overrides on top of what the backend
 //! last returned, so a like shows up instantly in every column and can be
@@ -16,7 +16,7 @@ pub enum Toggle {
     Bookmark,
 }
 
-/// The viewer state and counters to display for a post.
+/// The viewer state and counters to display for a tweet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Effective {
     pub viewer: ViewerPostState,
@@ -24,7 +24,7 @@ pub struct Effective {
 }
 
 impl Effective {
-    /// Whether `toggle` is on (liked, reposted, bookmarked).
+    /// Whether `toggle` is on (liked, retweeted, bookmarked).
     pub fn is_on(&self, toggle: Toggle) -> bool {
         match toggle {
             Toggle::Like => self.viewer.liked,
@@ -42,7 +42,7 @@ pub struct Pending {
     previous: Option<Effective>,
 }
 
-/// Overrides keyed by post id.
+/// Overrides keyed by tweet id.
 #[derive(Debug, Default)]
 pub struct Interactions {
     overrides: HashMap<PostId, Effective>,

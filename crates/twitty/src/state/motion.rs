@@ -12,19 +12,19 @@ use super::column::ListChange;
 
 /// How long a row that just arrived takes to fade in.
 pub const ARRIVAL: Duration = Duration::from_millis(260);
-/// How long the tint of a row that arrived at the top (a newer post) lasts.
+/// How long the tint of a row that arrived at the top (a newer tweet) lasts.
 pub const ARRIVAL_HIGHLIGHT: Duration = Duration::from_millis(1400);
 /// Delay between the rows of a freshly loaded page, so they cascade in.
 pub const STAGGER: Duration = Duration::from_millis(35);
 /// Rows past this many on a fresh page appear with the last one (they are
 /// usually off screen anyway).
 pub const STAGGER_ROWS: usize = 8;
-/// How far (px) an arriving row, a dialog card or the "new posts" pill travels.
+/// How far (px) an arriving row, a dialog card or the "new tweets" pill travels.
 pub const TRAVEL: f32 = 8.0;
 /// How far (px) the thread panel slides in from the right edge. Short, so the
 /// panel's hitbox is already where the user expects it on the first frame.
 pub const PANEL_TRAVEL: f32 = 48.0;
-/// The like / repost / bookmark "pop".
+/// The like / retweet / bookmark "pop".
 pub const POP: Duration = Duration::from_millis(320);
 /// How much bigger an icon gets at the top of its pop.
 pub const POP_SCALE: f32 = 0.35;
@@ -34,7 +34,7 @@ pub const POP_SCALE: f32 = 0.35;
 pub enum Entrance {
     /// Part of a freshly loaded page: fades in after `delay`.
     Cascade { delay: Duration },
-    /// A newer post at the top: drops in and is tinted for a moment.
+    /// A newer tweet at the top: drops in and is tinted for a moment.
     Newer,
     /// An older row appended at the bottom: fades in.
     Older,
@@ -218,7 +218,7 @@ mod tests {
             assert_eq!(start.opacity, 0.0, "{e:?}");
             assert_eq!(e.frame(1.0), RowFrame { opacity: 1.0, offset: 0.0, tint: 0.0 }, "{e:?}");
         }
-        assert!(Entrance::Newer.frame(0.0).offset < 0.0, "newer posts drop in from above");
+        assert!(Entrance::Newer.frame(0.0).offset < 0.0, "newer tweets drop in from above");
         assert_eq!(Entrance::Newer.frame(0.0).tint, 1.0);
         // A delayed row is still hidden during its delay.
         let late = Entrance::Cascade { delay: STAGGER * 4 };

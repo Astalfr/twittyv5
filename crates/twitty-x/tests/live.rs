@@ -1,4 +1,4 @@
-//! Opt-in checks against real X data. Never run in CI.
+//! Opt-in checks against real Twitter data. Never run in CI.
 
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "test helpers outside #[test] fns")]
 //!

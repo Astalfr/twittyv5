@@ -1,4 +1,4 @@
-//! Display formatting for times and counters, matching X's conventions.
+//! Display formatting for times and counters, matching Twitter's conventions.
 
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 

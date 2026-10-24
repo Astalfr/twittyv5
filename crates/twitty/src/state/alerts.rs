@@ -37,7 +37,7 @@ pub fn announce(kind: LoadKind, change: &ListChange, items: &[FeedItem]) -> Opti
             let noun = if news.iter().all(|i| matches!(i, FeedItem::Notification(_))) {
                 "notifications"
             } else {
-                "posts"
+                "tweets"
             };
             format!("{n} new {noun}\n{preview}")
         }
@@ -60,9 +60,10 @@ fn is_news(item: &FeedItem) -> bool {
 fn preview(item: &FeedItem) -> String {
     let (who, text) = match item {
         FeedItem::Post(post) => (post.author.display_name.clone(), post.body.text()),
-        FeedItem::Repost { by, post } => {
-            (format!("{} reposted {}", by.display_name, post.author.display_name), post.body.text())
-        }
+        FeedItem::Repost { by, post } => (
+            format!("{} retweeted {}", by.display_name, post.author.display_name),
+            post.body.text(),
+        ),
         FeedItem::Thread(posts) => match posts.last() {
             Some(post) => (post.author.display_name.clone(), post.body.text()),
             None => return String::new(),
@@ -122,7 +123,7 @@ mod tests {
 
         let three = announce(LoadKind::Newer, &prepended(3), &items).unwrap();
         assert_eq!(three.count, 3);
-        assert_eq!(three.body, format!("3 new posts\n{}", preview(&items[0])));
+        assert_eq!(three.body, format!("3 new tweets\n{}", preview(&items[0])));
     }
 
     #[test]

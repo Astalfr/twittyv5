@@ -1,4 +1,4 @@
-//! One deck column: header, virtualised post list, paging and polling.
+//! One deck column: header, virtualised tweet list, paging and polling.
 
 use std::{
     sync::Arc,
@@ -34,7 +34,7 @@ use crate::{
 
 /// Start loading older rows when this close to the bottom.
 const PREFETCH_ROWS: usize = 5;
-/// Distance of the "new posts" pill from the top of the list.
+/// Distance of the "new tweets" pill from the top of the list.
 const PILL_TOP: f32 = 12.0;
 
 /// Requests from a column to the deck.
@@ -63,7 +63,7 @@ pub struct ColumnView {
     /// Whether keyboard shortcuts act on this column.
     active: bool,
     load_task: Option<Task<()>>,
-    /// How often to check for newer posts; `None` pauses polling. Set by the
+    /// How often to check for newer tweets; `None` pauses polling. Set by the
     /// app from the provider's rate limits (`state::poll`).
     poll_interval: Option<Duration>,
     _poll_task: Option<Task<()>>,
@@ -541,11 +541,11 @@ impl ColumnView {
                     .icon(Icon::new(IconName::ArrowUp))
                     .text_button(Size::Small)
                     .label(SharedString::from(format!(
-                        "{unseen} new post{}",
+                        "{unseen} new tweet{}",
                         if unseen == 1 { "" } else { "s" }
                     )))
                     .on_click(cx.listener(|this, _, _, cx| this.scroll_to_top(cx)));
-                // Occludes the post under it, which would otherwise take the
+                // Occludes the tweet under it, which would otherwise take the
                 // same click and open its thread.
                 let pill = div().occlude().debug_selector(|| "new-posts-pill".into()).child(pill);
                 let tokens = theme.motion.clone();
@@ -566,7 +566,7 @@ impl ColumnView {
     }
 }
 
-/// `row` fading (and sliding) in; newer posts also carry a fading `tint`.
+/// `row` fading (and sliding) in; newer tweets also carry a fading `tint`.
 /// Only paint moves: the row's measured height never changes.
 fn arriving(key: &str, entrance: Entrance, row: AnyElement, tint: gpui_kit::Hsla) -> AnyElement {
     div()
@@ -811,7 +811,7 @@ mod tests {
         };
         let (backend, column) = setup(cx);
         let sound = cx.update(RecordingSound::install);
-        // Like Windows, GPUI only posts notifications for an identified app.
+        // Like Windows, GPUI only tweets notifications for an identified app.
         cx.update(|cx| cx.set_app_identity("Twitty.Test", "Twitty"));
         cx.run_until_parked();
         assert!(sound.played().is_empty(), "the first page is not news");
@@ -833,7 +833,7 @@ mod tests {
         let shown = cx.shown_system_notifications();
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].title.as_ref(), "Friends", "titled with the column's name");
-        assert!(shown[0].body.starts_with("2 new posts\n"), "{}", shown[0].body);
+        assert!(shown[0].body.starts_with("2 new tweets\n"), "{}", shown[0].body);
 
         // A refresh is not news.
         column.update(cx, |c, cx| c.load(LoadKind::Refresh, cx));
@@ -872,7 +872,7 @@ mod tests {
 
         cx.simulate_mouse_move(over_posts, None, gpui_kit::Modifiers::default());
         cx.run_until_parked();
-        assert!(!column.read_with(cx, |c, _| c.header_hovered()), "hidden again over the posts");
+        assert!(!column.read_with(cx, |c, _| c.header_hovered()), "hidden again over the tweets");
     }
 
     #[gpui_kit::test]

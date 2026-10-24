@@ -10,7 +10,7 @@ use twitty_model::{BackendError, Profile};
 /// How long the input must stay unchanged before it is searched.
 pub const DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// The query for `input`: trimmed, without a leading `@` (X matches handles
+/// The query for `input`: trimmed, without a leading `@` (Twitter matches handles
 /// without it). `None` when nothing is left to search.
 pub fn query(input: &str) -> Option<String> {
     let q = input.trim();

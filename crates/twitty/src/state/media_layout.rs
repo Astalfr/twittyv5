@@ -1,4 +1,4 @@
-//! Geometry of the 1–4 item media grid, in the style of X.
+//! Geometry of the 1–4 item media grid, in the style of Twitter.
 
 use twitty_model::AspectRatio;
 
@@ -65,7 +65,7 @@ impl Grid {
 /// Lays out `count` media tiles in a grid of `width` pixels.
 ///
 /// A single item keeps its aspect ratio, clamped between 3:4 (portrait) and
-/// 2:1 (panorama). Several items use a fixed 16:9 box split like X does.
+/// 2:1 (panorama). Several items use a fixed 16:9 box split like Twitter does.
 /// Items beyond four are not shown.
 pub fn layout(count: usize, first_aspect: Option<AspectRatio>, width: f32) -> Grid {
     let width = width.max(0.0);

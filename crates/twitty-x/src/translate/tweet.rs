@@ -13,7 +13,7 @@ use url::Url;
 use super::{Ctx, card, media, text};
 use crate::wire::{array_at, at, bool_at, str_at, u64_at};
 
-/// A tweet result after unwrapping X's wrappers.
+/// A tweet result after unwrapping Twitter's wrappers.
 pub(crate) enum Unwrapped<'a> {
     Tweet(&'a Value),
     Gone(UnavailableReason),
@@ -68,7 +68,7 @@ pub(crate) fn item(result: &Value, entry: &str, ctx: &mut Ctx) -> FeedItem {
         }
         Unwrapped::Unknown(reason) => return ctx.unsupported(entry, reason),
     };
-    // A retweet is the original post, shown with "<author> reposted".
+    // A retweet is the original tweet, shown with "<author> retweeted".
     if let Some(inner) = at(tweet, &["legacy", "retweeted_status_result", "result"]) {
         let by = match author(tweet, ctx) {
             Ok(by) => by,
@@ -115,7 +115,7 @@ pub(crate) fn post(tweet: &Value, ctx: &mut Ctx, depth: u8) -> Result<Post, Stri
         .collect();
 
     let body = match at(tweet, &["note_tweet", "note_tweet_results", "result"]) {
-        // Long posts: the full text lives in `note_tweet`, without a display range.
+        // Long tweets: the full text lives in `note_tweet`, without a display range.
         Some(note) if str_at(note, &["text"]).is_some() => text::rich_text(
             str_at(note, &["text"]).unwrap_or_default(),
             at(note, &["entity_set"]).map(text::entities).unwrap_or_default(),
@@ -143,7 +143,7 @@ pub(crate) fn post(tweet: &Value, ctx: &mut Ctx, depth: u8) -> Result<Post, Stri
             && bool_at(legacy, &["is_quote_status"]) == Some(true)
             && str_at(legacy, &["quoted_status_id_str"]).is_some() =>
         {
-            // X omits the quoted post when it is gone or hidden from the viewer.
+            // Twitter omits the quoted tweet when it is gone or hidden from the viewer.
             Some(Embed::Quote {
                 quoted: Box::new(PostOrGone::Unavailable {
                     reason: UnavailableReason::Other(None),
@@ -193,7 +193,7 @@ pub(crate) fn post(tweet: &Value, ctx: &mut Ctx, depth: u8) -> Result<Post, Stri
 /// Grok's automatic translation, sent when the
 /// `responsive_web_grok_show_grok_translated_post` feature is on. It covers
 /// the display text only (no reply mentions, no media link), with entity
-/// offsets in code points like `legacy`, and for long posts the whole note.
+/// offsets in code points like `legacy`, and for long tweets the whole note.
 /// `preview_translation` is a truncated copy and is ignored.
 fn translation(tweet: &Value) -> Option<Translation> {
     let grok = at(tweet, &["grok_translated_post_with_availability"])?;
@@ -215,7 +215,7 @@ fn translation(tweet: &Value) -> Option<Translation> {
     })
 }
 
-/// The Community Note X shows under a post, from `birdwatch_pivot`. X only
+/// The Community Note Twitter shows under a tweet, from `birdwatch_pivot`. Twitter only
 /// sends the pivot for a note rated helpful, in timelines as well as in
 /// `TweetDetail`; `has_birdwatch_notes` alone (notes still being rated) shows
 /// nothing. The text's entities use code-point `fromIndex`/`toIndex`.
@@ -253,7 +253,7 @@ fn quoted(result: &Value, ctx: &mut Ctx) -> PostOrGone {
     }
 }
 
-/// X's date format: `Wed Oct 21 15:38:10 +0000 2026`.
+/// Twitter's date format: `Wed Oct 21 15:38:10 +0000 2026`.
 pub(crate) fn parse_date(s: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_str(s, "%a %b %d %H:%M:%S %z %Y").ok().map(|d| d.with_timezone(&Utc))
 }

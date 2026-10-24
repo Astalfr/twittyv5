@@ -1,4 +1,4 @@
-//! The thread panel: a side panel with the conversation around one post.
+//! The thread panel: a side panel with the conversation around one tweet.
 
 use std::sync::Arc;
 
@@ -136,7 +136,7 @@ impl Render for ThreadPanel {
                                 .p_4()
                                 .text_sm()
                                 .text_color(theme.muted_foreground)
-                                .child("More replies on x.com"),
+                                .child("More replies on Twitter"),
                         )
                     })
                     .into_any_element()
@@ -158,7 +158,7 @@ impl Render for ThreadPanel {
                     .border_color(theme.border)
                     .child(Icon::new(IconName::MessageCircle).size(px(20.)))
                     .child(
-                        div().flex_1().text_lg().font_weight(FontWeight::EXTRA_BOLD).child("Post"),
+                        div().flex_1().text_lg().font_weight(FontWeight::EXTRA_BOLD).child("Tweet"),
                     )
                     .child(
                         Button::new("thread-close")
@@ -249,7 +249,7 @@ mod tests {
         });
         cx.run_until_parked();
 
-        let note = cx.debug_bounds("note-0").expect("the focused post's note is shown");
+        let note = cx.debug_bounds("note-0").expect("the focused tweet's note is shown");
         assert!(cx.debug_bounds("note-text-text-0").is_some(), "with its text");
         assert!(cx.debug_bounds("note-marker-0").is_none(), "no marker next to the note");
         let rate = cx.debug_bounds("note-rate-0").expect("the link to rate it");
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(cx.opened_url(), url);
         cx.simulate_click(note.center(), gpui_kit::Modifiers::default());
         cx.run_until_parked();
-        assert_eq!(*seen.borrow(), Vec::<Navigate>::new(), "the note doesn't reopen the post");
+        assert_eq!(*seen.borrow(), Vec::<Navigate>::new(), "the note doesn't reopen the tweet");
     }
 
     #[gpui_kit::test]

@@ -1,9 +1,9 @@
-//! `x-client-transaction-id`: the per-request signature X's web client sends.
+//! `x-client-transaction-id`: the per-request signature Twitter's web client sends.
 //!
 //! The web client derives it from a key in the home page
 //! (`twitter-site-verification`), one of four "loading" SVG animations in the
 //! same page, and byte indices hidden in the `ondemand.s` chunk; then it hashes
-//! method, path and time with them. Without it X refuses some writes (error
+//! method, path and time with them. Without it Twitter refuses some writes (error
 //! 226, "looks like it might be automated"). Ported from XClientTransaction
 //! (MIT); see `docs/x-api.md`.
 
@@ -24,7 +24,7 @@ use url::Url;
 
 use crate::{XError, catalog::Method, discovery, session::Session};
 
-/// Seconds X counts from (2023-05-01 07:00 UTC).
+/// Seconds Twitter counts from (2023-05-01 07:00 UTC).
 const EPOCH_SECS: i64 = 1_682_924_400;
 const KEYWORD: &str = "obfiowerehiring";
 const EXTRA_BYTE: u8 = 3;
@@ -350,7 +350,7 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
-    // Synthetic page and chunk in X's format (made-up key and animation).
+    // Synthetic page and chunk in Twitter's format (made-up key and animation).
     // Expected values come from a straight port of XClientTransaction's Python.
     const HOME: &str = include_str!("../../tests/fixtures/transaction/home.html");
     const ONDEMAND: &str = include_str!("../../tests/fixtures/transaction/ondemand.s.js");

@@ -1,13 +1,13 @@
-//! Machine-translated posts: which text a row shows, and the note under it.
+//! Machine-translated tweets: which text a row shows, and the note under it.
 //!
-//! A translated post shows its translation by default; the viewer can switch
-//! each post back to the original, and every column follows that choice.
+//! A translated tweet shows its translation by default; the viewer can switch
+//! each tweet back to the original, and every column follows that choice.
 
 use std::{borrow::Cow, collections::HashSet};
 
 use twitty_model::{Post, PostId, RichText};
 
-/// Posts the viewer switched back to their original text.
+/// Tweets the viewer switched back to their original text.
 #[derive(Debug, Clone, Default)]
 pub struct Originals(HashSet<PostId>);
 
@@ -24,14 +24,14 @@ impl Originals {
     }
 }
 
-/// The text to render for a post, and the note explaining it.
+/// The text to render for a tweet, and the note explaining it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Shown<'a> {
     pub body: &'a RichText,
     pub note: Option<Note>,
 }
 
-/// The line above a translated post's text.
+/// The line above a translated tweet's text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
     /// "Translated from Japanese", or "Original in Japanese".

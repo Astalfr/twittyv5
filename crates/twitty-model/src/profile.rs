@@ -44,7 +44,7 @@ impl Profile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Badges {
     pub verified: Option<VerifiedKind>,
-    /// Posts are only visible to approved followers.
+    /// Tweets are only visible to approved followers.
     pub protected: bool,
 }
 

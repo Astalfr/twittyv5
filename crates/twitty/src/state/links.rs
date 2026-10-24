@@ -1,11 +1,11 @@
-//! Shareable links to posts.
+//! Shareable links to tweets.
 
 use twitty_model::Post;
 
-/// Host of the embed-friendly mirror used for shared post links.
+/// Host of the embed-friendly mirror used for shared tweet links.
 const VX_HOST: &str = "vxtwitter.com";
 
-/// The post's canonical link with its host swapped for vxtwitter, so it
+/// The tweet's canonical link with its host swapped for vxtwitter, so it
 /// embeds properly when pasted into chat apps. Falls back to the canonical
 /// link if the host can't be replaced.
 pub fn vx_link(post: &Post) -> String {

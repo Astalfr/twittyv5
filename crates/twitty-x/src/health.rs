@@ -1,6 +1,6 @@
 //! Per-operation health counters behind `Backend::health`: how many responses
-//! translated cleanly, how many rows X sent that Twitty couldn't read, and the
-//! last problem seen. This is the early warning for X changing its JSON.
+//! translated cleanly, how many rows Twitter sent that Twitty couldn't read, and the
+//! last problem seen. This is the early warning for Twitter changing its JSON.
 
 use std::{
     collections::BTreeMap,

@@ -108,7 +108,7 @@ fn failure(action: FollowAction, e: &BackendError) -> String {
         FollowAction::Unfollow => "unfollow",
     };
     match e {
-        // X's own reason, e.g. "X error 162: You have been blocked…".
+        // Twitter's own reason, e.g. "Twitter error 162: You have been blocked…".
         BackendError::Upstream(reason) => format!("Couldn't {what}: {reason}"),
         other => format!("Couldn't {what}: {other}"),
     }

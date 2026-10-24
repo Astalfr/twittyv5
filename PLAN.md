@@ -1,8 +1,8 @@
 # Twitty — Implementation Plan
 
-A native desktop client for X (Twitter), written in Rust with **GPUI** (via **GPUI Kit**). It talks to X's internal web GraphQL API (`https://x.com/i/api/graphql/<queryId>/<Operation>`) and looks like the new **X Pro / TweetDeck**: a multi-column deck.
+A native desktop client for Twitter, written in Rust with **GPUI** (via **GPUI Kit**). It talks to Twitter's internal web GraphQL API (`https://x.com/i/api/graphql/<queryId>/<Operation>`) and looks like the new **TweetDeck**: a multi-column deck.
 
-> Status: **M0–M8 done**. Writes (like/repost/bookmark/reply/post), thread panel, compose with X's length counter, profile hover card, open in browser. M9 done: polling within rate limits, keyboard shortcuts, image viewer, settings page. M10 done: drift detection (Settings → Diagnostics), log file, logged panics. Deferred by decision: real transaction id (not required by X yet) and X Pro deck sync (see docs/decisions.md).
+> Status: **M0–M8 done**. Writes (like/retweet/bookmark/reply/tweet), thread panel, compose with Twitter's length counter, profile hover card, open in browser. M9 done: polling within rate limits, keyboard shortcuts, image viewer, settings page. M10 done: drift detection (Settings → Diagnostics), log file, logged panics. Deferred by decision: real transaction id (not required by Twitter yet) and TweetDeck deck sync (see docs/decisions.md).
 >
 > Living documentation is in [docs/](docs/README.md) and contributor/agent rules are in [CLAUDE.md](CLAUDE.md). Every milestone below is done only when it meets the definition of done in [docs/testing.md](docs/testing.md).
 
@@ -45,17 +45,17 @@ A native desktop client for X (Twitter), written in Rust with **GPUI** (via **GP
   ```
 - `v_virtual_list` needs every row height up front, so it doesn't suit tweets. Use GPUI's `list()`/`ListState`, as gpui-component's diff view does.
 
-### 1.3 X internal API
+### 1.3 Twitter internal API
 
-X doesn't document this API. These notes come from community clients: [`bun_x`](https://crates.io/crates/bun_x) (Rust, Apache-2.0, 2026-10-23, the freshest reference), [x-go](https://github.com/teslashibe/x-go) and [twitter-graphql-scraper](https://github.com/she-llac/twitter-graphql-scraper).
+Twitter doesn't document this API. These notes come from community clients: [`bun_x`](https://crates.io/crates/bun_x) (Rust, Apache-2.0, 2026-10-23, the freshest reference), [x-go](https://github.com/teslashibe/x-go) and [twitter-graphql-scraper](https://github.com/she-llac/twitter-graphql-scraper).
 
 - **Auth**:
   - Cookies: `auth_token` (the session) and `ct0` (CSRF). The `x-csrf-token` header must equal `ct0`.
   - `authorization: Bearer <public web bearer>`. The bearer is built into x.com's JS and is the same for every user.
   - `x-twitter-auth-type: OAuth2Session`, `x-twitter-active-user: yes`, `x-twitter-client-language: en`.
   - `origin`/`referer: https://x.com`, a realistic Chrome UA, and stable `x-client-uuid` / `x-twitter-client-deviceid` values.
-  - X rotates cookies through `Set-Cookie`, and we must keep the new values.
-- **Query IDs** change with every X release (about every 2–4 weeks). To find them:
+  - Twitter rotates cookies through `Set-Cookie`, and we must keep the new values.
+- **Query IDs** change with every Twitter release (about every 2–4 weeks). To find them:
   1. Fetch `x.com` pages.
   2. Collect the `abs.twimg.com/responsive-web/client-web/*.js` bundle URLs.
   3. Regex `{queryId, operationName}` out of the bundles.
@@ -68,13 +68,13 @@ X doesn't document this API. These notes come from community clients: [`bun_x`](
   - Entry types: `TimelineTimelineItem` / `TimelineTimelineModule` / `TimelineTimelineCursor`.
   - Result typenames: `Tweet` / `TweetWithVisibilityResults` / `TweetTombstone` / `TweetUnavailable`.
   - Inside a tweet: `legacy`, `core.user_results`, `note_tweet`, `quoted_status_result`, `retweeted_status_result`, `card`, `extended_entities`.
-- **X Pro** ([help](https://help.x.com/en/using-x/x-pro)) has Decks (workspaces of columns), a column creator, top/latest ordering and video docking. It has been Premium+ only since March 2026. `bun_x` documents its deck GraphQL (ViewerAccountSync, CreateDeck, …), which could allow an optional sync later.
+- **TweetDeck** ([help](https://help.x.com/en/using-x/x-pro)) has Decks (workspaces of columns), a column creator, top/latest ordering and video docking. It has been Premium+ only since March 2026. `bun_x` documents its deck GraphQL (ViewerAccountSync, CreateDeck, …), which could allow an optional sync later.
 
 ---
 
 ## 2. Core principle: Twitty owns its data model
 
-**X's JSON structures never leave the X adapter.** X changes field names, nesting, typenames and feature flags all the time. If the UI, the cache or the settings used those shapes directly, every X change would ripple through the whole codebase and break saved data.
+**Twitter's JSON structures never leave the Twitter adapter.** Twitter changes field names, nesting, typenames and feature flags all the time. If the UI, the cache or the settings used those shapes directly, every Twitter change would ripple through the whole codebase and break saved data.
 
 So Twitty is built as **ports and adapters**, with an anti-corruption layer:
 
@@ -86,16 +86,16 @@ So Twitty is built as **ports and adapters**, with an anti-corruption layer:
 
 ### Rules
 
-1. **`twitty-model`** is the stable domain crate. It depends only on `serde`, `chrono`, `url` and `smol_str`. It has no X field names and no `__typename`s. It is designed around what Twitty *displays*, not around what X *sends*.
-2. **`twitty-x::wire`** is private (`pub(crate)`). It reads X's JSON **leniently**:
+1. **`twitty-model`** is the stable domain crate. It depends only on `serde`, `chrono`, `url` and `smol_str`. It has no Twitter field names and no `__typename`s. It is designed around what Twitty *displays*, not around what Twitter *sends*.
+2. **`twitty-x::wire`** is private (`pub(crate)`). It reads Twitter's JSON **leniently**:
    - mostly `serde_json::Value` with small typed helpers
    - `#[serde(default)]` everywhere
    - unknown variants map to `Unknown`.
-3. **`twitty-x::translate`** is the only code that converts wire data into model types. When X changes, only this module (and its fixtures) changes.
+3. **`twitty-x::translate`** is the only code that converts wire data into model types. When Twitter changes, only this module (and its fixtures) changes.
 4. **What crosses the boundary**: the UI and the rest of the app see only `twitty-model` types and the `Backend` trait. `twitty-x` re-exports nothing from `wire`.
 5. **Fail soft**: an entry that can't be translated becomes `FeedItem::Unsupported { reason }`, or is skipped with a `tracing::warn!`. It never fails the whole page.
-6. **Opaque handles**: X cursors, query IDs and rest IDs are wrapped as opaque newtypes (`PageToken`, `PostId`, `UserId`). The UI never parses or builds them.
-7. **Data saved to disk** (caches, decks, settings) uses the `twitty-model` types and a `schema_version` field, never raw X JSON. A change at X can't break saved data.
+6. **Opaque handles**: Twitter cursors, query IDs and rest IDs are wrapped as opaque newtypes (`PageToken`, `PostId`, `UserId`). The UI never parses or builds them.
+7. **Data saved to disk** (caches, decks, settings) uses the `twitty-model` types and a `schema_version` field, never raw Twitter JSON. A change at Twitter can't break saved data.
 8. **Normalisation happens in `translate`**:
    - code-point entity offsets (verified live) → byte ranges in Rust `String`s
    - `t.co` → expanded URLs, with trailing media links stripped
@@ -103,7 +103,7 @@ So Twitty is built as **ports and adapters**, with an anti-corruption layer:
    - `note_tweet` long text preferred over the truncated text
    - retweet unwrapped
    - the best video variant chosen
-   - X date strings → `DateTime<Utc>`.
+   - Twitter date strings → `DateTime<Utc>`.
 
 ### 2.1 Domain model sketch (`twitty-model`)
 
@@ -243,9 +243,9 @@ Main dependencies:
 
 ---
 
-## 4. UI: X Pro / TweetDeck look
+## 4. UI: TweetDeck look
 
-I can't access X Pro myself, so this is a spec rather than a copy. The colours below are from memory and must be **checked against x.com's live CSS**.
+I can't access TweetDeck myself, so this is a spec rather than a copy. The colours below are from memory and must be **checked against x.com's live CSS**.
 
 ```
 ┌──┬───────────────────┬───────────────────┬───────────────────┬──────
@@ -266,24 +266,24 @@ I can't access X Pro myself, so this is a spec rather than a copy. The colours b
 - **Left rail (~68px)**: logo, then Home, Explore/Search, Notifications, Messages (later), Lists, **Add column**, and the deck switcher. At the bottom: the Compose button and the account avatar menu.
 - **Deck**: columns side by side in one horizontal scroll area. Each column is a fixed width (Narrow 310 / Medium 350 / Wide 400px) and can be reordered by dragging. Columns are separated by 1px borders.
 - **Column header** (sticky): icon, title, optional subtitle (@handle or query), and a ⚙ popover (width, Top/Latest, media preview size, clear, remove).
-- **Post cell**:
+- **Tweet cell**:
   - 40px round avatar
   - **name** · @handle · relative time (gray), and a ⋯ menu
   - body text, with links in the accent colour
   - media grid with 1–4 images and 16px rounded corners
-  - quote card with a bordered, smaller version of the post
+  - quote card with a bordered, smaller version of the tweet
   - link card
-  - action row (reply, repost, like, views, bookmark, share) in gray, with active colours (like = pink, repost = green).
+  - action row (reply, retweet, like, views, bookmark, share) in gray, with active colours (like = pink, retweet = green).
 - **Behaviour**:
-  - **"↑ N new posts"** pill when the column is scrolled down
+  - **"↑ N new tweets"** pill when the column is scrolled down
   - skeleton rows while loading
-  - an inline "Show more" for long posts
-  - clicking a post opens a **thread panel** (a side sheet).
+  - an inline "Show more" for long tweets
+  - clicking a tweet opens a **thread panel** (a side sheet).
 - **Themes** (gpui-kit theme JSON):
   - Lights out: bg `#000000`, border `#2F3336`, text `#E7E9EA`, secondary `#71767B`, accent `#1D9BF0`
   - Dim: bg `#15202B`
   - Light: bg `#FFFFFF`
-- **Font**: Segoe UI / system font. Chirp is X's own font and isn't bundled.
+- **Font**: Segoe UI / system font. Chirp is Twitter's own font and isn't bundled.
 - **Video**: GPUI has no video player on Windows, so `twitty-media` decodes with Media Foundation and the app draws the frames. GIFs play in the media viewer and in place in timeline tiles (hover play/pause button; autoplay of visible GIFs is a setting, off by default). Videos play in the viewer with sound (audio as the clock) and a control bar (play/pause, time, seek, mute, volume). Next, maybe: videos playing in place in timelines, keyboard shortcuts (space, ←/→ seek), hardware decoding through a D3D device.
 
 ---
@@ -293,22 +293,22 @@ I can't access X Pro myself, so this is a spec rather than a copy. The colours b
 | # | Milestone | Done when |
 |---|---|---|
 | **M0** | Toolchain check | gpui-kit 0.8.0's `hello_world` builds and runs on Windows 11 with Rust 1.98. We know whether a `build.rs` or Windows manifest is needed. |
-| **M1** | Workspace + model | The 3 crates exist. `twitty-model` types and the `Backend` trait are defined. `MockBackend` serves fixture posts. |
-| **M2** | UI skeleton on mock data | Rail, deck, three columns with `list()`/`ListState`, post cells, the Lights-out theme. Everything driven by `MockBackend`. |
-| **M3** | X transport | Session, static headers, txid (random), cookie rotation, rate-limit tracker, queryId/features discovery and cache. `twitty-x-cli` dumps raw HomeTimeline JSON. |
+| **M1** | Workspace + model | The 3 crates exist. `twitty-model` types and the `Backend` trait are defined. `MockBackend` serves fixture tweets. |
+| **M2** | UI skeleton on mock data | Rail, deck, three columns with `list()`/`ListState`, tweet cells, the Lights-out theme. Everything driven by `MockBackend`. |
+| **M3** | Twitter transport | Session, static headers, txid (random), cookie rotation, rate-limit tracker, queryId/features discovery and cache. `twitty-x-cli` dumps raw HomeTimeline JSON. |
 | **M4** | Wire + translate | Lenient wire readers and translation into the model. At least 15 fixtures (retweet, quote, quote-of-deleted, thread module, long note, 4 images, video, GIF, poll, card, tombstone, withheld, pinned, cursors), with `insta` snapshots of the **model** output. |
 | **M5** | Real Home column | `XBackend` is plugged into the UI. Paging with older/newer tokens, image loading, `PostStore` deduplication. *(Done: no separate `PostStore`, see [decisions.md](docs/decisions.md).)* |
 | **M6** | Login + persistence | Cookie dialog (paste `auth_token` + `ct0`, with how-to steps), checked by `viewer()`, stored in keyring. Decks and settings saved in `%APPDATA%\Twitty` with `schema_version`. |
 | **M7** | All column types | Notifications, Search, List, User, Bookmarks, Thread. Add/remove/reorder/resize columns. Several decks. |
-| **M8** | Interaction | Like, repost, bookmark (optimistic updates with rollback), reply/compose (`publish`), thread panel, profile hover card, open in browser. |
+| **M8** | Interaction | Like, retweet, bookmark (optimistic updates with rollback), reply/compose (`publish`), thread panel, profile hover card, open in browser. |
 | **M9** | Polish | Per-column polling within rate limits, new-posts pill, keyboard actions (j/k, l, r, t, n, Esc), image lightbox, Dim/Light themes, settings page. |
-| **M10** | Hardening | Real transaction-id algorithm if needed, drift detection (a counter of `Unsupported`/decode warnings shown in a debug panel), logging, and an optional X Pro deck sync. |
+| **M10** | Hardening | Real transaction-id algorithm if needed, drift detection (a counter of `Unsupported`/decode warnings shown in a debug panel), logging, and an optional TweetDeck deck sync. |
 
 ---
 
 ## 6. Testing strategy
 
-- **twitty-x**: fixture-driven tests. A raw X JSON response goes through translate, and the resulting `FeedPage` is checked with `insta` snapshots. When X changes, we capture a new fixture and fix `translate`, and the model snapshots must stay the same.
+- **twitty-x**: fixture-driven tests. A raw Twitter JSON response goes through translate, and the resulting `FeedPage` is checked with `insta` snapshots. When Twitter changes, we capture a new fixture and fix `translate`, and the model snapshots must stay the same.
 - **transport**: `wiremock` tests for headers, cookie rotation, 429 backoff and recovery from stale query IDs (404 → refresh IDs → retry once).
 - **UI**: `#[gpui::test]` with `MockBackend` (paging, optimistic like/rollback, deck persistence).
 - **Manual**: `twitty-x-cli` runs against a real (secondary) account.
@@ -317,7 +317,7 @@ I can't access X Pro myself, so this is a spec rather than a copy. The colours b
 
 ## 7. Risks
 
-- **Terms of service and account bans**: unofficial API use breaks X's rules. Develop with a secondary account.
+- **Terms of service and account bans**: unofficial API use breaks Twitter's rules. Develop with a secondary account.
 - **queryId / features drift**: handled by runtime discovery, the cache and the embedded fallback. The domain model keeps the rest of the app isolated from it.
 - **Schema drift**: limited to `wire` + `translate` by design. Lenient decoding plus `Unsupported` items mean the UI degrades instead of crashing.
 - **Transaction ID enforcement** (error 353): port the real algorithm when it's required.
@@ -335,4 +335,4 @@ I can't access X Pro myself, so this is a spec rather than a copy. The colours b
 - x-go: https://github.com/teslashibe/x-go
 - twitter-graphql-scraper: https://github.com/she-llac/twitter-graphql-scraper
 - x-client-transaction (Rust): https://crates.io/crates/x-client-transaction
-- X Pro help: https://help.x.com/en/using-x/x-pro · TweetDeck history: https://en.wikipedia.org/wiki/TweetDeck
+- TweetDeck help: https://help.x.com/en/using-x/x-pro · TweetDeck history: https://en.wikipedia.org/wiki/TweetDeck

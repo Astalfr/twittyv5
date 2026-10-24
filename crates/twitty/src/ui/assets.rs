@@ -76,9 +76,9 @@ pub const LOGO: &str = "brand/twitty.png";
 /// `remote_image::asset`, which resamples it to the device size first.
 pub const LOGO_SIZE: f32 = 18.;
 
-/// Filled Lucide heart, for a post the viewer liked.
+/// Filled Lucide heart, for a tweet the viewer liked.
 pub const HEART_FILL: &str = "twitty/icons/heart-fill.svg";
-/// Filled Lucide bookmark, for a post the viewer bookmarked.
+/// Filled Lucide bookmark, for a tweet the viewer bookmarked.
 pub const BOOKMARK_FILL: &str = "twitty/icons/bookmark-fill.svg";
 
 /// Twitty's own SVG icons: Lucide ships no filled variants.

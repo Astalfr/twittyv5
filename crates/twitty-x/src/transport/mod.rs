@@ -1,4 +1,4 @@
-//! HTTP layer for X's internal API: authentication, cookie rotation,
+//! HTTP layer for Twitter's internal API: authentication, cookie rotation,
 //! rate limits, retries and error mapping. Knows nothing about GraphQL shapes.
 
 mod cookies;
@@ -22,7 +22,7 @@ pub use rate_limit::{RateLimit, RateLimits};
 
 use crate::{XError, catalog::Method, session::Session};
 
-/// Called with the new session after X rotated a cookie, so it can be persisted.
+/// Called with the new session after Twitter rotated a cookie, so it can be persisted.
 pub type RotateHook = Arc<dyn Fn(&Session) + Send + Sync>;
 
 /// Retry behaviour for transient failures (network errors, 5xx, 429 without reset).
@@ -233,7 +233,7 @@ impl Transport {
     }
 }
 
-/// Codes X sends with a 403 when it refuses an action but the session is
+/// Codes Twitter sends with a 403 when it refuses an action but the session is
 /// fine: 158 "can't follow yourself", 160 "already requested to follow",
 /// 161 "follow limit", 162 "blocked from following". Mapping them to
 /// `Unauthorized` would ask the user to sign in again.
@@ -275,7 +275,7 @@ fn interpret(
 }
 
 /// A 2xx body may still carry `errors`. With usable `data` we keep the data
-/// (X often reports partial failures this way); without it we fail.
+/// (Twitter often reports partial failures this way); without it we fail.
 fn interpret_body(endpoint: &str, body: Value) -> Result<Value, XError> {
     let errors = body.get("errors").and_then(Value::as_array).filter(|e| !e.is_empty());
     let has_data = body.get("data").is_some_and(|d| !d.is_null());

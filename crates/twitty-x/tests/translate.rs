@@ -1,8 +1,8 @@
-//! Translation of real (anonymised) X responses into `twitty-model`.
+//! Translation of real (anonymised) Twitter responses into `twitty-model`.
 //!
 //! Fixtures in `tests/fixtures/` are live captures scrubbed with
 //! `twitty-x-cli anonymise` (see docs/x-api.md). Snapshots record a compact,
-//! readable summary of the *model* output: when X changes its JSON, the fix
+//! readable summary of the *model* output: when Twitter changes its JSON, the fix
 //! goes into `translate` and these snapshots must not change.
 
 #![expect(clippy::unwrap_used, reason = "test helpers outside #[test] fns")]
@@ -302,7 +302,7 @@ fn follow_replies() {
     insta::assert_snapshot!("follow-replies", out);
 }
 
-/// The "People" tab of `SearchTimeline`: accounts, not posts.
+/// The "People" tab of `SearchTimeline`: accounts, not tweets.
 #[test]
 fn people_search_lists_accounts() {
     let path = format!("{}/tests/fixtures/search-people.json", env!("CARGO_MANIFEST_DIR"));

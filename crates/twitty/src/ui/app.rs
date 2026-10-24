@@ -73,7 +73,7 @@ const ACCOUNT_AVATAR: f32 = 30.0;
 const BUDGET_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Shown when the session check at startup gets `Unauthorized`.
-pub const EXPIRED_NOTICE: &str = "Your X session expired or was revoked. Sign in again.";
+pub const EXPIRED_NOTICE: &str = "Your Twitter session expired or was revoked. Sign in again.";
 
 /// Something that just closed, still drawn while it animates out. The
 /// slot is cleared by `_clear` when the exit animation is over.
@@ -86,7 +86,7 @@ struct Leaving<T> {
 enum LeavingOverlay {
     Media(Arc<twitty_model::Post>, usize),
     /// A dialog view: sign-in, add column, column or deck settings, compose,
-    /// repost, people search.
+    /// retweet, people search.
     View(AnyView),
     Account,
     Settings,
@@ -117,7 +117,7 @@ pub struct AppOptions {
     pub settings_path: Option<PathBuf>,
     /// The log file, shown in settings.
     pub log_path: Option<PathBuf>,
-    /// Whether columns poll for new posts.
+    /// Whether columns poll for new tweets.
     pub poll: bool,
     /// Where the backend's session came from; `None` means demo data.
     pub session: Option<SessionSource>,
@@ -163,7 +163,7 @@ pub struct TwittyApp {
     deck_save: Option<Task<()>>,
     /// The window the app is the root of, for dialogs opened from column events.
     window: AnyWindowHandle,
-    /// The image viewer: a post and the index of the media shown.
+    /// The image viewer: a tweet and the index of the media shown.
     media: Option<(Arc<twitty_model::Post>, usize)>,
     /// Plays the viewer's media when it is a GIF or a video.
     media_player: Option<Entity<VideoPlayer>>,
@@ -381,7 +381,7 @@ impl TwittyApp {
         self.repost.as_ref()
     }
 
-    /// Handles a request from a post row.
+    /// Handles a request from a tweet row.
     pub fn navigate(&mut self, to: Navigate, window: &mut Window, cx: &mut Context<Self>) {
         match to {
             Navigate::Thread(id) => self.open_thread(id, cx),
@@ -403,7 +403,7 @@ impl TwittyApp {
         }
     }
 
-    /// The post and media index shown in the image viewer.
+    /// The tweet and media index shown in the image viewer.
     pub fn media_viewer(&self) -> Option<(&twitty_model::Post, usize)> {
         self.media.as_ref().map(|(p, ix)| (p.as_ref(), *ix))
     }
@@ -499,7 +499,7 @@ impl TwittyApp {
         let Some(column) = self.active_view() else {
             return;
         };
-        // The first arrow press only selects the first post.
+        // The first arrow press only selects the first tweet.
         if column.read(cx).model().selected().is_none() {
             column.update(cx, |c, cx| c.move_selection(0, cx));
             return;
@@ -548,7 +548,7 @@ impl TwittyApp {
         cx.notify();
     }
 
-    /// Back to the launch state: no post selected, the first column active.
+    /// Back to the launch state: no tweet selected, the first column active.
     fn reset_keyboard(&mut self, cx: &mut Context<Self>) {
         for (_, column) in &self.columns {
             column.update(cx, |c, cx| c.clear_selection(cx));
@@ -769,7 +769,7 @@ impl TwittyApp {
                                 .primary()
                                 .icon(IconName::Play)
                                 .text_button(Size::Medium)
-                                .label("Play on x.com")
+                                .label("Play on Twitter")
                                 .when(interactive, |b| {
                                     b.on_click(move |_, _, cx| {
                                         cx.stop_propagation();
@@ -842,7 +842,7 @@ impl TwittyApp {
         cx.notify();
     }
 
-    /// Shows the compose dialog, for a new post, a reply or a quote.
+    /// Shows the compose dialog, for a new tweet, a reply or a quote.
     pub fn open_compose(
         &mut self,
         target: ComposeTarget,
@@ -853,8 +853,8 @@ impl TwittyApp {
         let view = cx.new(|cx| ComposeView::new(backend, target, window, cx));
         self._compose_sub = Some(cx.subscribe(&view, |this, view, e: &ComposeEvent, cx| {
             if let ComposeEvent::Published(post) = e {
-                tracing::info!("published post {}", post.id);
-                // From what was sent: X's answer may leave the quote out.
+                tracing::info!("published tweet {}", post.id);
+                // From what was sent: Twitter's answer may leave the quote out.
                 let notice = Notice::published(view.read(cx).target());
                 this.show_toast(notice, cx);
                 // A reply shows up in the open conversation.
@@ -872,7 +872,7 @@ impl TwittyApp {
         cx.notify();
     }
 
-    /// Asks whether to repost `post` (or undo its repost), or quote it.
+    /// Asks whether to retweet `post` (or undo its retweet), or quote it.
     pub fn open_repost(
         &mut self,
         post: Arc<twitty_model::Post>,
@@ -961,11 +961,11 @@ impl TwittyApp {
                 self.viewer = Some(viewer);
             }
             Err(BackendError::Unauthorized) => {
-                tracing::warn!("the stored X session was rejected");
+                tracing::warn!("the stored Twitter session was rejected");
                 self.open_login(Some(EXPIRED_NOTICE.to_owned()), window, cx);
             }
             // Columns show their own errors; the session may still be fine.
-            Err(e) => tracing::warn!("could not check the X session: {e}"),
+            Err(e) => tracing::warn!("could not check the Twitter session: {e}"),
         }
         cx.notify();
     }
@@ -1382,7 +1382,7 @@ impl TwittyApp {
         self.save_settings(cx);
     }
 
-    /// Turns automatic checks for new posts on or off, and saves the choice.
+    /// Turns automatic checks for new tweets on or off, and saves the choice.
     pub fn set_polling(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.settings.polling = Some(enabled);
         self.update_polling(cx);
@@ -1465,7 +1465,7 @@ impl TwittyApp {
             .child(
                 Checkbox::new("polling")
                     .checked(self.settings.polling_enabled())
-                    .label("Check for new posts automatically (within X's rate limits)")
+                    .label("Check for new tweets automatically (within Twitter's rate limits)")
                     .on_click({
                         let weak = weak.clone();
                         move |checked, _, cx| {
@@ -1533,7 +1533,7 @@ impl TwittyApp {
     }
 
     /// One line per request type: responses, rows, rows Twitty couldn't read,
-    /// errors, and the last problem. Unreadable rows mean X changed its data.
+    /// errors, and the last problem. Unreadable rows mean Twitter changed its data.
     fn render_health(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::state::diagnostics::{self, Verdict};
         let theme = cx.theme().clone();
@@ -1729,9 +1729,9 @@ impl TwittyApp {
                     this.open_compose(ComposeTarget::New, window, cx)
                 }));
         let compose = if expanded {
-            compose.text_button(Size::Large).label("Post").w_full().h(px(48.))
+            compose.text_button(Size::Large).label("Tweet").w_full().h(px(48.))
         } else {
-            compose.tooltip("Post").w(px(52.))
+            compose.tooltip("Tweet").w(px(52.))
         };
         let active = self.deck.active_index();
         let decks: Vec<_> = self
@@ -1967,7 +1967,7 @@ impl Render for TwittyApp {
                     .rounded_tl(px(CHROME_RADIUS - 1.))
                     .bg(theme.primary.opacity(0.15))
                     .text_color(theme.primary)
-                    .child("Demo mode: showing generated posts")
+                    .child("Demo mode: showing generated tweets")
                     .when(can_sign_in, |d| {
                         d.child(
                             Button::new("banner-sign-in")
@@ -2048,7 +2048,7 @@ impl Render for TwittyApp {
                     .when_some(self.sheet.as_ref().map(Sheet::view), |d, panel| {
                         // A sheet over the deck's right side. Its backdrop takes
                         // the whole click that closes it, so nothing under it
-                        // (a post, an image, a link) reacts. With an overlay
+                        // (a tweet, an image, a link) reacts. With an overlay
                         // open, that overlay's backdrop darkens everything.
                         d.when(!has_overlay, |d| {
                             let shade = div()
@@ -2637,7 +2637,7 @@ mod tests {
         let tops: Vec<_> = order.into_iter().map(|selector| top(cx, selector)).collect();
         assert!(
             tops.windows(2).all(|pair| pair[0] < pair[1]),
-            "Post, Search people, Add column, then the decks"
+            "Tweet, Search people, Add column, then the decks"
         );
         assert!(top(cx, "rail-deck-0") < top(cx, "rail-deck-add"), "New deck under the list");
         assert!(cx.debug_bounds("deck-edit-0").is_none(), "no edit buttons while collapsed");
@@ -2797,7 +2797,7 @@ mod tests {
         compose.update_in(cx, |c, window, cx| c.type_text("nice", window, cx));
         compose.update(cx, |c, cx| c.submit(cx));
         cx.run_until_parked();
-        assert!(app.read_with(cx, |app, _| app.compose().is_none()), "closed after posting");
+        assert!(app.read_with(cx, |app, _| app.compose().is_none()), "closed after tweeting");
     }
 
     #[gpui_kit::test]
@@ -2885,7 +2885,7 @@ mod tests {
             assert_eq!(p.tab(), ProfileTab::Tweets);
             let posts: Vec<_> =
                 p.model(ProfileTab::Tweets).items().iter().flat_map(|i| i.posts()).collect();
-            assert!(!posts.is_empty(), "the user's posts loaded");
+            assert!(!posts.is_empty(), "the user's tweets loaded");
             assert!(!p.model(ProfileTab::Media).loaded_once(), "media waits for its tab");
         });
         assert!(cx.debug_bounds("profile-counts").is_some(), "the header shows the counts");
@@ -3096,14 +3096,14 @@ mod tests {
         let (app, cx) = keyboard_app(cx);
         assert_eq!(selected(&app, cx), None, "nothing selected at launch");
         cx.simulate_keystrokes("down");
-        assert_eq!(selected(&app, cx), Some(0), "the first press selects the first post");
+        assert_eq!(selected(&app, cx), Some(0), "the first press selects the first tweet");
         cx.simulate_keystrokes("up");
         assert_eq!(selected(&app, cx), Some(0));
         cx.simulate_keystrokes("j j j k");
         assert_eq!(selected(&app, cx), Some(2));
         cx.simulate_keystrokes("right");
         assert_eq!(app.read_with(cx, |app, _| app.active_column()), 1);
-        assert_eq!(selected(&app, cx), Some(0), "the next column starts on its first post");
+        assert_eq!(selected(&app, cx), Some(0), "the next column starts on its first tweet");
         cx.simulate_keystrokes("j");
         assert_eq!(selected(&app, cx), Some(1));
         cx.simulate_keystrokes("left");
@@ -3184,10 +3184,10 @@ mod tests {
         let backend = MockBackend::new();
         let (app, cx) = keyboard_app_on(backend.clone(), cx);
         // After the columns loaded: the like is the next call.
-        backend.fail_next(BackendError::Upstream("X error 226: automated".into()));
+        backend.fail_next(BackendError::Upstream("Twitter error 226: automated".into()));
         cx.simulate_keystrokes("j l");
         cx.run_until_parked();
-        assert_eq!(toast_texts(&app, cx), ["Couldn't like: X error 226: automated"]);
+        assert_eq!(toast_texts(&app, cx), ["Couldn't like: Twitter error 226: automated"]);
         let kind = app.read_with(cx, |app, _| app.toasts().items()[0].kind);
         assert_eq!(kind, crate::state::toasts::ToastKind::Error);
     }
@@ -3262,8 +3262,8 @@ mod tests {
         assert_eq!(compose.read_with(cx, |c, cx| c.text_value(cx)), "qj");
         compose.update(cx, |c, cx| c.submit(cx));
         cx.run_until_parked();
-        assert!(app.read_with(cx, |app, _| app.compose().is_none()), "closed after posting");
-        assert!(backend.actions().is_empty(), "a quote is a post, not a repost");
+        assert!(app.read_with(cx, |app, _| app.compose().is_none()), "closed after tweeting");
+        assert!(backend.actions().is_empty(), "a quote is a tweet, not a retweet");
         assert_eq!(toast_texts(&app, cx), ["Quote sent"]);
     }
 
@@ -3296,7 +3296,7 @@ mod tests {
                     .map(Arc::new)
             })
         }
-        .expect("the mock has a multi-image post");
+        .expect("the mock has a multi-image tweet");
         let hub = app.read_with(cx, |app, _| app.hub.clone());
         let count = post.media.len();
         hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
@@ -3328,7 +3328,7 @@ mod tests {
                     .find(|p| !p.media.is_empty())
                     .cloned()
             })
-            .expect("the mock has a post with media");
+            .expect("the mock has a tweet with media");
         let poster = post.media[0].preview().clone();
         let stream = poster.url.join("/clip.mp4").unwrap();
         post.media = vec![
@@ -3382,7 +3382,7 @@ mod tests {
                     .find(|p| !p.media.is_empty())
                     .cloned()
             })
-            .expect("the mock has a post with media");
+            .expect("the mock has a tweet with media");
         let poster = post.media[0].preview().clone();
         let stream = Some(poster.url.join("/clip.mp4").unwrap());
         let duration = Some(Duration::from_secs(42));
@@ -3435,7 +3435,7 @@ mod tests {
                     .find(|p| !p.media.is_empty())
                     .cloned()
             })
-            .expect("the mock has a post with media");
+            .expect("the mock has a tweet with media");
         let poster = post.media[0].preview().clone();
         let stream = Some(poster.url.join("/clip.mp4").unwrap());
         let duration = Some(Duration::from_secs(42));
@@ -3492,7 +3492,7 @@ mod tests {
                     .find(|p| !p.media.is_empty())
                     .cloned()
             })
-            .expect("the mock has a post with media");
+            .expect("the mock has a tweet with media");
         let poster = post.media[0].preview().clone();
         let stream = Some(poster.url.join("/missing.mp4").unwrap());
         post.media = vec![twitty_model::Media::Gif { poster, stream, alt: None }];
@@ -3537,7 +3537,7 @@ mod tests {
                     .find(|p| !p.media.is_empty())
                     .cloned()
             })
-            .expect("the mock has a post with media");
+            .expect("the mock has a tweet with media");
         // Any URL: the client serves the wide bitmap.
         let image = post.media[0].preview().clone();
         post.media = vec![twitty_model::Media::Image { image, alt: None }];
@@ -3610,10 +3610,10 @@ mod tests {
         let post = column.read_with(cx, |c, _| {
             c.model().items().iter().flat_map(|i| i.posts()).find(|p| !p.media.is_empty()).cloned()
         });
-        let post = Arc::new(post.expect("the mock has a post with media"));
+        let post = Arc::new(post.expect("the mock has a tweet with media"));
         app.update(cx, |app, cx| app.add_deck("", DeckIcon::default(), cx));
         open_panel(&app, "1", cx);
-        // e.g. an image opened from a post in the panel.
+        // e.g. an image opened from a tweet in the panel.
         let hub = app.read_with(cx, |app, _| app.hub.clone());
         hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
         cx.run_until_parked();
@@ -3650,7 +3650,7 @@ mod tests {
         assert_eq!(panel_root(&app, cx), None, "the panel closed");
         assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()), "no image opened");
 
-        // Over the first post's text: it doesn't open its thread either.
+        // Over the first tweet's text: it doesn't open its thread either.
         open_panel(&app, "elsewhere", cx);
         cx.simulate_click(point(px(250.), px(200.)), Modifiers::default());
         cx.run_until_parked();
@@ -3664,7 +3664,7 @@ mod tests {
         let post = column.read_with(cx, |c, _| {
             c.model().items().iter().flat_map(|i| i.posts()).find(|p| p.media.len() >= 2).cloned()
         });
-        let post = Arc::new(post.expect("the mock has a multi-image post"));
+        let post = Arc::new(post.expect("the mock has a multi-image tweet"));
         let hub = app.read_with(cx, |app, _| app.hub.clone());
         hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
         cx.run_until_parked();
@@ -3705,7 +3705,7 @@ mod tests {
             ("repost", |app, _, window, cx| {
                 let column = app.columns[0].1.read(cx);
                 let post = column.model().items().iter().flat_map(|i| i.posts()).next().cloned();
-                app.open_repost(Arc::new(post.expect("the column has posts")), window, cx);
+                app.open_repost(Arc::new(post.expect("the column has tweets")), window, cx);
             }),
             ("search people", |app, _, window, cx| app.open_user_search(window, cx)),
             ("add column", |app, _, window, cx| app.open_add_column(window, cx)),
@@ -3761,8 +3761,8 @@ mod tests {
                 finish_exits(cx);
                 opened
             })
-            .expect("the deck shows a post to click");
-        // A spot inside the open panel where a click switches to another post.
+            .expect("the deck shows a tweet to click");
+        // A spot inside the open panel where a click switches to another tweet.
         let root = first_post(&app, cx).id.to_string();
         let viewport = cx.update(|window, _| window.viewport_size());
         let x = viewport.width - px(300.);
@@ -3781,7 +3781,7 @@ mod tests {
                 finish_exits(cx);
                 switched
             })
-            .expect("the panel shows a post to click");
+            .expect("the panel shows a tweet to click");
 
         open_panel(&app, &root, cx);
         cx.simulate_keystrokes("escape");
@@ -3793,8 +3793,8 @@ mod tests {
         // The same spot on the leaving panel does nothing...
         cx.simulate_click(spot, Modifiers::default());
         cx.run_until_parked();
-        assert_eq!(panel_root(&app, cx), None, "the leaving panel's posts don't react");
-        // ...but the deck beside it does: a post opens its thread.
+        assert_eq!(panel_root(&app, cx), None, "the leaving panel's tweets don't react");
+        // ...but the deck beside it does: a tweet opens its thread.
         cx.simulate_click(in_deck, Modifiers::default());
         cx.run_until_parked();
         assert!(panel_root(&app, cx).is_some(), "the leaving panel doesn't block the deck");
@@ -3812,7 +3812,7 @@ mod tests {
         let post = column.read_with(cx, |c, _| {
             c.model().items().iter().flat_map(|i| i.posts()).find(|p| p.media.len() >= 2).cloned()
         });
-        let post = Arc::new(post.expect("the mock has a multi-image post"));
+        let post = Arc::new(post.expect("the mock has a multi-image tweet"));
         let hub = app.read_with(cx, |app, _| app.hub.clone());
         hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
         cx.run_until_parked();

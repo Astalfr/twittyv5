@@ -1,5 +1,5 @@
 //! A column's settings dialog: its name, width, and how it announces new
-//! posts. Every change applies to the column right away.
+//! tweets. Every change applies to the column right away.
 
 use gpui_kit::{
     App, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render, Styled,
@@ -20,7 +20,7 @@ const VOLUME_STEP: f32 = 5.0;
 
 /// The text of the notification the Test button sends.
 pub const TEST_NOTIFICATION: &str =
-    "Test notification: new posts in this column show up like this.";
+    "Test notification: new tweets in this column show up like this.";
 
 /// What the dialog reports to the app.
 #[derive(Debug, Clone, PartialEq)]
@@ -167,7 +167,7 @@ impl ColumnSettingsView {
         self.report(true, cx);
     }
 
-    /// Sends a sample notification the way new posts will, switched on or not.
+    /// Sends a sample notification the way new tweets will, switched on or not.
     pub fn test_notification(&self, cx: &mut Context<Self>) {
         let title = self.settings.title(&self.source);
         column::show_notification(self.id, title, TEST_NOTIFICATION.to_owned(), cx);
@@ -185,9 +185,9 @@ fn labelled(label: &'static str, value: String, cx: &App) -> impl IntoElement {
 
 /// The system notification switch's label, named after the platform's.
 const DESKTOP_LABEL: &str = if cfg!(windows) {
-    "Show a Windows notification for new posts"
+    "Show a Windows notification for new tweets"
 } else {
-    "Show a system notification for new posts"
+    "Show a system notification for new tweets"
 };
 
 impl Render for ColumnSettingsView {
@@ -217,7 +217,7 @@ impl Render for ColumnSettingsView {
                     .child(labelled("Column width", format!("{} px", self.settings.width.px()), cx))
                     .child(Slider::new(&self.width).accessibility_label("Column width")),
             )
-            .child(section("New posts"))
+            .child(section("New tweets"))
             .child(
                 Switch::new("column-sound").checked(alerts.sound).label("Play a sound").on_click({
                     let weak = weak.clone();
@@ -335,7 +335,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn the_test_button_sends_a_notification(cx: &mut TestAppContext) {
-        // Like Windows, GPUI only posts notifications for an identified app.
+        // Like Windows, GPUI only tweets notifications for an identified app.
         cx.update(|cx| cx.set_app_identity("Twitty.Test", "Twitty"));
         let (view, events, cx) = open(ColumnSettings::default(), cx);
         let button = cx.debug_bounds("column-test-notification").expect("the Test button is drawn");

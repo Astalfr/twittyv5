@@ -1,4 +1,4 @@
-//! Twitty: a native X client with an X Pro style deck.
+//! Twitty: a native Twitter client with a TweetDeck-style deck.
 
 // Release builds are GUI apps: no console window on Windows. Debug builds keep
 // the console so logs are visible.
@@ -73,13 +73,14 @@ fn main() -> anyhow::Result<()> {
     let found = find_session(Session::from_env(), store.as_ref(), &session_files());
     let (backend, mock, session): (Arc<dyn Backend>, _, _) = match found {
         Some((session, origin)) => {
-            tracing::info!("using the X session from {origin}");
+            tracing::info!("using the Twitter session from {origin}");
             let on_rotate = match &origin {
                 SessionOrigin::Keyring => Some(keyring_rotation(Arc::clone(&store))),
                 SessionOrigin::File(path) => Some(file_rotation(path.clone())),
                 SessionOrigin::Env => None,
             };
-            let client = XClient::production(session, on_rotate).context("creating X client")?;
+            let client =
+                XClient::production(session, on_rotate).context("creating Twitter client")?;
             let source = match origin {
                 SessionOrigin::Keyring => SessionSource::Keyring,
                 other => SessionSource::External(other.to_string()),
@@ -132,7 +133,7 @@ fn main() -> anyhow::Result<()> {
         cx.set_global(Video(Arc::new(SystemVideo)));
         cx.set_http_client(Arc::new(http));
 
-        // Demo: new posts trickle into Home so polling and the "new posts" pill can be seen.
+        // Demo: new tweets trickle into Home so polling and the "new tweets" pill can be seen.
         if let Some(mock) = mock {
             cx.spawn(async move |cx| {
                 loop {
@@ -166,7 +167,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Builds X backends for the sign-in dialog. Their rotated cookies go to the keyring.
+/// Builds Twitter backends for the sign-in dialog. Their rotated cookies go to the keyring.
 fn x_connector(store: Arc<dyn CredentialStore>) -> Connector {
     Arc::new(move |c: &Credentials| {
         let session = Session::new(c.auth_token.as_str(), c.ct0.as_str())
@@ -177,7 +178,7 @@ fn x_connector(store: Arc<dyn CredentialStore>) -> Connector {
     })
 }
 
-/// Where the X session was found.
+/// Where the Twitter session was found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SessionOrigin {
     Env,
@@ -243,8 +244,8 @@ fn keyring_rotation(store: Arc<dyn CredentialStore>) -> RotateHook {
             ct0: session.ct0.expose().to_owned(),
         };
         match store.save(&credentials) {
-            Ok(()) => tracing::info!("saved rotated X session"),
-            Err(e) => tracing::error!("could not save rotated X session: {e}"),
+            Ok(()) => tracing::info!("saved rotated Twitter session"),
+            Err(e) => tracing::error!("could not save rotated Twitter session: {e}"),
         }
     })
 }
@@ -256,9 +257,12 @@ fn file_rotation(path: PathBuf) -> RotateHook {
     Arc::new(move |session: &Session| {
         let _guard = writing.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         match save_session(&path, session) {
-            Ok(()) => tracing::info!("saved rotated X session to {}", path.display()),
+            Ok(()) => tracing::info!("saved rotated Twitter session to {}", path.display()),
             Err(e) => {
-                tracing::error!("could not save rotated X session to {}: {e:#}", path.display());
+                tracing::error!(
+                    "could not save rotated Twitter session to {}: {e:#}",
+                    path.display()
+                );
             }
         }
     })

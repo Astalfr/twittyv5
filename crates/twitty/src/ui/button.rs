@@ -11,7 +11,7 @@ use gpui_kit::{
 const WEIGHT: FontWeight = FontWeight::SEMIBOLD;
 
 /// (height, horizontal padding) of a text button of `size`. GPUI Kit's are
-/// 20/24/32/32px tall with 4/8/10/12px each side; X's buttons are roomier.
+/// 20/24/32/32px tall with 4/8/10/12px each side; Twitter's buttons are roomier.
 pub(crate) fn metrics(size: Size) -> (Pixels, Pixels) {
     match size {
         Size::XSmall => (px(22.), px(8.)),

@@ -117,7 +117,7 @@ impl From<Volume> for u8 {
     }
 }
 
-/// How a column announces new posts that arrive while it polls.
+/// How a column announces new tweets that arrive while it polls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ColumnAlerts {
     /// Play the notification sound.

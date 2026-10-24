@@ -1,11 +1,11 @@
-//! Scrubs captured X responses so they can be committed as test fixtures.
+//! Scrubs captured Twitter responses so they can be committed as test fixtures.
 //!
 //! The output keeps the JSON structure, every key, all numbers and the length
 //! (in Unicode code points) of every string, so entity offsets stay valid.
 //! Text, names, handles, ids, URLs and opaque tokens are replaced with
 //! pseudo-random characters. The replacement of a word or id is the same
 //! everywhere in one run (a handle in `screen_name` matches the `@handle` in a
-//! post's text, an id in `id_str` matches the one in an `entryId`), but the
+//! tweet's text, an id in `id_str` matches the one in an `entryId`), but the
 //! key is random per run, so the mapping can't be reversed with a dictionary.
 
 use std::{
@@ -33,7 +33,7 @@ const TEXT_KEYS: &[&str] = &[
     "vanity",
     "alt_text",
     "ext_alt_text",
-    // Grok's translation of a post (`grok_translated_post_with_availability`).
+    // Grok's translation of a tweet (`grok_translated_post_with_availability`).
     "translation",
     "preview_translation",
 ];
@@ -57,7 +57,7 @@ const KEEP_KEYS: &[&str] = &["created_at", "timestamp_ms", "__typename", "type",
 const SENSITIVE_KEY_PARTS: &[&str] =
     &["handle", "name", "email", "address", "bitcoin", "ethereum", "phone"];
 
-/// Hosts kept verbatim: X's own, which identify nothing.
+/// Hosts kept verbatim: Twitter's own, which identify nothing.
 const KEEP_HOSTS: &[&str] = &[
     "x.com",
     "twitter.com",

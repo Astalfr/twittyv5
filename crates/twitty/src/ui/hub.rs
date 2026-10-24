@@ -17,33 +17,33 @@ use crate::{
     },
 };
 
-/// A request from a post row to open something; the app decides how.
+/// A request from a tweet row to open something; the app decides how.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Navigate {
-    /// Show the conversation around a post.
+    /// Show the conversation around a tweet.
     Thread(PostId),
-    /// Compose a reply to a post.
+    /// Compose a reply to a tweet.
     Reply(Arc<Post>),
-    /// Ask whether to repost (or undo the repost of) a post, or quote it.
+    /// Ask whether to retweet (or undo the retweet of) a tweet, or quote it.
     Repost(Arc<Post>),
     /// Show an account's profile.
     Profile(Arc<Profile>),
     /// Show the profile of an account mentioned in a text, which must be
     /// looked up first.
     Mention(UserRef),
-    /// Add a column with an account's posts.
+    /// Add a column with an account's tweets.
     UserColumn(Arc<Profile>),
-    /// Show a post's media in the viewer, starting at `index`.
+    /// Show a tweet's media in the viewer, starting at `index`.
     Media { post: Arc<Post>, index: usize },
 }
 
-/// Owns the viewer's optimistic post state for the whole window.
+/// Owns the viewer's optimistic tweet state for the whole window.
 pub struct InteractionsHub {
     state: Interactions,
     backend: Arc<dyn Backend>,
     /// Toggles the viewer just turned on, whose icon "pops".
     pops: Recent<(PostId, Toggle), ()>,
-    /// Translated posts the viewer switched back to their original text.
+    /// Translated tweets the viewer switched back to their original text.
     originals: Originals,
 }
 
@@ -71,18 +71,18 @@ impl InteractionsHub {
         self.state.effective(post)
     }
 
-    /// Whether `toggle`'s icon on post `id` is in its "pop", i.e. the viewer
+    /// Whether `toggle`'s icon on tweet `id` is in its "pop", i.e. the viewer
     /// just turned it on.
     pub fn popping(&self, id: &PostId, toggle: Toggle) -> bool {
         self.pops.get(&(id.clone(), toggle), Instant::now()).is_some()
     }
 
-    /// Whether translated post `id` is switched back to its original text.
+    /// Whether translated tweet `id` is switched back to its original text.
     pub fn showing_original(&self, id: &PostId) -> bool {
         self.originals.showing_original(id)
     }
 
-    /// Switches translated post `id` between its translation and original.
+    /// Switches translated tweet `id` between its translation and original.
     pub fn toggle_original(&mut self, id: &PostId, cx: &mut Context<Self>) {
         self.originals.toggle(id);
         cx.notify();
@@ -121,7 +121,7 @@ impl InteractionsHub {
                 Ok(Err(e)) => e,
                 Err(e) => BackendError::Network(e.to_string()),
             };
-            tracing::warn!("post action failed, rolling back: {error}");
+            tracing::warn!("tweet action failed, rolling back: {error}");
             this.update(cx, |this, cx| {
                 this.state.rollback(pending);
                 cx.emit(Notice::action_failed(&action, &error, chrono::Utc::now()));
@@ -173,7 +173,7 @@ mod tests {
         cx.update(|cx| cx.set_global(Runtime::inline()));
         let backend = MockBackend::new();
         let post = first_post(&backend).await;
-        assert!(!post.viewer.liked, "the mock's first post starts unliked");
+        assert!(!post.viewer.liked, "the mock's first tweet starts unliked");
         let hub = cx.new(|_| InteractionsHub::new(Arc::new(backend.clone())));
         let popping = |cx: &mut TestAppContext| {
             hub.read_with(cx, |hub, _| hub.popping(&post.id, Toggle::Like))
@@ -206,7 +206,7 @@ mod tests {
         cx.run_until_parked();
 
         assert!(!hub.read_with(cx, |hub, _| hub.effective(&post).viewer.reposted));
-        assert_eq!(*notices.lock().unwrap(), [Notice::error("Couldn't repost: nope")]);
+        assert_eq!(*notices.lock().unwrap(), [Notice::error("Couldn't retweet: nope")]);
     }
 
     #[gpui_kit::test]
@@ -224,7 +224,7 @@ mod tests {
 
         assert_eq!(
             *notices.lock().unwrap(),
-            [Notice::success("Reposted"), Notice::success("Added to Bookmarks")]
+            [Notice::success("Retweeted"), Notice::success("Added to Bookmarks")]
         );
     }
 

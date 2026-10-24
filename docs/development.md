@@ -77,6 +77,6 @@ Icons come from GPUI Kit's Lucide catalog. Only the ones listed in `crates/twitt
 ## Debugging tips
 
 - Logs go to the console in debug builds and always to the log file (release builds have no console). `RUST_LOG` overrides the default `twitty=info,twitty_x=info`. Panics are logged before the default handler runs.
-- Settings → **Diagnostics** shows, per X operation since startup: responses, rows, rows Twitty couldn't read (`Unsupported`), errors, and the last warning/error. "Unreadable" rows are the signal that X changed its JSON.
+- Settings → **Diagnostics** shows, per Twitter operation since startup: responses, rows, rows Twitty couldn't read (`Unsupported`), errors, and the last warning/error. "Unreadable" rows are the signal that Twitter changed its JSON.
 - To capture a raw response for a new shape, use `twitty-x-cli capture` (see [x-api.md](x-api.md#dev-cli)).
 - gpui-component's `inspector` feature (`gpui-kit/inspector`) gives a GPUI element inspector, similar to browser DevTools.

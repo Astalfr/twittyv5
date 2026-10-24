@@ -1,8 +1,8 @@
-# X internal API (`twitty-x`)
+# Twitter internal API (`twitty-x`)
 
-X doesn't document this API. Everything here comes from community clients and our own observations: [`bun_x`](https://crates.io/crates/bun_x) (Rust, Apache-2.0, the main reference), [x-go](https://github.com/teslashibe/x-go) and [twitter-graphql-scraper](https://github.com/she-llac/twitter-graphql-scraper). Check each claim against live traffic, and update this page whenever behaviour changes.
+Twitter doesn't document this API. Everything here comes from community clients and our own observations: [`bun_x`](https://crates.io/crates/bun_x) (Rust, Apache-2.0, the main reference), [x-go](https://github.com/teslashibe/x-go) and [twitter-graphql-scraper](https://github.com/she-llac/twitter-graphql-scraper). Check each claim against live traffic, and update this page whenever behaviour changes.
 
-> Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
+> Using Twitter's internal API is against Twitter's terms of service. Develop and run live tests with a **secondary account**.
 
 **M10:** `XBackend` keeps per-operation health counters (`Backend::health`), shown in Settings → Diagnostics; a response with no timeline at all counts as a warning. Requests carry a real transaction id since 2026-10-24 (see below).
 
@@ -12,7 +12,7 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 **M5:** `XBackend` implements `twitty-model`'s `Backend` and the app uses it when it finds a session. Reads (`viewer`, `feed`, `thread`, `profile`) are wired; writes (`act`, `publish`) return an error until M8. Verified live on 2026-10-24: Home, Notifications and Search columns load with images.
 
-**M4:** X responses are translated into `twitty-model` by `translate::feed_page` and checked against 9 anonymised live fixtures.
+**M4:** Twitter responses are translated into `twitty-model` by `translate::feed_page` and checked against 9 anonymised live fixtures.
 
 **M3:** transport, catalog, discovery, `XClient` and the dev CLI are implemented, tested against a mock server, and **verified live on 2026-10-24**: `HomeTimeline` and `HomeLatestTimeline` returned data with the declared feature subsets, and logged-in discovery found every operation Twitty uses. Translation into `twitty-model` (`wire` + `translate`) is M4.
 
@@ -27,8 +27,8 @@ X doesn't document this API. Everything here comes from community clients and ou
 | `client.rs` | `XClient::graphql(op, variables)` and helpers like `home_timeline`. Recovers once from stale ids. `XClient::production` builds one with the default cache paths and discovery (used by the app and the CLI). |
 | `requests.rs` | Private: which operation and variables serve each `FeedSource` and `PageRequest`. Only live-verified variable sets are mapped. |
 | `backend.rs` | `XBackend`: `Backend` over `XClient` + `translate`. |
-| `wire.rs` | Private, lenient readers over X JSON: `at`/`str_at`/`u64_at`…, `timeline()` classifying entries (items, modules, cursors). |
-| `translate/` | X JSON → `twitty-model`: `text` (entities → `RichText`), `user`, `tweet`, `media`, `card`, `notification`; entry points `feed_page()` (any timeline), `thread()` (`TweetDetail` split around the focal post), `viewer()` and `user()`. |
+| `wire.rs` | Private, lenient readers over Twitter JSON: `at`/`str_at`/`u64_at`…, `timeline()` classifying entries (items, modules, cursors). |
+| `translate/` | Twitter JSON → `twitty-model`: `text` (entities → `RichText`), `user`, `tweet`, `media`, `card`, `notification`; entry points `feed_page()` (any timeline), `thread()` (`TweetDetail` split around the focal tweet), `viewer()` and `user()`. |
 | `anonymise.rs` | Scrubs captures into committable fixtures, plus a leak check. |
 | `bin/twitty-x-cli.rs` | Dev tool: `ops`, `refresh-ids`, `capture home`, `capture op`, `anonymise`. |
 | `data/operations.json` | Embedded fallback ids with feature switches and field toggles, regenerated from a live discovery run. |
@@ -65,7 +65,7 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 
 ### Signing in
 
-Use **Sign in** (banner or rail). The dialog explains where to find the cookies, normalises what was pasted (quotes, `auth_token=` prefixes, spaces), validates it with `Session::new`, then calls `Viewer`. Only a session X accepts is stored (Windows Credential Manager, entry `Twitty` / `x-session`).
+Use **Sign in** (banner or rail). The dialog explains where to find the cookies, normalises what was pasted (quotes, `auth_token=` prefixes, spaces), validates it with `Session::new`, then calls `Viewer`. Only a session Twitter accepts is stored (Windows Credential Manager, entry `Twitty` / `x-session`).
 
 At startup the app takes the first of:
 
@@ -87,18 +87,18 @@ A session file is `{"auth_token": "…", "ct0": "…"}`. Unusable sources are lo
 | `User { tab: Posts }` | `UserTweets` | |
 | `User { tab: Replies }` | `UserTweetsAndReplies` | |
 | `User { tab: Media }` | `UserMedia` | page 1 is a `VerticalGrid` module; later pages come as `TimelineAddToModule` |
-| `User { tab: Likes }` | `Likes` | X only shows the signed-in account's likes; other accounts come back empty |
+| `User { tab: Likes }` | `Likes` | Twitter only shows the signed-in account's likes; other accounts come back empty |
 | `List { id }` | `ListLatestTweetsTimeline` | |
 | `Bookmarks` | `Bookmarks` | |
 
 `Backend::search_users` (the **Search people** dialog) calls `SearchTimeline` (POST) with `product: "People"`. The response is a timeline of `TimelineUser` items whose `user_results.result` has the same shape as `UserByScreenName`, so `translate::users` reuses the profile translation. An entry that isn't a readable account is skipped with a warning. Its health counters are kept as `SearchTimeline (People)`, apart from the search columns, but it spends the same `SearchTimeline` rate budget.
 | `Thread { root }` | `TweetDetail` | |
 
-`PageRequest::Older` sends the bottom cursor and `Newer` the top cursor, both as `cursor`. A page with no rows ends the feed even if X sends a cursor, so scrolling can't loop on empty pages.
+`PageRequest::Older` sends the bottom cursor and `Newer` the top cursor, both as `cursor`. A page with no rows ends the feed even if Twitter sends a cursor, so scrolling can't loop on empty pages.
 
 ## Query IDs and features
 
-The `queryId` changes with X web releases (about every 2–4 weeks), and `features` changes too. `Catalog::resolve` checks, in order:
+The `queryId` changes with Twitter web releases (about every 2–4 weeks), and `features` changes too. `Catalog::resolve` checks, in order:
 
 1. **Override**: set with `--query-id` in the CLI or `Catalog::set_override`. Never auto-refreshed.
 2. **Runtime cache**: `%LOCALAPPDATA%\Twitty\cache\query-ids.json`, written by discovery, fresh for 24h. Names are looked up as-is, then with a `Query` suffix (Relay naming).
@@ -140,7 +140,7 @@ What the live runs showed:
 
 ## `x-client-transaction-id`
 
-X enforces this header on some writes. With a random value, `CreateRetweet` and `CreateBookmark` get **HTTP 404**, which looks exactly like a stale query id: rediscovery finds the same id. A Relay mutation got error **226** ("looks like it might be automated") on a real post, probably for the same reason; 226 can also be an account-level signal that no header fixes. Likes, unbookmarking and reads still passed with random ids on 2026-10-24. So a 404 on a write whose id refresh reports `changed=0` points here, not at the catalog.
+Twitter enforces this header on some writes. With a random value, `CreateRetweet` and `CreateBookmark` get **HTTP 404**, which looks exactly like a stale query id: rediscovery finds the same id. A Relay mutation got error **226** ("looks like it might be automated") on a real tweet, probably for the same reason; 226 can also be an account-level signal that no header fixes. Likes, unbookmarking and reads still passed with random ids on 2026-10-24. So a 404 on a write whose id refresh reports `changed=0` points here, not at the catalog.
 
 `transport/transaction.rs` ports the web client's algorithm (after XClientTransaction, MIT):
 1. **Key material**, loaded once per hour by `Signer` and fetched logged in, with its own plain HTTP client. It comes from `https://x.com/home`:
@@ -157,7 +157,7 @@ When writes start failing again with 404, 226 or 353, check that `twitty-x-cli c
 ## Rate limits and retries
 
 - `x-rate-limit-limit`, `x-rate-limit-remaining` and `x-rate-limit-reset` (epoch seconds) are recorded **per operation** (`RateLimits`).
-- When `remaining == 0` and the reset is in the future, calls fail locally with `XError::RateLimited { reset_at }` without hitting X.
+- When `remaining == 0` and the reset is in the future, calls fail locally with `XError::RateLimited { reset_at }` without hitting Twitter.
 - HTTP 429 → `RateLimited` with the reset from the headers (or now + 1 min).
 - Network errors and 5xx are retried with exponential backoff (default 3 retries, 1s base). 401/403/404/429 are never retried.
 - Column polling will adjust to the remaining budget (see [ui.md](ui.md)).
@@ -183,9 +183,9 @@ When writes start failing again with 404, 226 or 353, check that `twitty-x-cli c
 | Action | Operation | Variables |
 |---|---|---|
 | Like / unlike | `FavoriteTweet` / `UnfavoriteTweet` | `{"tweet_id"}` |
-| Repost / undo | `CreateRetweet` / `DeleteRetweet` | `{"tweet_id", "dark_request": false}` / `{"source_tweet_id", "dark_request": false}` |
+| Retweet / undo | `CreateRetweet` / `DeleteRetweet` | `{"tweet_id", "dark_request": false}` / `{"source_tweet_id", "dark_request": false}` |
 | Bookmark / remove | `CreateBookmark` / `DeleteBookmark` | `{"tweet_id"}` |
-| Post / reply | `CreateTweet` | `{"tweet_text", "dark_request": false, "media": {"media_entities": [], "possibly_sensitive": false}, "semantic_annotation_ids": [], "disallowed_reply_options": null}` plus `reply: {"in_reply_to_tweet_id", "exclude_reply_user_ids": []}` for replies, `attachment_url: "https://x.com/i/status/<id>"` for quotes |
+| Tweet / reply | `CreateTweet` | `{"tweet_text", "dark_request": false, "media": {"media_entities": [], "possibly_sensitive": false}, "semantic_annotation_ids": [], "disallowed_reply_options": null}` plus `reply: {"in_reply_to_tweet_id", "exclude_reply_user_ids": []}` for replies, `attachment_url: "https://x.com/i/status/<id>"` for quotes |
 
 All are POSTs with `{variables, features, queryId}`. Error handling (`backend.rs`):
 - codes **139** ("already favorited") and **327** ("already retweeted") count as success, so a double click or a stale view doesn't roll back a state that is in fact right;
@@ -225,11 +225,11 @@ Observed live on 2026-10-24 (input for M4):
 - `HomeTimeline`: one `TimelineAddEntries` with `cursor-top`, 28 `tweet-*`, 7 `promoted-tweet-*`, `cursor-bottom`; all results were `Tweet`.
 - **User objects changed**: `core.user_results.result` has no `legacy` block anymore. Name and handle are in `core.{name, screen_name, created_at}`, and there are `avatar`, `banner`, `profile_bio`, `location`, `website`, `verification`, `is_blue_verified`, `relationship_counts`, `relationship_perspectives`, `tweet_counts`, `privacy`.
 - Tweets still have `legacy` (`full_text`, `entities`, `extended_entities`, counts, `favorited`, `retweeted`, `bookmarked`, `created_at`, `quoted_status_id_str`), plus `views`, `quoted_status_result`, `edit_control`, `grok_*`.
-- `HomeLatestTimeline` on the test account returned no posts: a `TimelineShowCover` (email review prompt) and an entry `flip-prompt-message-grok-bot-inline`. Covers and prompts must be skipped.
+- `HomeLatestTimeline` on the test account returned no tweets: a `TimelineShowCover` (email review prompt) and an entry `flip-prompt-message-grok-bot-inline`. Covers and prompts must be skipped.
 
 ### Grok translations (2026-10-24)
 
-X machine-translates posts with Grok. The translation is only sent when the feature switch `responsive_web_grok_show_grok_translated_post` is `true` (it is in `data/default_features.json`; every operation that returns posts declares it, only `Viewer` and `UserByScreenName` don't). Each tweet then carries:
+Twitter machine-translates tweets with Grok. The translation is only sent when the feature switch `responsive_web_grok_show_grok_translated_post` is `true` (it is in `data/default_features.json`; every operation that returns tweets declares it, only `Viewer` and `UserByScreenName` don't). Each tweet then carries:
 
 ```
 grok_translated_post_with_availability
@@ -240,13 +240,13 @@ grok_translated_post_with_availability
   .data.preview_translation           # truncated copy, long posts only: ignored
 ```
 
-Checked live on `HomeTimeline` and searches (Japanese posts, Japanese replies, English, French): 28 of 28 entities match as code points, including after emoji; a long `note_tweet` gets its whole text translated; replies translate without their leading mentions. `translate::tweet` turns it into `Post::translation`, and anything unexpected (no data, blank text, same source and destination) is just no translation, never an error.
+Checked live on `HomeTimeline` and searches (Japanese tweets, Japanese replies, English, French): 28 of 28 entities match as code points, including after emoji; a long `note_tweet` gets its whole text translated; replies translate without their leading mentions. `translate::tweet` turns it into `Post::translation`, and anything unexpected (no data, blank text, same source and destination) is just no translation, never an error.
 
-`destination_language` is `en`, which matches the `x-twitter-client-language: en` the transport sends (not tried with another value). Posts in the account's own languages aren't translated: on a French-speaking account, 28 of 28 French and every English post came back `is_available: false`, while Japanese, Korean and Portuguese posts were translated.
+`destination_language` is `en`, which matches the `x-twitter-client-language: en` the transport sends (not tried with another value). Tweets in the account's own languages aren't translated: on a French-speaking account, 28 of 28 French and every English tweet came back `is_available: false`, while Japanese, Korean and Portuguese tweets were translated.
 
 ### Community Notes (2026-10-24)
 
-A post with a note rated helpful carries `birdwatch_pivot` (with the features `responsive_web_birdwatch_consumption_enabled` and `responsive_web_birdwatch_pivots_enabled`, both on). Seen live on `SearchTimeline` and `TweetDetail` with the same shape:
+A tweet with a note rated helpful carries `birdwatch_pivot` (with the features `responsive_web_birdwatch_consumption_enabled` and `responsive_web_birdwatch_pivots_enabled`, both on). Seen live on `SearchTimeline` and `TweetDetail` with the same shape:
 
 ```
 birdwatch_pivot
@@ -260,9 +260,9 @@ birdwatch_pivot
   .iconType / .footerIconType / .visualStyle
 ```
 
-`translate::tweet` turns it into `Post::community_note` (text and `destinationUrl`, falling back to `callToAction.destinationUrl`); a pivot without text or a valid link is dropped with a warning, and the post stays. Only `TimelineUrl` entities become links; their covered text is shown as is. The `fromIndex`/`toIndex` offsets are taken as **code points**: the one live note had only BMP characters, so this is inferred from the same rich-text format in notification `rich_message`s, where only code points give whole names after emoji. A wrong guess only drops or shifts a link span; the text is never lost.
+`translate::tweet` turns it into `Post::community_note` (text and `destinationUrl`, falling back to `callToAction.destinationUrl`); a pivot without text or a valid link is dropped with a warning, and the tweet stays. Only `TimelineUrl` entities become links; their covered text is shown as is. The `fromIndex`/`toIndex` offsets are taken as **code points**: the one live note had only BMP characters, so this is inferred from the same rich-text format in notification `rich_message`s, where only code points give whole names after emoji. A wrong guess only drops or shifts a link span; the text is never lost.
 
-`has_birdwatch_notes` on the tweet is not used: it is `true` on the noted post in `TweetDetail`, absent in `SearchTimeline`, and may also cover notes still being rated, which X doesn't show. `UserMedia` and `Likes` are requested with `withBirdwatchNotes: false` (as the web client does), so posts in those columns may come without their note; opening the post (`TweetDetail`, `withBirdwatchNotes: true`) shows it.
+`has_birdwatch_notes` on the tweet is not used: it is `true` on the noted tweet in `TweetDetail`, absent in `SearchTimeline`, and may also cover notes still being rated, which Twitter doesn't show. `UserMedia` and `Likes` are requested with `withBirdwatchNotes: false` (as the web client does), so tweets in those columns may come without their note; opening the tweet (`TweetDetail`, `withBirdwatchNotes: true`) shows it.
 
 ## Dev CLI
 
@@ -309,14 +309,14 @@ TWITTY_LIVE=1 TWITTY_AUTH_TOKEN=… TWITTY_CT0=… cargo test -p twitty-x --test
 
 1. Capture into the gitignored `dumps/`: `twitty-x-cli capture home` / `capture op …`.
 2. Scrub it: `twitty-x-cli anonymise dumps/x.json crates/twitty-x/tests/fixtures/x.json`.
-   - Keeps the JSON structure, all keys and numbers, dates, `__typename`s, card type names, X's own hosts and URL route words, and the code-point length of every string (so entity offsets stay valid).
+   - Keeps the JSON structure, all keys and numbers, dates, `__typename`s, card type names, Twitter's own hosts and URL route words, and the code-point length of every string (so entity offsets stay valid).
    - Replaces text, names, handles, ids, other hosts, URL paths and opaque tokens with pseudo-random characters. A word or id maps to the same replacement everywhere in the file (handle in `screen_name` = `@handle` in text, `id_str` = id in `entryId`), but the key is random per run, so it can't be reversed with a dictionary.
    - Refuses to write if any original handle or user display name survives in a string value. Reviewed false positives (e.g. an account literally named "None" colliding with enum values) can be passed with `--allow`.
 3. Add the name to `FIXTURES` in `tests/translate.rs`, run `cargo insta review` and read the summary snapshot.
 
-Never commit a raw capture: it contains other people's posts and profile data. Polls and tombstones didn't appear in live captures yet; they are covered by synthetic unit tests in `translate/card.rs` and `translate/tweet.rs`.
+Never commit a raw capture: it contains other people's tweets and profile data. Polls and tombstones didn't appear in live captures yet; they are covered by synthetic unit tests in `translate/card.rs` and `translate/tweet.rs`.
 
-## Runbook: "X broke something"
+## Runbook: "Twitter broke something"
 
 | Symptom | Likely cause | Action |
 |---|---|---|

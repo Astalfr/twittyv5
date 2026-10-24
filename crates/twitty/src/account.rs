@@ -1,7 +1,7 @@
 //! The signed-in account: credentials, where they are stored, and how the app
 //! turns them into a backend.
 //!
-//! Credentials are opaque strings here. Validating them and building the X
+//! Credentials are opaque strings here. Validating them and building the Twitter
 //! backend happen in `main.rs` (the only place that knows `twitty-x`), behind
 //! [`Connector`].
 
@@ -89,7 +89,7 @@ pub struct KeyringStore {
 }
 
 impl KeyringStore {
-    /// The entry Twitty uses for its X session.
+    /// The entry Twitty uses for its Twitter session.
     pub fn x_session() -> Self {
         Self { service: "Twitty".into(), user: "x-session".into() }
     }
@@ -176,7 +176,7 @@ pub enum ConnectError {
     Setup(String),
 }
 
-/// Builds a backend for credentials. `main.rs` provides the X implementation.
+/// Builds a backend for credentials. `main.rs` provides the Twitter implementation.
 pub type Connector =
     Arc<dyn Fn(&Credentials) -> Result<Arc<dyn Backend>, ConnectError> + Send + Sync>;
 

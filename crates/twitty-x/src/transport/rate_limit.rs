@@ -29,7 +29,7 @@ impl RateLimit {
     }
 }
 
-/// Budgets keyed by operation name. Each operation has its own window at X.
+/// Budgets keyed by operation name. Each operation has its own window at Twitter.
 #[derive(Debug, Default)]
 pub struct RateLimits {
     by_endpoint: Mutex<HashMap<String, RateLimit>>,

@@ -1,4 +1,4 @@
-//! The compose dialog: write a post, a reply or a quote, with X's length
+//! The compose dialog: write a tweet, a reply or a quote, with Twitter's length
 //! counter.
 
 use std::sync::Arc;
@@ -24,7 +24,7 @@ const PADDING: f32 = 24.;
 /// What the dialog reports to the app.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComposeEvent {
-    /// The post was published.
+    /// The tweet was published.
     Published(Arc<Post>),
     Dismissed,
 }
@@ -59,7 +59,7 @@ impl ComposeView {
     ) -> Self {
         let placeholder = match target {
             ComposeTarget::New => "What's happening?",
-            ComposeTarget::Reply(_) => "Post your reply",
+            ComposeTarget::Reply(_) => "Tweet your reply",
             ComposeTarget::Quote(_) => "Add a comment",
         };
         let text =
@@ -115,7 +115,7 @@ impl ComposeView {
                     Ok(post) => cx.emit(ComposeEvent::Published(Arc::new(post))),
                     Err(e) => {
                         tracing::warn!("publishing failed: {e}");
-                        this.error = Some(format!("Couldn't post: {e}"));
+                        this.error = Some(format!("Couldn't tweet: {e}"));
                     }
                 }
                 cx.notify();
@@ -139,9 +139,9 @@ impl Render for ComposeView {
             _ => theme.muted_foreground,
         };
         let (title, action) = match self.target {
-            ComposeTarget::New => ("New post", "Post"),
+            ComposeTarget::New => ("New tweet", "Tweet"),
             ComposeTarget::Reply(_) => ("Reply", "Reply"),
-            ComposeTarget::Quote(_) => ("Quote", "Post"),
+            ComposeTarget::Quote(_) => ("Quote", "Tweet"),
         };
         v_flex()
             .w(px(WIDTH))
@@ -171,7 +171,7 @@ impl Render for ComposeView {
                 )
             })
             .child(Textarea::new(&self.text).disabled(sending))
-            // Under the text, where X puts the quoted post. Kept short, so
+            // Under the text, where Twitter puts the quoted tweet. Kept short, so
             // the grown textarea and the buttons still fit a small window.
             .when_some(self.target.quoted().cloned(), |d, quoted| {
                 let width = WIDTH - 2. * PADDING;
@@ -286,7 +286,7 @@ mod tests {
         let quoted = Arc::new(page.items[0].posts()[0].clone());
         let (view, cx, events) = open(cx, backend, ComposeTarget::Quote(Arc::clone(&quoted)));
         cx.run_until_parked();
-        let text = cx.debug_bounds("compose-quote-body").expect("the quoted post is shown");
+        let text = cx.debug_bounds("compose-quote-body").expect("the quoted tweet is shown");
         assert!(text.size.height > px(0.));
         view.update_in(cx, |v, window, cx| v.type_text("look at this", window, cx));
         view.update(cx, |v, cx| v.submit(cx));
@@ -313,7 +313,8 @@ mod tests {
     #[gpui_kit::test]
     fn failures_keep_the_text_and_explain(cx: &mut TestAppContext) {
         let backend = MockBackend::new();
-        backend.fail_next(BackendError::Upstream("X error 187: Status is a duplicate.".into()));
+        backend
+            .fail_next(BackendError::Upstream("Twitter error 187: Status is a duplicate.".into()));
         let (view, cx, events) = open(cx, backend, ComposeTarget::New);
         view.update_in(cx, |v, window, cx| v.type_text("again", window, cx));
         view.update(cx, |v, cx| v.submit(cx));

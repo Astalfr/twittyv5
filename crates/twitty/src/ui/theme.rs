@@ -16,7 +16,7 @@ pub fn init(name: &str, cx: &mut App) {
         tracing::error!("bundled themes failed to load: {err:#}");
     }
     apply(name, None, cx);
-    // Columns and the deck always show their scrollbars, like X Pro.
+    // Columns and the deck always show their scrollbars, like TweetDeck.
     Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
 }
 

@@ -1,5 +1,5 @@
-//! Lenient readers over X's JSON. Private to this crate: nothing outside
-//! `twitty-x` may depend on X's shapes (see `docs/domain-model.md`).
+//! Lenient readers over Twitter's JSON. Private to this crate: nothing outside
+//! `twitty-x` may depend on Twitter's shapes (see `docs/domain-model.md`).
 //!
 //! Every accessor returns `Option` and tolerates missing fields, nulls and
 //! numbers sent as strings, so shape drift degrades output instead of failing.

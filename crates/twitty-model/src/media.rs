@@ -54,7 +54,7 @@ pub struct VideoVariant {
     pub size: Option<(u32, u32)>,
 }
 
-/// Media attached to a post.
+/// Media attached to a tweet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Media {

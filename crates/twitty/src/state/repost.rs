@@ -1,9 +1,9 @@
-//! The repost dialog: what confirming it does for a post.
+//! The retweet dialog: what confirming it does for a tweet.
 
 use crate::state::interactions::Effective;
 
 /// What the dialog's main button does, from the viewer's current state of
-/// the post (with their pending toggles, not the state the post was loaded
+/// the tweet (with their pending toggles, not the state the tweet was loaded
 /// with).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepostChoice {
@@ -19,16 +19,16 @@ impl RepostChoice {
     /// The dialog's title.
     pub fn title(self) -> &'static str {
         match self {
-            Self::Repost => "Repost this post?",
-            Self::Undo => "Undo this repost?",
+            Self::Repost => "Retweet this tweet?",
+            Self::Undo => "Undo this retweet?",
         }
     }
 
     /// The main button's label.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Repost => "Repost",
-            Self::Undo => "Undo repost",
+            Self::Repost => "Retweet",
+            Self::Undo => "Undo retweet",
         }
     }
 }
@@ -50,8 +50,8 @@ mod tests {
         let mut state = Interactions::default();
         assert_eq!(RepostChoice::for_post(&state.effective(&post)), RepostChoice::Repost);
         state.toggle(&post, Toggle::Repost);
-        assert!(!post.viewer.reposted, "the loaded post is unchanged");
+        assert!(!post.viewer.reposted, "the loaded tweet is unchanged");
         assert_eq!(RepostChoice::for_post(&state.effective(&post)), RepostChoice::Undo);
-        assert_eq!(RepostChoice::Undo.label(), "Undo repost");
+        assert_eq!(RepostChoice::Undo.label(), "Undo retweet");
     }
 }

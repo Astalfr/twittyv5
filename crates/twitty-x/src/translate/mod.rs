@@ -1,4 +1,4 @@
-//! X JSON → `twitty-model`. The only code that knows both worlds.
+//! Twitter JSON → `twitty-model`. The only code that knows both worlds.
 //!
 //! Rules (see `docs/domain-model.md`): never panic, never fail a whole page.
 //! An entry that can't be translated becomes `FeedItem::Unsupported` with a
@@ -115,7 +115,7 @@ pub struct TranslatedUsers {
     pub warnings: Vec<String>,
 }
 
-/// The accounts of a `SearchTimeline` "People" response, in X's order. An
+/// The accounts of a `SearchTimeline` "People" response, in Twitter's order. An
 /// entry that isn't a readable account is skipped with a warning.
 pub fn users(root: &Value) -> TranslatedUsers {
     let mut ctx = Ctx::default();
@@ -144,8 +144,8 @@ pub fn user(root: &Value) -> Option<Profile> {
     user::profile(at(root, &["data", "user", "result"])?)
 }
 
-/// Splits a `TweetDetail` response around the `focal` post: rows before it are
-/// its ancestors, rows after it the replies. `None` when the focal post isn't
+/// Splits a `TweetDetail` response around the `focal` tweet: rows before it are
+/// its ancestors, rows after it the replies. `None` when the focal tweet isn't
 /// in the response (deleted, protected, withheld…).
 pub fn thread(root: &Value, focal: &PostId) -> Option<ThreadView> {
     let page = feed_page(root).page;
@@ -162,8 +162,8 @@ pub fn thread(root: &Value, focal: &PostId) -> Option<ThreadView> {
 }
 
 /// Where the viewer stands after a v1.1 `friendships/create` or `destroy`
-/// call, from the user object it returns. X's `following` there can still
-/// show the state before the call, so a follow is trusted unless X says it
+/// call, from the user object it returns. Twitter's `following` there can still
+/// show the state before the call, so a follow is trusted unless Twitter says it
 /// is only a request (a protected account).
 pub fn follow_status(root: &Value, action: FollowAction) -> FollowStatus {
     match action {
@@ -181,7 +181,7 @@ pub fn follow_status(root: &Value, action: FollowAction) -> FollowStatus {
     }
 }
 
-/// The post a `CreateTweet` response returns.
+/// The tweet a `CreateTweet` response returns.
 pub fn created_post(root: &Value) -> Option<Post> {
     let result = at(root, &["data", "create_tweet", "tweet_results", "result"])?;
     match tweet::item(result, "created", &mut Ctx::default()) {
@@ -199,7 +199,7 @@ fn item(entry: &str, content: &Value, ctx: &mut Ctx) -> Option<FeedItem> {
         return None;
     }
     match str_at(content, &["__typename"]).or_else(|| str_at(content, &["itemType"])) {
-        // Empty results happen for posts the viewer can't see at all.
+        // Empty results happen for tweets the viewer can't see at all.
         Some("TimelineTweet") => {
             at(content, &["tweet_results", "result"]).map(|r| tweet::item(r, entry, ctx))
         }
@@ -211,14 +211,14 @@ fn item(entry: &str, content: &Value, ctx: &mut Ctx) -> Option<FeedItem> {
 }
 
 /// Conversation modules become threads; other modules (who-to-follow,
-/// carousels) are shown only for the posts they contain.
+/// carousels) are shown only for the tweets they contain.
 fn module(entry: &str, display_type: &str, items: &[Value], ctx: &mut Ctx) -> Vec<FeedItem> {
     let rows: Vec<FeedItem> =
         wire::module_items(items).filter_map(|(id, content)| item(id, content, ctx)).collect();
     if !display_type.contains("Conversation") {
         return rows;
     }
-    // A conversation is shown as one connected group of posts.
+    // A conversation is shown as one connected group of tweets.
     let (posts, others): (Vec<FeedItem>, Vec<FeedItem>) =
         rows.into_iter().partition(|r| matches!(r, FeedItem::Post(_)));
     let mut posts: Vec<Post> = posts
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn follow_status_reads_requests_and_ignores_a_stale_following() {
         let follow = |body| follow_status(&body, FollowAction::Follow);
-        // X can echo the state before the call.
+        // Twitter can echo the state before the call.
         assert_eq!(
             follow(json!({"protected": false, "following": false})),
             FollowStatus::Following

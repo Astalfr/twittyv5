@@ -65,7 +65,7 @@ fn variants(m: &Value) -> Vec<VideoVariant> {
     variants
 }
 
-/// The `WIDTHxHEIGHT` segment of an X video path (`/vid/avc1/1280x720/…`).
+/// The `WIDTHxHEIGHT` segment of a Twitter video path (`/vid/avc1/1280x720/…`).
 fn size_in_path(url: &Url) -> Option<(u32, u32)> {
     url.path_segments()?.find_map(|segment| {
         let (w, h) = segment.split_once('x')?;

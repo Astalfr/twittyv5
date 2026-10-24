@@ -1,6 +1,6 @@
-//! Post and bio text: X's raw text + entity list → `RichText`.
+//! Tweet and bio text: Twitter's raw text + entity list → `RichText`.
 //!
-//! X gives entity offsets in **Unicode code points** of the raw (HTML-escaped)
+//! Twitter gives entity offsets in **Unicode code points** of the raw (HTML-escaped)
 //! text, verified against live data on 2026-10-24. `display_text_range`
 //! (also code points) cuts the leading reply mentions and the trailing media
 //! link. Output spans are byte ranges into the decoded text.
@@ -11,7 +11,7 @@ use url::Url;
 
 use crate::wire::{array_at, at, str_at};
 
-/// An entity as X describes it, before translation.
+/// An entity as Twitter describes it, before translation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RawEntity {
     /// Code-point offsets into the raw text.
@@ -33,7 +33,7 @@ pub(crate) enum RawKind {
         display: String,
         expanded: String,
     },
-    /// The trailing `t.co` link X appends for attached media: removed.
+    /// The trailing `t.co` link Twitter appends for attached media: removed.
     Media,
 }
 
@@ -44,7 +44,7 @@ fn indices(e: &Value) -> Option<(usize, usize)> {
     (a < b).then_some((a, b))
 }
 
-/// Reads an X entity object (`entities`, `entity_set`, bio `description`).
+/// Reads a Twitter entity object (`entities`, `entity_set`, bio `description`).
 pub(crate) fn entities(set: &Value) -> Vec<RawEntity> {
     let mut out = Vec::new();
     let mut push = |key: &str, kind: &dyn Fn(&Value) -> Option<RawKind>| {
@@ -71,7 +71,7 @@ pub(crate) fn entities(set: &Value) -> Vec<RawEntity> {
     out
 }
 
-/// Reads the entities of X's "rich message" texts (Community Notes, …):
+/// Reads the entities of Twitter's "rich message" texts (Community Notes, …):
 /// `{fromIndex, toIndex, ref: {type, url, expandedUrl}}`, with code-point
 /// offsets into `raw`. Only links are kept; their covered text is already the
 /// display form, so it stays as is.
@@ -319,7 +319,7 @@ mod tests {
     }
 
     proptest! {
-        /// Whatever entities X sends, translation never panics and spans stay valid.
+        /// Whatever entities Twitter sends, translation never panics and spans stay valid.
         #[test]
         fn never_panics_and_spans_are_valid(
             raw in "\\PC{0,30}",

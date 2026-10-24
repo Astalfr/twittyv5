@@ -22,7 +22,7 @@ pub struct Settings {
     /// Theme name; unknown names fall back to the default theme.
     #[serde(default)]
     pub theme: Option<String>,
-    /// Whether columns check for new posts on their own (default on).
+    /// Whether columns check for new tweets on their own (default on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub polling: Option<bool>,
     /// Whether the UI animates (default on); off renders every animation at

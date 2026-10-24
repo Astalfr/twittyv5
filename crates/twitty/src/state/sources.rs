@@ -1,5 +1,5 @@
 //! Variants of a column's source shown as tabs under its header (Home's
-//! "For you" / "Following", a profile's Posts / Replies / Media / Likes…).
+//! "For you" / "Following", a profile's Tweets / Replies / Media / Likes…).
 
 use twitty_model::{FeedSource, HomeMode, NotificationFilter, SearchSort, UserTab};
 
@@ -41,7 +41,7 @@ pub fn tabs(source: &FeedSource) -> Vec<Tab> {
                 .collect()
         }
         FeedSource::User { id, handle, .. } => [
-            ("Posts", UserTab::Posts),
+            ("Tweets", UserTab::Posts),
             ("Replies", UserTab::Replies),
             ("Media", UserTab::Media),
             ("Likes", UserTab::Likes),
@@ -90,7 +90,7 @@ mod tests {
         let user =
             FeedSource::User { id: UserId::new("9"), handle: "NASA".into(), tab: UserTab::Posts };
         let labels: Vec<_> = tabs(&user).iter().map(|t| t.label).collect();
-        assert_eq!(labels, ["Posts", "Replies", "Media", "Likes"]);
+        assert_eq!(labels, ["Tweets", "Replies", "Media", "Likes"]);
         assert!(tabs(&user).iter().all(|t| t.source.title() == "@NASA"));
     }
 

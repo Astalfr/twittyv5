@@ -26,7 +26,7 @@ impl fmt::Debug for Secret {
     }
 }
 
-/// The two cookies X needs for authenticated GraphQL calls.
+/// The two cookies Twitter needs for authenticated GraphQL calls.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     /// Session cookie.

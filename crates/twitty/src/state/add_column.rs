@@ -1,5 +1,5 @@
 //! The "Add column" dialog: which kinds of column exist, and how what the user
-//! typed (a query, `@handle`, list or post link) becomes a `FeedSource`.
+//! typed (a query, `@handle`, list or tweet link) becomes a `FeedSource`.
 
 use twitty_model::{FeedSource, HomeMode, ListId, NotificationFilter, PostId, SearchSort, UserTab};
 
@@ -34,7 +34,7 @@ impl ColumnKind {
             ColumnKind::Search => "Search",
             ColumnKind::User => "User",
             ColumnKind::List => "List",
-            ColumnKind::Post => "Post",
+            ColumnKind::Post => "Tweet",
             ColumnKind::Bookmarks => "Bookmarks",
         }
     }
@@ -45,7 +45,7 @@ impl ColumnKind {
             ColumnKind::Search => Some("Search query, e.g. rust lang:en"),
             ColumnKind::User => Some("@handle or profile link"),
             ColumnKind::List => Some("List link or id"),
-            ColumnKind::Post => Some("Post link or id"),
+            ColumnKind::Post => Some("Tweet link or id"),
             ColumnKind::Home | ColumnKind::Notifications | ColumnKind::Bookmarks => None,
         }
     }
@@ -69,7 +69,7 @@ pub enum InputError {
     BadHandle,
     #[error("Paste a list link like x.com/i/lists/123…")]
     BadList,
-    #[error("Paste a post link like x.com/user/status/123…")]
+    #[error("Paste a tweet link like x.com/user/status/123…")]
     BadPost,
 }
 

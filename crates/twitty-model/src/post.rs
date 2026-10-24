@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::{ImageRef, Media, PostId, Profile, RichText, UserId};
 
-/// A single post.
+/// A single tweet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Post {
     pub id: PostId,
@@ -24,15 +24,15 @@ pub struct Post {
     /// provider sent one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translation: Option<Translation>,
-    /// Context readers added to the post (X's Community Notes), when one is
+    /// Context readers added to the tweet (Twitter's Community Notes), when one is
     /// shown publicly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub community_note: Option<CommunityNote>,
-    /// Canonical web link to the post.
+    /// Canonical web link to the tweet.
     pub url: Url,
 }
 
-/// A machine translation of a post's body.
+/// A machine translation of a tweet's body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Translation {
     pub body: RichText,
@@ -42,7 +42,7 @@ pub struct Translation {
     pub to: Option<SmolStr>,
 }
 
-/// Context added to a post by readers, shown under it.
+/// Context added to a tweet by readers, shown under it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommunityNote {
     /// The note's text, with its links.
@@ -51,7 +51,7 @@ pub struct CommunityNote {
     pub url: Url,
 }
 
-/// What the post replies to.
+/// What the tweet replies to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplyRef {
     pub post: Option<PostId>,
@@ -68,11 +68,11 @@ pub struct Metrics {
     pub quotes: u64,
     pub likes: u64,
     pub bookmarks: u64,
-    /// Not every post exposes a view count.
+    /// Not every tweet exposes a view count.
     pub views: Option<u64>,
 }
 
-/// The signed-in viewer's own state on a post.
+/// The signed-in viewer's own state on a tweet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ViewerPostState {
     pub liked: bool,
@@ -80,10 +80,10 @@ pub struct ViewerPostState {
     pub bookmarked: bool,
 }
 
-/// Content embedded below the post body.
+/// Content embedded below the tweet body.
 #[expect(
     clippy::large_enum_variant,
-    reason = "one embed per post; boxing adds indirection for no gain"
+    reason = "one embed per tweet; boxing adds indirection for no gain"
 )]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -93,7 +93,7 @@ pub enum Embed {
     Poll(Poll),
 }
 
-/// A post that may have been removed or hidden.
+/// A tweet that may have been removed or hidden.
 #[expect(clippy::large_enum_variant, reason = "always stored behind a Box in Embed::Quote")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -102,7 +102,7 @@ pub enum PostOrGone {
     Unavailable { reason: UnavailableReason },
 }
 
-/// Why a post cannot be shown.
+/// Why a tweet cannot be shown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "message", rename_all = "snake_case")]
 pub enum UnavailableReason {
@@ -125,7 +125,7 @@ pub struct LinkCard {
     pub domain: String,
 }
 
-/// A poll attached to a post.
+/// A poll attached to a tweet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Poll {
     pub options: Vec<PollOption>,

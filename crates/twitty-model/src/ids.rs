@@ -31,7 +31,7 @@ macro_rules! id_type {
 }
 
 id_type!(
-    /// Identifies a post. Opaque outside the backend that issued it.
+    /// Identifies a tweet. Opaque outside the backend that issued it.
     PostId
 );
 id_type!(

@@ -18,18 +18,18 @@ pub enum PageRequest {
     Older(PageToken),
 }
 
-/// A conversation around one post.
+/// A conversation around one tweet.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadView {
-    /// Posts above the focused one, oldest first.
+    /// Tweets above the focused one, oldest first.
     pub ancestors: Vec<Post>,
     pub focus: Post,
-    /// Replies below the focused post.
+    /// Replies below the focused tweet.
     pub replies: Vec<FeedItem>,
     pub more_replies: Option<PageToken>,
 }
 
-/// A change the viewer makes to a post.
+/// A change the viewer makes to a tweet.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PostAction {
     Like(PostId),
@@ -41,7 +41,7 @@ pub enum PostAction {
 }
 
 impl PostAction {
-    /// The post the action applies to.
+    /// The tweet the action applies to.
     pub fn post_id(&self) -> &PostId {
         match self {
             PostAction::Like(id)
@@ -98,7 +98,7 @@ pub struct RequestHealth {
     pub last_error: Option<String>,
 }
 
-/// A post being composed.
+/// A tweet being composed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Draft {
     pub text: String,
@@ -121,7 +121,7 @@ pub trait Backend: Send + Sync + 'static {
         page: PageRequest,
     ) -> BoxFuture<'a, Result<FeedPage, BackendError>>;
 
-    /// The conversation around a post.
+    /// The conversation around a tweet.
     fn thread<'a>(&'a self, id: &'a PostId) -> BoxFuture<'a, Result<ThreadView, BackendError>>;
 
     /// A profile by handle (without `@`).
@@ -134,7 +134,7 @@ pub trait Backend: Send + Sync + 'static {
         query: &'a str,
     ) -> BoxFuture<'a, Result<Vec<Profile>, BackendError>>;
 
-    /// Applies a viewer action to a post.
+    /// Applies a viewer action to a tweet.
     fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>>;
 
     /// Follows or unfollows `user`, returning where the viewer stands
@@ -145,7 +145,7 @@ pub trait Backend: Send + Sync + 'static {
         action: FollowAction,
     ) -> BoxFuture<'a, Result<FollowStatus, BackendError>>;
 
-    /// Publishes a new post and returns it.
+    /// Publishes a new tweet and returns it.
     fn publish(&self, draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>>;
 
     /// The request budget for loading `source`, if the provider has one.

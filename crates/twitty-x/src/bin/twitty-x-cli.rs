@@ -1,4 +1,4 @@
-//! Developer CLI for the X adapter: inspect the operation catalog, refresh
+//! Developer CLI for the Twitter adapter: inspect the operation catalog, refresh
 //! query ids, and capture raw responses for fixtures.
 //!
 //! Credentials come from `--session <file>` (`{"auth_token": "...", "ct0": "..."}`)

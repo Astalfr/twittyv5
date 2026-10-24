@@ -1,4 +1,4 @@
-//! Twitty's adapter for X's internal web GraphQL API.
+//! Twitty's adapter for Twitter's internal web GraphQL API.
 //!
 //! Layers (see `docs/x-api.md`):
 //! - [`transport`]: authenticated HTTP, cookie rotation, rate limits, retries;
@@ -6,10 +6,10 @@
 //! - [`XClient`]: GraphQL requests returning raw JSON;
 //! - [`XBackend`]: the `twitty-model` `Backend` port over `XClient` + `translate`.
 //!
-//! - [`translate`]: X JSON → `twitty-model` (the only code that knows both);
+//! - [`translate`]: Twitter JSON → `twitty-model` (the only code that knows both);
 //! - [`anonymise`]: scrubbing captures into committable test fixtures.
 //!
-//! X's JSON shapes stay inside this crate (`wire` is private); everything
+//! Twitter's JSON shapes stay inside this crate (`wire` is private); everything
 //! public returns `twitty-model` types or raw `serde_json::Value`s for tooling.
 
 #![forbid(unsafe_code)]

@@ -1,4 +1,4 @@
-//! End-to-end tests of the X client against a mock server (no real network).
+//! End-to-end tests of the Twitter client against a mock server (no real network).
 
 #![expect(clippy::unwrap_used, reason = "test helpers outside #[test] fns")]
 

@@ -1,6 +1,6 @@
 # Twitty
 
-A native X (Twitter) client in Rust + GPUI (via GPUI Kit). It uses X's internal web GraphQL API and has an X Pro / TweetDeck-style multi-column UI.
+A native Twitter client in Rust + GPUI (via GPUI Kit). It uses Twitter's internal web GraphQL API and has a TweetDeck-style multi-column UI.
 
 - Roadmap and milestones: [PLAN.md](PLAN.md)
 - How the project works: [docs/](docs/README.md). Read the relevant doc before changing a subsystem.
@@ -25,16 +25,16 @@ Windows 11 + PowerShell is the main dev environment.
 
 - **Crates**:
   - `twitty-model` holds the stable domain types and the `Backend` trait. It does no I/O and has no GPUI.
-  - `twitty-x` is the X adapter that implements `Backend`.
+  - `twitty-x` is the Twitter adapter that implements `Backend`.
   - `twitty` is the GPUI app.
   - Details are in [docs/architecture.md](docs/architecture.md).
-- **IMPORTANT: X's JSON shapes never leave `twitty-x`.**
+- **IMPORTANT: Twitter's JSON shapes never leave `twitty-x`.**
   - `twitty_x::wire` is `pub(crate)`, and only `twitty_x::translate` converts wire → model.
   - The UI, the caches and persisted files use `twitty-model` types only.
-  - Never add X field names (`legacy`, `rest_id`, `__typename`, …) to `twitty-model`.
+  - Never add Twitter field names (`legacy`, `rest_id`, `__typename`, …) to `twitty-model`.
   - See [docs/domain-model.md](docs/domain-model.md).
 - **Translation fails soft.** An entry that can't be parsed becomes `FeedItem::Unsupported` plus a `tracing::warn!`. It must never fail the whole page or panic.
-- **Opaque IDs**: X cursors, query IDs and IDs stay wrapped (`PageToken`, `PostId`, `UserId`). The UI never parses them.
+- **Opaque IDs**: Twitter cursors, query IDs and IDs stay wrapped (`PageToken`, `PostId`, `UserId`). The UI never parses them.
 - **Versioned persistence**: every on-disk format has a `schema_version` and a migration path. Changing a persisted type means adding a migration and a golden-file test.
 - **The UI depends on `dyn Backend`**, never on `XBackend` directly. UI work and UI tests use `MockBackend` (`twitty-model` feature `mock`).
 - **Logic lives in `twitty::state`** (plain Rust, unit tested); `twitty::ui` views only render state and forward input.
@@ -66,7 +66,7 @@ Windows 11 + PowerShell is the main dev environment.
   - Network calls run on the tokio runtime in `twitty::runtime` and are awaited from `cx.spawn`.
   - Never block the UI thread or call `block_on` inside GPUI.
 - **Spawned tasks** hold `WeakEntity`, never `Entity`. Don't keep entity borrows across `.await`. Call `cx.notify()` after mutating view state.
-- **Timelines** use `list()` + `ListState` (variable height). Don't use `uniform_list` / `v_virtual_list` for posts.
+- **Timelines** use `list()` + `ListState` (variable height). Don't use `uniform_list` / `v_virtual_list` for tweets.
 - **`ListState::set_scroll_handler` runs while the `ListState` is mutably borrowed.** Reading the list there panics, so `cx.defer` the reaction (see `ui/column.rs`).
 - **`overflow_hidden` clips to a rectangle, not to rounded corners.** Images inside rounded boxes must round their own outer corners (`rounded_img` + `media_layout::Corners` in `ui/post.rs`).
 - **A loaded `img` takes the bitmap's aspect ratio unless one is set, and it beats the given height.** An `img` sized to a box must also set `.aspect_ratio(w / h)` (see `rounded_img`).
@@ -79,8 +79,8 @@ Full strategy: [docs/testing.md](docs/testing.md).
 
 - **Every change ships with tests, in the same change.** Bug fixes start with a failing test that reproduces the bug.
 - **`translate` changes**: add or update an anonymised fixture in `crates/twitty-x/tests/fixtures/` plus an `insta` snapshot of the *model* output. The model snapshot of an existing fixture must not change unless the change is intended and explained.
-- **Text/entity code** (X's code-point offsets, spans, URL expansion) gets `proptest` property tests (never panics, spans in bounds, on char boundaries, not overlapping).
-- **New X samples** go through `twitty-x-cli anonymise` before they are committed; it refuses to write when a handle or name survives.
+- **Text/entity code** (Twitter's code-point offsets, spans, URL expansion) gets `proptest` property tests (never panics, spans in bounds, on char boundaries, not overlapping).
+- **New Twitter samples** go through `twitty-x-cli anonymise` before they are committed; it refuses to write when a handle or name survives.
 - **Transport behaviour** (headers, cookie rotation, 429 backoff, stale queryId refresh) is tested with `wiremock` in `crates/twitty-x/tests/transport.rs`. Tests never hit the real network, except the `#[ignore]` live suite.
 - **Compare JSON as parsed values, never as strings.** Feature unification turns on serde_json's `preserve_order` in workspace builds, so key order differs between `-p` and `--workspace` runs.
 - **UI state logic** goes in `twitty::state` with plain unit tests. View wiring is tested with `#[gpui_kit::test]` + `MockBackend` + `Runtime::inline()` (see the tests in `ui/column.rs`).
@@ -95,9 +95,9 @@ Don't weaken, `#[ignore]` or delete a test to make it pass. Fix the root cause.
 
 ## Docs
 
-- **Keep `docs/` accurate.** Any change to architecture, data flow, the X protocol handling, persisted formats or test strategy updates the matching doc in the same change.
+- **Keep `docs/` accurate.** Any change to architecture, data flow, the Twitter protocol handling, persisted formats or test strategy updates the matching doc in the same change.
 - **Non-obvious decisions** are recorded in [docs/decisions.md](docs/decisions.md).
-- **When X breaks** (stale query IDs, new fields, error 353, …), follow the runbook in [docs/x-api.md](docs/x-api.md) and record what changed.
+- **When Twitter breaks** (stale query IDs, new fields, error 353, …), follow the runbook in [docs/x-api.md](docs/x-api.md) and record what changed.
 
 ## Git
 

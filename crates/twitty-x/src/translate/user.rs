@@ -1,4 +1,4 @@
-//! X user results → `Profile`.
+//! Twitter user results → `Profile`.
 //!
 //! As of 2026-10 user objects carry `core`, `avatar`, `profile_bio`,
 //! `relationship_counts`, `verification`… and no `legacy` block. The older
