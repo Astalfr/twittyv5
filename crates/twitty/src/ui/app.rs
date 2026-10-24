@@ -4,9 +4,10 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use gpui_kit::{
     Animation, AnimationExt, AnyElement, AnyView, Context, Entity, FocusHandle, FontWeight,
-    IntoElement, ObjectFit, ParentElement, Render, ScrollHandle, Styled, StyledImage, Subscription,
-    Task, Window, assets::IconName, component::button::*, component::checkbox::Checkbox,
-    component::scroll::ScrollableElement, component::*, div, img, prelude::*, px,
+    ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render, Resource, ScrollHandle,
+    SharedUri, Styled, StyledImage, Subscription, Task, Window, assets::IconName,
+    component::button::*, component::checkbox::Checkbox, component::scroll::ScrollableElement,
+    component::*, div, img, prelude::*, px,
 };
 use twitty_model::{
     Backend, BackendError, FeedSource, Profile, SpanKind, UserRef, mock::MockBackend,
@@ -426,6 +427,21 @@ impl TwittyApp {
         };
         let playable = !matches!(media, twitty_model::Media::Image { .. });
         let url = post.url.to_string();
+        let viewport = window.viewport_size();
+        let (box_w, box_h) =
+            media_layout::viewer_box(viewport.width.into(), viewport.height.into(), count > 1);
+        let src = media.preview().url.as_str().to_owned();
+        // The loaded bitmap's size, from the cache entry the `img` draws.
+        let drawn = cx
+            .fetch_asset::<ImgResourceLoader>(&Resource::Uri(SharedUri::from(src.clone())))
+            .and_then(Result::ok)
+            .and_then(|image| {
+                let size = image.size(0);
+                media_layout::viewer_image_size(
+                    (size.width.0 as f32, size.height.0 as f32),
+                    (box_w, box_h),
+                )
+            });
         let nav = |id: &'static str, icon: IconName, delta: isize| {
             Button::new(id)
                 .ghost()
@@ -440,9 +456,6 @@ impl TwittyApp {
                     }))
                 })
         };
-        let viewport = window.viewport_size();
-        let (box_w, box_h) =
-            media_layout::viewer_box(viewport.width.into(), viewport.height.into(), count > 1);
         v_flex()
             .id("media-viewer")
             .size_full()
@@ -478,9 +491,11 @@ impl TwittyApp {
                     .when(count > 1, |d| d.child(nav("media-prev", IconName::ChevronLeft, -1)))
                     .child(
                         // An explicit box from the window size, so the image can't
-                        // push past the screen edge. The image itself has no size:
-                        // GPUI then uses the bitmap's own size, capped by the box,
-                        // so it is shrunk to fit but never blown up (pixelated).
+                        // push past the screen edge. The image is the bitmap's
+                        // own size shrunk to fit the box, never blown up
+                        // (pixelated). It is sized exactly: with only max sizes,
+                        // GPUI clamps each side on its own and letterboxes the
+                        // picture, and clicks on the bars would not close.
                         h_flex()
                             .flex_none()
                             .w(px(box_w))
@@ -488,13 +503,16 @@ impl TwittyApp {
                             .items_center()
                             .justify_center()
                             .child(
-                                img(media.preview().url.as_str().to_owned())
+                                img(src)
                                     .id("media-image")
+                                    .debug_selector(|| "media-image".into())
                                     .when(interactive, |i| {
                                         i.on_click(|_, _, cx| cx.stop_propagation())
                                     })
-                                    .max_w(px(box_w))
-                                    .max_h(px(box_h))
+                                    .map(|i| match drawn {
+                                        Some((w, h)) => i.w(px(w)).h(px(h)),
+                                        None => i.max_w(px(box_w)).max_h(px(box_h)),
+                                    })
                                     .object_fit(ObjectFit::Contain)
                                     .map(|i| {
                                         // Stepping to another image fades it in (not
@@ -2345,6 +2363,67 @@ mod tests {
         assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "columns don't move");
         cx.simulate_keystrokes("escape");
         assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()));
+    }
+
+    #[gpui_kit::test]
+    fn clicking_beside_the_picture_closes_the_media_viewer(cx: &mut TestAppContext) {
+        use image::{ImageFormat, Rgba, RgbaImage};
+        // A very wide bitmap: shrunk to the box's width, it is far shorter
+        // than its own 400 px.
+        let mut png = std::io::Cursor::new(Vec::new());
+        RgbaImage::from_pixel(4000, 400, Rgba([255, 0, 0, 255]))
+            .write_to(&mut png, ImageFormat::Png)
+            .unwrap();
+        let png = png.into_inner();
+        let (app, cx) = keyboard_app(cx);
+        cx.update(|_, cx| {
+            cx.set_http_client(gpui_kit::http_client::FakeHttpClient::create(move |_| {
+                let body = png.clone();
+                async move {
+                    Ok(gpui_kit::http_client::Response::builder()
+                        .status(200)
+                        .body(gpui_kit::http_client::AsyncBody::from(body))?)
+                }
+            }));
+        });
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let mut post = column
+            .read_with(cx, |c, _| {
+                c.model()
+                    .items()
+                    .iter()
+                    .flat_map(|i| i.posts())
+                    .find(|p| !p.media.is_empty())
+                    .cloned()
+            })
+            .expect("the mock has a post with media");
+        // Any URL: the client serves the wide bitmap.
+        let image = post.media[0].preview().clone();
+        post.media = vec![twitty_model::Media::Image { image, alt: None }];
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        let post = Arc::new(post);
+        let open = |cx: &mut VisualTestContext| {
+            let to = Navigate::Media { post: Arc::clone(&post), index: 0 };
+            hub.update(cx, |hub, cx| hub.navigate(to, cx));
+            cx.run_until_parked();
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            cx.debug_bounds("media-image").expect("image drawn")
+        };
+
+        let image = open(cx);
+        let aspect = image.size.width / image.size.height;
+        assert!((aspect - 10.0).abs() < 0.1, "the element is the picture: {image:?}");
+        cx.simulate_click(image.center(), Modifiers::default());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_some()), "the picture keeps it");
+
+        // Above the picture, where GPUI used to letterbox it inside the element.
+        let above = point(image.center().x, image.top() - px(10.));
+        assert!(image.size.height < px(380.), "room above: {image:?}");
+        cx.simulate_click(above, Modifiers::default());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()), "beside it closes");
     }
 
     /// Opens the thread panel on `root` and draws a frame so it has a hitbox.

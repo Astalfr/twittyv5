@@ -127,12 +127,41 @@ pub fn viewer_box(width: f32, height: f32, has_nav: bool) -> (f32, f32) {
     (w.max(0.0), h.max(0.0))
 }
 
+/// The size the image viewer draws a `bitmap` (width, height) at inside
+/// `bounds` (from [`viewer_box`]): shrunk to fit with its aspect ratio kept,
+/// never enlarged. The image element must be exactly this size, or clicks
+/// on the letterbox around the picture land on the image instead of the
+/// backdrop. `None` for an empty bitmap.
+pub fn viewer_image_size(bitmap: (f32, f32), bounds: (f32, f32)) -> Option<(f32, f32)> {
+    let (w, h) = bitmap;
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let scale = (bounds.0 / w).min(bounds.1 / h).clamp(0.0, 1.0);
+    Some((w * scale, h * scale))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn approx(a: f32, b: f32) -> bool {
         (a - b).abs() < 0.01
+    }
+
+    #[test]
+    fn viewer_image_fits_its_box_keeping_its_aspect() {
+        let fits = |bitmap, bounds| viewer_image_size(bitmap, bounds).unwrap();
+        // Wider than the box: the width limits, the height follows.
+        let (w, h) = fits((1200.0, 800.0), (1000.0, 700.0));
+        assert!(approx(w, 1000.0) && approx(h, 666.67), "{w}×{h}");
+        // Taller than the box: the height limits.
+        let (w, h) = fits((800.0, 1200.0), (1000.0, 600.0));
+        assert!(approx(w, 400.0) && approx(h, 600.0), "{w}×{h}");
+        // Smaller than the box: never blown up.
+        assert_eq!(fits((300.0, 200.0), (1000.0, 700.0)), (300.0, 200.0));
+        assert_eq!(fits((300.0, 200.0), (0.0, 0.0)), (0.0, 0.0));
+        assert_eq!(viewer_image_size((0.0, 200.0), (1000.0, 700.0)), None);
     }
 
     #[test]
