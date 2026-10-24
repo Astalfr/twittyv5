@@ -16,7 +16,8 @@ actions!(
         ColumnRight,
         /// Like / unlike the selected post.
         LikeSelected,
-        /// Repost / undo the repost of the selected post.
+        /// Ask whether to repost (or undo the repost of) the selected post,
+        /// or quote it.
         RepostSelected,
         /// Bookmark / remove the bookmark of the selected post.
         BookmarkSelected,
@@ -28,6 +29,10 @@ actions!(
         NewPost,
         /// Close the image viewer, dialog or thread panel.
         Dismiss,
+        /// Repost (or undo the repost) from the repost dialog.
+        ConfirmRepost,
+        /// Quote the post instead, from the repost dialog.
+        QuoteInstead,
     ]
 );
 
@@ -35,19 +40,22 @@ actions!(
 pub const DECK: &str = "Deck";
 /// Key context of a dialog overlay.
 pub const OVERLAY: &str = "Overlay";
+/// Key context of the repost dialog (inside the overlay).
+pub const REPOST_DIALOG: &str = "RepostDialog";
 
 /// Every shortcut, as shown in the settings page: (keys, what they do).
-pub const HELP: [(&str, &str); 10] = [
+pub const HELP: [(&str, &str); 11] = [
     ("j / k", "Next / previous post"),
     ("← / →", "Previous / next column (or image)"),
     ("Enter", "Open the conversation"),
     ("l", "Like"),
-    ("t", "Repost"),
+    ("t", "Repost or quote (asks first)"),
     ("b", "Bookmark"),
     ("r", "Reply"),
     ("n", "New post"),
     ("Esc", "Close image, dialog or panel"),
     ("Enter (in a dialog)", "Submit"),
+    ("q (in the repost dialog)", "Quote"),
 ];
 
 /// Registers the shortcuts.
@@ -68,5 +76,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("n", NewPost, deck),
         KeyBinding::new("escape", Dismiss, deck),
         KeyBinding::new("escape", Dismiss, Some(OVERLAY)),
+        KeyBinding::new("enter", ConfirmRepost, Some(REPOST_DIALOG)),
+        KeyBinding::new("q", QuoteInstead, Some(REPOST_DIALOG)),
     ]);
 }

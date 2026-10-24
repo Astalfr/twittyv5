@@ -24,6 +24,8 @@ pub enum Navigate {
     Thread(PostId),
     /// Compose a reply to a post.
     Reply(Arc<Post>),
+    /// Ask whether to repost (or undo the repost of) a post, or quote it.
+    Repost(Arc<Post>),
     /// Show an account's profile.
     Profile(Arc<Profile>),
     /// Show the profile of an account mentioned in a text, which must be

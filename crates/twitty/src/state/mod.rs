@@ -18,6 +18,7 @@ pub mod motion;
 pub mod playback;
 pub mod poll;
 pub mod profile;
+pub mod repost;
 pub mod settings;
 pub mod sources;
 pub mod thread;

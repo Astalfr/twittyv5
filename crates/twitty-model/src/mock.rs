@@ -532,6 +532,13 @@ impl Backend for MockBackend {
     fn publish(&self, draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>> {
         Box::pin(async move {
             self.take_failure()?;
+            // Looked up before taking the lock, which `find_post` takes too.
+            let embed = draft.quote.as_ref().map(|q| Embed::Quote {
+                quoted: Box::new(match self.find_post(q) {
+                    Some(post) => PostOrGone::Post(post),
+                    None => PostOrGone::Unavailable { reason: UnavailableReason::Deleted },
+                }),
+            });
             let mut st = self.lock();
             let id = st.next_post_id();
             let author = Arc::clone(&st.authors[0]);
@@ -542,7 +549,7 @@ impl Backend for MockBackend {
                 created_at: Utc::now(),
                 body: RichText::plain(draft.text),
                 media: Vec::new(),
-                embed: None,
+                embed,
                 reply_to: draft.reply_to.map(|p| crate::ReplyRef {
                     post: Some(p),
                     user: None,
@@ -781,6 +788,18 @@ mod tests {
         assert_eq!(handles("ADA"), ["ada"]);
         assert_eq!(handles("hopper"), ["grace"]);
         assert!(handles("nobody here").is_empty());
+    }
+
+    #[test]
+    fn a_published_quote_embeds_the_quoted_post() {
+        let backend = MockBackend::new();
+        let page = block_on(backend.feed(&home(), PageRequest::First)).unwrap();
+        let quoted = page.items[0].posts()[0].clone();
+        let draft =
+            Draft { text: "look".into(), quote: Some(quoted.id.clone()), ..Default::default() };
+        let post = block_on(backend.publish(draft)).unwrap();
+        let Some(Embed::Quote { quoted: embed }) = post.embed else { panic!("{:?}", post.embed) };
+        assert_eq!(*embed, PostOrGone::Post(quoted));
     }
 
     #[test]

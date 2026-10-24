@@ -35,6 +35,7 @@ depends on nothing else of ours.
 |---|---|
 | `state::column` | `ColumnModel`: paging, cursors, de-duplication, unseen count, `ListChange` instructions for the view |
 | `state::interactions` | Optimistic like/repost/bookmark overrides with rollback |
+| `state::repost` | What the repost dialog offers (repost or undo) from the viewer's effective state |
 | `state::follow` | The profile sheet's Follow button: optimistic follow/unfollow, rollback with the reason, protected accounts' requests, late profile refreshes ignored after a click |
 | `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move, `ColumnSettings` (name, width, alerts) |
 | `state::alerts` | Which loads announce new rows, and the notification text |
@@ -95,7 +96,7 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - `TwittyApp` (root view) owns the `DeckFile`, the column views and the shared `InteractionsHub`.
 - Each `ColumnView` owns its `ColumnModel` (rows + cursors) and its `ListState`. The list has one extra footer row (spinner, retry, "caught up").
 - The viewer's likes, reposts and bookmarks are overrides in `InteractionsHub`, so every column shows the change instantly. Failures roll back.
-- Post rows don't know about panels or dialogs: they emit `hub::Navigate` (`Thread`, `Reply`, `Profile`, `UserColumn`, `Media`) through the hub, and `TwittyApp` opens the thread panel, the compose dialog, the profile sheet, a User column or the image viewer. The thread panel and the profile sheet share one side-sheet slot (`Sheet` in `ui/app.rs`).
+- Post rows don't know about panels or dialogs: they emit `hub::Navigate` (`Thread`, `Reply`, `Repost`, `Profile`, `Mention`, `UserColumn`, `Media`) through the hub, and `TwittyApp` opens the thread panel, the compose dialog, the repost dialog (whose Quote opens compose), the profile sheet, a User column or the image viewer. The thread panel and the profile sheet share one side-sheet slot (`Sheet` in `ui/app.rs`).
 - Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`. Saves are chained (`TwittyApp::persist`), so quick edits never interleave their writes.
 - New-post alerts: a column checks `state::alerts::announce` after each load. The sound goes through the `sound::Sound` global (`SystemSound` from `main.rs`; no global in tests means silence, `RecordingSound` records). System notifications use GPUI's `show_system_notification`, which needs the app identity `main.rs` sets first (`cx.set_app_identity`).
 - Inline GIFs: `ui::post::media_grid` adds `ui::gif::inline_gif` over each GIF tile, keyed by the post and media index inside `RowCtx::scope` (one per list: a column, the thread panel, the profile sheet), so the same post in two columns plays separately. Whether it plays is `state::playback::gif_plays` (the viewer's choice, else the autoplay setting).

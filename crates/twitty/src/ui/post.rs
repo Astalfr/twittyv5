@@ -1036,6 +1036,77 @@ fn quote_card(
         }))
 }
 
+/// A post as a dialog shows it (the repost dialog, a quote being written):
+/// bordered like a quote card, with its author, text and first media, but
+/// inert, since a click there must not open anything behind the dialog.
+/// `name` makes its debug selectors (`{name}-body`, `{name}-media`) unique.
+/// The text is clamped to `lines` and the media to `max_media` px high.
+pub(crate) fn post_preview(
+    name: &'static str,
+    post: &Post,
+    showing_original: bool,
+    width: f32,
+    (lines, max_media): (usize, f32),
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    let shown = translation::shown(post, showing_original);
+    v_flex()
+        .debug_selector(move || name.to_owned())
+        .w(px(width))
+        .rounded(px(16.))
+        .border_1()
+        .border_color(theme.border)
+        .overflow_hidden()
+        .child(
+            v_flex()
+                .px_3()
+                .pt_3()
+                .pb_2()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .min_w_0()
+                        .child(avatar(&post.author, 20.0))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::BOLD)
+                                .truncate()
+                                .child(post.author.display_name.clone()),
+                        )
+                        .child(div().text_color(theme.muted_foreground).truncate().child(format!(
+                            "@{} · {}",
+                            post.author.handle,
+                            relative_time(post.created_at, Utc::now())
+                        ))),
+                )
+                .child(
+                    div()
+                        .debug_selector(move || format!("{name}-body"))
+                        .line_clamp(lines)
+                        .text_color(theme.foreground)
+                        .child(shown.body.text().to_owned()),
+                ),
+        )
+        .children(post.media.first().map(|m| {
+            let inner = (width - 2.0 * BORDER).max(0.0);
+            let h = media_layout::layout(1, m.preview().aspect(), inner).height.min(max_media);
+            div()
+                .debug_selector(move || format!("{name}-media"))
+                .relative()
+                .w_full()
+                .h(px(h))
+                .child(rounded_img(
+                    remote_image::source(m.preview().url.as_str(), inner, h),
+                    inner,
+                    h,
+                    media_layout::Corners::BOTTOM,
+                ))
+                .children(media_badge(m))
+        }))
+}
+
 fn link_card(
     id: (&'static str, usize),
     card: &LinkCard,
@@ -1137,6 +1208,8 @@ impl IfEmpty for String {
 enum Click {
     Toggle(Toggle),
     Reply,
+    /// Opens the repost dialog, which reposts, undoes or quotes.
+    Repost,
     Nothing,
 }
 
@@ -1170,7 +1243,7 @@ fn action_icon_path(icon: IconName, on: Click, active: bool) -> SharedString {
 fn hover_color(on: Click, theme: &gpui_kit::component::Theme) -> Hsla {
     match on {
         Click::Toggle(Toggle::Like) => theme.red,
-        Click::Toggle(Toggle::Repost) => theme.green,
+        Click::Repost => theme.green,
         _ => theme.primary,
     }
 }
@@ -1214,12 +1287,20 @@ fn action_bar(
                         let to = Navigate::Reply(Arc::clone(&post));
                         hub.update(cx, |hub, cx| hub.navigate(to, cx));
                     }
+                    Click::Repost => {
+                        let to = Navigate::Repost(Arc::clone(&post));
+                        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+                    }
                     Click::Nothing => {}
                 }
             })
             .child(action_icon(
                 action_icon_path(icon, on, active.is_some()),
-                matches!(on, Click::Toggle(t) if pops.contains(&t)),
+                match on {
+                    Click::Toggle(t) => pops.contains(&t),
+                    Click::Repost => pops.contains(&Toggle::Repost),
+                    Click::Reply | Click::Nothing => false,
+                },
             ))
             .when_some(count, |d, (n, (one, many))| {
                 let full: SharedString = exact_count(n, one, many).into();
@@ -1250,7 +1331,7 @@ fn action_bar(
             IconName::Repeat2,
             Some((m.reposts + m.quotes, ("Repost", "Reposts"))),
             eff.viewer.reposted.then_some(theme.green),
-            Click::Toggle(Toggle::Repost),
+            Click::Repost,
         ))
         .child(action(
             "like",
@@ -1743,6 +1824,16 @@ mod tests {
         seen.take()
     }
 
+    #[gpui_kit::test]
+    fn the_repost_button_asks_first(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, _) = mock_post();
+        let id = post.id.clone();
+        let seen = navigations(cx, FeedItem::Post(post), "action-repost-0");
+        let [Navigate::Repost(asked)] = seen.as_slice() else { panic!("{seen:?}") };
+        assert_eq!(asked.id, id);
+    }
+
     /// The mock post translated from French.
     fn translated_post() -> Post {
         mock_items(twitty_model::FeedSource::Bookmarks)
@@ -2032,7 +2123,7 @@ mod tests {
             gpui_kit::init(cx);
             let theme = cx.theme();
             assert_eq!(hover_color(Click::Toggle(Toggle::Like), theme), theme.red);
-            assert_eq!(hover_color(Click::Toggle(Toggle::Repost), theme), theme.green);
+            assert_eq!(hover_color(Click::Repost, theme), theme.green);
             assert_eq!(hover_color(Click::Toggle(Toggle::Bookmark), theme), theme.primary);
             assert_eq!(hover_color(Click::Reply, theme), theme.primary);
         });
@@ -2042,7 +2133,7 @@ mod tests {
     fn liked_and_bookmarked_icons_fill_in() {
         let like = Click::Toggle(Toggle::Like);
         let bookmark = Click::Toggle(Toggle::Bookmark);
-        let repost = Click::Toggle(Toggle::Repost);
+        let repost = Click::Repost;
         assert_eq!(action_icon_path(IconName::Heart, like, true).as_ref(), HEART_FILL);
         assert_eq!(action_icon_path(IconName::Heart, like, false), IconName::Heart.path());
         assert_eq!(action_icon_path(IconName::Bookmark, bookmark, true).as_ref(), BOOKMARK_FILL);

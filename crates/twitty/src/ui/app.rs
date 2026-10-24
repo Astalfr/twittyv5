@@ -17,12 +17,14 @@ use crate::{
     account::{AccountServices, SessionSource},
     runtime::Runtime,
     state::{
+        compose::ComposeTarget,
         deck::{ColumnConfig, ColumnId, ColumnSettings, DeckFile, DeckIcon},
         interactions::Toggle,
         media_layout::{self, viewer},
         motion,
         playback::{self, Autoplay, State},
         poll,
+        repost::RepostChoice,
         settings::Settings,
         toasts::{Notice, Toasts},
     },
@@ -40,6 +42,7 @@ use crate::{
         player::{Options as PlayerOptions, Quality, VideoPlayer, play_pause_sign},
         post::span_url,
         profile::{CloseProfile, ProfilePanel},
+        repost::{RepostEvent, RepostView},
         theme,
         thread::{CloseThread, ThreadPanel},
         title_bar, toasts as toast_view,
@@ -83,7 +86,7 @@ struct Leaving<T> {
 enum LeavingOverlay {
     Media(Arc<twitty_model::Post>, usize),
     /// A dialog view: sign-in, add column, column or deck settings, compose,
-    /// people search.
+    /// repost, people search.
     View(AnyView),
     Account,
     Settings,
@@ -145,6 +148,7 @@ pub struct TwittyApp {
     column_settings: Option<Entity<ColumnSettingsView>>,
     deck_settings: Option<Entity<DeckSettingsView>>,
     compose: Option<Entity<ComposeView>>,
+    repost: Option<Entity<RepostView>>,
     user_search: Option<Entity<UserSearchView>>,
     /// The side sheet: a conversation or a profile.
     sheet: Option<Sheet>,
@@ -179,6 +183,7 @@ pub struct TwittyApp {
     _column_settings_sub: Option<Subscription>,
     _deck_settings_sub: Option<Subscription>,
     _compose_sub: Option<Subscription>,
+    _repost_sub: Option<Subscription>,
     _user_search_sub: Option<Subscription>,
     _sheet_sub: Option<Subscription>,
     _hub_subs: Vec<Subscription>,
@@ -225,6 +230,7 @@ impl TwittyApp {
             column_settings: None,
             deck_settings: None,
             compose: None,
+            repost: None,
             user_search: None,
             sheet: None,
             mention_lookup: None,
@@ -247,6 +253,7 @@ impl TwittyApp {
             _column_settings_sub: None,
             _deck_settings_sub: None,
             _compose_sub: None,
+            _repost_sub: None,
             _user_search_sub: None,
             _sheet_sub: None,
             _hub_subs: Vec::new(),
@@ -370,11 +377,16 @@ impl TwittyApp {
         self.compose.as_ref()
     }
 
+    pub fn repost_dialog(&self) -> Option<&Entity<RepostView>> {
+        self.repost.as_ref()
+    }
+
     /// Handles a request from a post row.
     pub fn navigate(&mut self, to: Navigate, window: &mut Window, cx: &mut Context<Self>) {
         match to {
             Navigate::Thread(id) => self.open_thread(id, cx),
-            Navigate::Reply(post) => self.open_compose(Some(post), window, cx),
+            Navigate::Reply(post) => self.open_compose(ComposeTarget::Reply(post), window, cx),
+            Navigate::Repost(post) => self.open_repost(post, window, cx),
             Navigate::Profile(p) => self.open_profile(p, cx),
             Navigate::Mention(user) => self.open_mention(user, cx),
             Navigate::UserColumn(p) => {
@@ -462,6 +474,7 @@ impl TwittyApp {
             || self.column_settings.is_some()
             || self.deck_settings.is_some()
             || self.compose.is_some()
+            || self.repost.is_some()
             || self.user_search.is_some()
             || self.account_panel
             || self.settings_panel
@@ -506,6 +519,12 @@ impl TwittyApp {
         }
         let column = self.active_view()?;
         column.read(cx).model().selected_post().cloned().map(Arc::new)
+    }
+
+    fn repost_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(post) = self.selected_post(cx) {
+            self.open_repost(post, window, cx);
+        }
     }
 
     fn toggle_selected(&mut self, toggle: Toggle, cx: &mut Context<Self>) {
@@ -823,19 +842,21 @@ impl TwittyApp {
         cx.notify();
     }
 
-    /// Shows the compose dialog, for a reply when `reply_to` is set.
+    /// Shows the compose dialog, for a new post, a reply or a quote.
     pub fn open_compose(
         &mut self,
-        reply_to: Option<Arc<twitty_model::Post>>,
+        target: ComposeTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let backend = Arc::clone(&self.backend);
-        let view = cx.new(|cx| ComposeView::new(backend, reply_to, window, cx));
-        self._compose_sub = Some(cx.subscribe(&view, |this, _, e: &ComposeEvent, cx| {
+        let view = cx.new(|cx| ComposeView::new(backend, target, window, cx));
+        self._compose_sub = Some(cx.subscribe(&view, |this, view, e: &ComposeEvent, cx| {
             if let ComposeEvent::Published(post) = e {
                 tracing::info!("published post {}", post.id);
-                this.show_toast(Notice::published(post), cx);
+                // From what was sent: X's answer may leave the quote out.
+                let notice = Notice::published(view.read(cx).target());
+                this.show_toast(notice, cx);
                 // A reply shows up in the open conversation.
                 let parent = post.reply_to.as_ref().and_then(|r| r.post.as_ref());
                 if let Some(panel) = this.thread_panel()
@@ -847,6 +868,41 @@ impl TwittyApp {
             this.close_overlays(cx);
         }));
         self.compose = Some(view);
+        self.account_panel = false;
+        cx.notify();
+    }
+
+    /// Asks whether to repost `post` (or undo its repost), or quote it.
+    pub fn open_repost(
+        &mut self,
+        post: Arc<twitty_model::Post>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let hub = self.hub.read(cx);
+        let choice = RepostChoice::for_post(&hub.effective(&post));
+        let original = hub.showing_original(&post.id);
+        let shown = Arc::clone(&post);
+        let view = cx.new(|cx| RepostView::new(shown, choice, original, window, cx));
+        self._repost_sub =
+            Some(cx.subscribe_in(&view, window, move |this, _, e: &RepostEvent, window, cx| {
+                this.close_overlays(cx);
+                match e {
+                    // Only when nothing changed it meanwhile, so the toggle
+                    // does what the button said.
+                    RepostEvent::Confirm(choice)
+                        if RepostChoice::for_post(&this.hub.read(cx).effective(&post))
+                            == *choice =>
+                    {
+                        this.hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Repost, cx));
+                    }
+                    RepostEvent::Quote => {
+                        this.open_compose(ComposeTarget::Quote(Arc::clone(&post)), window, cx);
+                    }
+                    RepostEvent::Confirm(_) | RepostEvent::Dismissed => {}
+                }
+            }));
+        self.repost = Some(view);
         self.account_panel = false;
         cx.notify();
     }
@@ -951,6 +1007,8 @@ impl TwittyApp {
             Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.compose {
             Some(LeavingOverlay::View(view.clone().into()))
+        } else if let Some(view) = &self.repost {
+            Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.user_search {
             Some(LeavingOverlay::View(view.clone().into()))
         } else if self.account_panel {
@@ -977,6 +1035,8 @@ impl TwittyApp {
         self._deck_settings_sub = None;
         self.compose = None;
         self._compose_sub = None;
+        self.repost = None;
+        self._repost_sub = None;
         self.user_search = None;
         self._user_search_sub = None;
         self.account_panel = false;
@@ -1658,13 +1718,16 @@ impl TwittyApp {
             label: label.into(),
             selected: false,
         };
-        let compose = Button::new("compose")
-            .debug_selector(|| "rail-compose".into())
-            .primary()
-            .icon(Icon::new(IconName::PenLine).size(px(22.)))
-            .rounded_full()
-            .h(px(52.))
-            .on_click(cx.listener(|this, _, window, cx| this.open_compose(None, window, cx)));
+        let compose =
+            Button::new("compose")
+                .debug_selector(|| "rail-compose".into())
+                .primary()
+                .icon(Icon::new(IconName::PenLine).size(px(22.)))
+                .rounded_full()
+                .h(px(52.))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_compose(ComposeTarget::New, window, cx)
+                }));
         let compose = if expanded {
             compose.text_button(Size::Large).label("Post").w_full().h(px(48.))
         } else {
@@ -1855,6 +1918,8 @@ impl Render for TwittyApp {
             Some(("deck-settings", true, view.clone().into_any_element()))
         } else if let Some(compose) = &self.compose {
             Some(("compose", true, compose.clone().into_any_element()))
+        } else if let Some(view) = &self.repost {
+            Some(("repost", true, view.clone().into_any_element()))
         } else if let Some(view) = &self.user_search {
             Some(("user-search", true, view.clone().into_any_element()))
         } else if self.account_panel {
@@ -1940,15 +2005,15 @@ impl Render for TwittyApp {
                     .on_action(cx.listener(|this, _: &keys::LikeSelected, _, cx| {
                         this.toggle_selected(Toggle::Like, cx)
                     }))
-                    .on_action(cx.listener(|this, _: &keys::RepostSelected, _, cx| {
-                        this.toggle_selected(Toggle::Repost, cx)
+                    .on_action(cx.listener(|this, _: &keys::RepostSelected, window, cx| {
+                        this.repost_selected(window, cx)
                     }))
                     .on_action(cx.listener(|this, _: &keys::BookmarkSelected, _, cx| {
                         this.toggle_selected(Toggle::Bookmark, cx)
                     }))
                     .on_action(cx.listener(|this, _: &keys::ReplySelected, window, cx| {
                         if let Some(post) = this.selected_post(cx) {
-                            this.open_compose(Some(post), window, cx);
+                            this.open_compose(ComposeTarget::Reply(post), window, cx);
                         }
                     }))
                     .on_action(cx.listener(|this, _: &keys::OpenSelected, _, cx| {
@@ -1958,7 +2023,7 @@ impl Render for TwittyApp {
                     }))
                     .on_action(cx.listener(|this, _: &keys::NewPost, window, cx| {
                         if this.media.is_none() {
-                            this.open_compose(None, window, cx);
+                            this.open_compose(ComposeTarget::New, window, cx);
                         }
                     }))
                     .on_action(cx.listener(|this, _: &keys::Dismiss, _, cx| this.dismiss(cx)))
@@ -3127,6 +3192,81 @@ mod tests {
         assert_eq!(kind, crate::state::toasts::ToastKind::Error);
     }
 
+    /// Lets a just-opened dialog take the keyboard.
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn t_asks_before_reposting_and_holds_the_keyboard(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        let (app, cx) = keyboard_app_on(backend.clone(), cx);
+        cx.simulate_keystrokes("j t");
+        draw(cx);
+        let dialog = app.read_with(cx, |app, _| app.repost_dialog().cloned()).expect("asks first");
+        let post = dialog.read_with(cx, |d, _| Arc::clone(d.post()));
+        assert_eq!(dialog.read_with(cx, |d, _| d.choice()), RepostChoice::Repost);
+        assert!(backend.actions().is_empty(), "nothing sent before confirming");
+
+        // Deck shortcuts don't act behind the dialog.
+        cx.simulate_keystrokes("j l t");
+        assert_eq!(selected(&app, cx), Some(0));
+        assert!(backend.actions().is_empty());
+
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.repost_dialog().is_none()), "closed");
+        assert_eq!(backend.actions(), [twitty_model::PostAction::Repost(post.id.clone())]);
+        assert!(app.read_with(cx, |app, cx| app.hub.read(cx).effective(&post).viewer.reposted));
+
+        // Asked again, it offers to undo; Esc changes nothing.
+        draw(cx);
+        cx.simulate_keystrokes("t");
+        draw(cx);
+        let dialog = app.read_with(cx, |app, _| app.repost_dialog().cloned()).expect("asks again");
+        assert_eq!(dialog.read_with(cx, |d, _| d.choice()), RepostChoice::Undo);
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.repost_dialog().is_none()));
+        assert_eq!(backend.actions().len(), 1);
+
+        draw(cx);
+        cx.simulate_keystrokes("t");
+        draw(cx);
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(backend.actions()[1], twitty_model::PostAction::Unrepost(post.id.clone()));
+    }
+
+    #[gpui_kit::test]
+    fn the_repost_button_quotes_from_its_dialog(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        let (app, cx) = keyboard_app_on(backend.clone(), cx);
+        let post = first_post(&app, cx);
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Repost(Arc::clone(&post)), cx));
+        draw(cx);
+        assert!(app.read_with(cx, |app, _| app.repost_dialog().is_some()));
+        cx.simulate_keystrokes("q");
+        draw(cx);
+        assert!(app.read_with(cx, |app, _| app.repost_dialog().is_none()));
+        let compose = app.read_with(cx, |app, _| app.compose().cloned()).expect("compose open");
+        assert_eq!(
+            compose.read_with(cx, |c, _| c.target().clone()),
+            ComposeTarget::Quote(Arc::clone(&post))
+        );
+        // The text field has the keyboard, so `q` and the rest are typed.
+        cx.simulate_keystrokes("q j");
+        assert_eq!(compose.read_with(cx, |c, cx| c.text_value(cx)), "qj");
+        compose.update(cx, |c, cx| c.submit(cx));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.compose().is_none()), "closed after posting");
+        assert!(backend.actions().is_empty(), "a quote is a post, not a repost");
+        assert_eq!(toast_texts(&app, cx), ["Quote sent"]);
+    }
+
     #[gpui_kit::test]
     fn n_opens_compose_and_typing_there_is_not_a_shortcut(cx: &mut TestAppContext) {
         let (app, cx) = keyboard_app(cx);
@@ -3560,8 +3700,13 @@ mod tests {
         let store = MemoryStore::default();
         let (app, cx) = start(cx, MockBackend::new(), None, &store);
         let column = app.read_with(cx, |app, _| app.columns[0].0);
-        let openers: [(&str, OpenDialog); 7] = [
-            ("compose", |app, _, window, cx| app.open_compose(None, window, cx)),
+        let openers: [(&str, OpenDialog); 8] = [
+            ("compose", |app, _, window, cx| app.open_compose(ComposeTarget::New, window, cx)),
+            ("repost", |app, _, window, cx| {
+                let column = app.columns[0].1.read(cx);
+                let post = column.model().items().iter().flat_map(|i| i.posts()).next().cloned();
+                app.open_repost(Arc::new(post.expect("the column has posts")), window, cx);
+            }),
             ("search people", |app, _, window, cx| app.open_user_search(window, cx)),
             ("add column", |app, _, window, cx| app.open_add_column(window, cx)),
             ("column settings", |app, id, window, cx| app.open_column_settings(id, window, cx)),

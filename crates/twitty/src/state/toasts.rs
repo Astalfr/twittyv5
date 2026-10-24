@@ -5,7 +5,9 @@
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use twitty_model::{BackendError, FollowAction, Post, PostAction};
+use twitty_model::{BackendError, FollowAction, PostAction};
+
+use crate::state::compose::ComposeTarget;
 
 /// How long a success stays up.
 pub const SUCCESS_TTL: Duration = Duration::from_millis(3000);
@@ -64,9 +66,13 @@ impl Notice {
         Self::error(format!("Couldn't {what}: {}", reason(error, now)))
     }
 
-    /// A post or reply was sent.
-    pub fn published(post: &Post) -> Self {
-        Self::success(if post.reply_to.is_some() { "Reply sent" } else { "Post sent" })
+    /// A post, reply or quote of `target` was sent.
+    pub fn published(target: &ComposeTarget) -> Self {
+        Self::success(match target {
+            ComposeTarget::New => "Post sent",
+            ComposeTarget::Reply(_) => "Reply sent",
+            ComposeTarget::Quote(_) => "Quote sent",
+        })
     }
 
     /// A follow change went through, for the account `@handle`.
@@ -289,6 +295,20 @@ mod tests {
             reason(&BackendError::Network("tls".into()), now),
             "no connection to the server"
         );
+    }
+
+    #[test]
+    fn published_says_what_was_sent() {
+        use twitty_model::{Backend, Draft, mock::MockBackend};
+        let backend = MockBackend::new();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let post = rt.block_on(backend.publish(Draft::default())).unwrap();
+        let post = std::sync::Arc::new(post);
+        assert_eq!(Notice::published(&ComposeTarget::New), Notice::success("Post sent"));
+        let reply = ComposeTarget::Reply(std::sync::Arc::clone(&post));
+        assert_eq!(Notice::published(&reply), Notice::success("Reply sent"));
+        let quote = ComposeTarget::Quote(post);
+        assert_eq!(Notice::published(&quote), Notice::success("Quote sent"));
     }
 
     #[test]

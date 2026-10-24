@@ -17,6 +17,7 @@ pub mod player;
 pub mod post;
 pub mod profile;
 pub mod remote_image;
+pub mod repost;
 pub mod theme;
 pub mod thread;
 pub mod title_bar;

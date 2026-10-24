@@ -1,4 +1,5 @@
-//! The compose dialog: write a post or a reply, with X's length counter.
+//! The compose dialog: write a post, a reply or a quote, with X's length
+//! counter.
 
 use std::sync::Arc;
 
@@ -11,9 +12,14 @@ use twitty_model::{Backend, BackendError, Post};
 
 use crate::{
     runtime::Runtime,
-    state::compose::{self, MAX_LENGTH},
-    ui::button::TextButton,
+    state::compose::{self, ComposeTarget, MAX_LENGTH},
+    ui::{button::TextButton, post::post_preview},
 };
+
+/// Width of the dialog card.
+const WIDTH: f32 = 560.;
+/// Its padding on each side (`p_6`).
+const PADDING: f32 = 24.;
 
 /// What the dialog reports to the app.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,7 +33,7 @@ impl EventEmitter<ComposeEvent> for ComposeView {}
 
 /// The compose dialog's view.
 pub struct ComposeView {
-    reply_to: Option<Arc<Post>>,
+    target: ComposeTarget,
     text: Entity<TextareaState>,
     backend: Arc<dyn Backend>,
     error: Option<String>,
@@ -38,7 +44,7 @@ pub struct ComposeView {
 impl std::fmt::Debug for ComposeView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ComposeView")
-            .field("reply_to", &self.reply_to.as_ref().map(|p| &p.id))
+            .field("target", &self.target)
             .field("error", &self.error)
             .finish_non_exhaustive()
     }
@@ -47,25 +53,38 @@ impl std::fmt::Debug for ComposeView {
 impl ComposeView {
     pub fn new(
         backend: Arc<dyn Backend>,
-        reply_to: Option<Arc<Post>>,
+        target: ComposeTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let placeholder = if reply_to.is_some() { "Post your reply" } else { "What's happening?" };
+        let placeholder = match target {
+            ComposeTarget::New => "What's happening?",
+            ComposeTarget::Reply(_) => "Post your reply",
+            ComposeTarget::Quote(_) => "Add a comment",
+        };
         let text =
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 12).placeholder(placeholder));
         // Re-render on every edit so the counter follows the text.
         let sub = cx.subscribe(&text, |_, _, _: &InputEvent, cx| cx.notify());
         text.update(cx, |s, cx| s.focus(window, cx));
-        Self { reply_to, text, backend, error: None, sending: None, _subs: vec![sub] }
+        Self { target, text, backend, error: None, sending: None, _subs: vec![sub] }
+    }
+
+    pub fn target(&self) -> &ComposeTarget {
+        &self.target
     }
 
     pub fn reply_to(&self) -> Option<&Arc<Post>> {
-        self.reply_to.as_ref()
+        self.target.reply_to()
     }
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    /// The text as typed.
+    pub fn text_value(&self, cx: &gpui_kit::App) -> String {
+        self.text.read(cx).value().to_string()
     }
 
     /// Types `text` at the cursor (tests).
@@ -81,7 +100,7 @@ impl ComposeView {
         if self.sending.is_some() || !compose::can_post(&text) {
             return;
         }
-        let draft = compose::draft(&text, self.reply_to.as_deref());
+        let draft = compose::draft(&text, &self.target);
         let backend = Arc::clone(&self.backend);
         let result = Runtime::global(cx).spawn(async move { backend.publish(draft).await });
         self.error = None;
@@ -119,23 +138,22 @@ impl Render for ComposeView {
             r if r < 20 => theme.warning,
             _ => theme.muted_foreground,
         };
+        let (title, action) = match self.target {
+            ComposeTarget::New => ("New post", "Post"),
+            ComposeTarget::Reply(_) => ("Reply", "Reply"),
+            ComposeTarget::Quote(_) => ("Quote", "Post"),
+        };
         v_flex()
-            .w(px(560.))
+            .w(px(WIDTH))
             .gap_3()
-            .p_6()
+            .p(px(PADDING))
             .rounded_2xl()
             .border_1()
             .border_color(theme.border)
             .bg(theme.popover)
             .text_color(theme.foreground)
-            .child(
-                div().text_xl().font_weight(FontWeight::BOLD).child(if self.reply_to.is_some() {
-                    "Reply"
-                } else {
-                    "New post"
-                }),
-            )
-            .when_some(self.reply_to.clone(), |d, parent| {
+            .child(div().text_xl().font_weight(FontWeight::BOLD).child(title))
+            .when_some(self.target.reply_to().cloned(), |d, parent| {
                 d.child(
                     v_flex()
                         .gap_1()
@@ -153,6 +171,12 @@ impl Render for ComposeView {
                 )
             })
             .child(Textarea::new(&self.text).disabled(sending))
+            // Under the text, where X puts the quoted post. Kept short, so
+            // the grown textarea and the buttons still fit a small window.
+            .when_some(self.target.quoted().cloned(), |d, quoted| {
+                let width = WIDTH - 2. * PADDING;
+                d.child(post_preview("compose-quote", &quoted, false, width, (3, 120.), cx))
+            })
             .when_some(self.error.clone(), |d, e| {
                 d.child(div().text_sm().text_color(theme.danger).child(e))
             })
@@ -178,7 +202,7 @@ impl Render for ComposeView {
                         Button::new("compose-post")
                             .primary()
                             .text_button(Size::Medium)
-                            .label(if self.reply_to.is_some() { "Reply" } else { "Post" })
+                            .label(action)
                             .loading(sending)
                             .disabled(!can_post || sending)
                             .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
@@ -196,16 +220,15 @@ mod tests {
     fn open(
         cx: &mut TestAppContext,
         backend: MockBackend,
-        reply_to: Option<Arc<Post>>,
+        target: ComposeTarget,
     ) -> (Entity<ComposeView>, &mut VisualTestContext, Arc<std::sync::Mutex<Vec<ComposeEvent>>>)
     {
         cx.update(|cx| {
             gpui_kit::init(cx);
             cx.set_global(Runtime::inline());
         });
-        let (view, cx) = cx.add_window_view(|window, cx| {
-            ComposeView::new(Arc::new(backend), reply_to, window, cx)
-        });
+        let (view, cx) = cx
+            .add_window_view(|window, cx| ComposeView::new(Arc::new(backend), target, window, cx));
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = Arc::clone(&events);
         cx.update(|_, cx| {
@@ -217,7 +240,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn posts_the_text(cx: &mut TestAppContext) {
-        let (view, cx, events) = open(cx, MockBackend::new(), None);
+        let (view, cx, events) = open(cx, MockBackend::new(), ComposeTarget::New);
         view.update_in(cx, |v, window, cx| v.type_text("hello from Twitty", window, cx));
         view.update(cx, |v, cx| v.submit(cx));
         cx.run_until_parked();
@@ -240,7 +263,7 @@ mod tests {
                     }))
                     .unwrap(),
             );
-        let (view, cx, events) = open(cx, backend, Some(Arc::clone(&parent)));
+        let (view, cx, events) = open(cx, backend, ComposeTarget::Reply(Arc::clone(&parent)));
         view.update_in(cx, |v, window, cx| v.type_text("a reply", window, cx));
         view.update(cx, |v, cx| v.submit(cx));
         cx.run_until_parked();
@@ -250,8 +273,36 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn quotes_embed_the_quoted_post_shown_under_the_text(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        let page = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(backend.feed(
+                &twitty_model::FeedSource::Home { mode: twitty_model::HomeMode::ForYou },
+                twitty_model::PageRequest::First,
+            ))
+            .unwrap();
+        let quoted = Arc::new(page.items[0].posts()[0].clone());
+        let (view, cx, events) = open(cx, backend, ComposeTarget::Quote(Arc::clone(&quoted)));
+        cx.run_until_parked();
+        let text = cx.debug_bounds("compose-quote-body").expect("the quoted post is shown");
+        assert!(text.size.height > px(0.));
+        view.update_in(cx, |v, window, cx| v.type_text("look at this", window, cx));
+        view.update(cx, |v, cx| v.submit(cx));
+        cx.run_until_parked();
+        let events = events.lock().unwrap();
+        let [ComposeEvent::Published(post)] = events.as_slice() else { panic!("{events:?}") };
+        let Some(twitty_model::Embed::Quote { quoted: embed }) = &post.embed else {
+            panic!("{:?}", post.embed)
+        };
+        assert_eq!(**embed, twitty_model::PostOrGone::Post(Post::clone(&quoted)));
+        assert!(post.reply_to.is_none());
+    }
+
+    #[gpui_kit::test]
     fn too_long_or_empty_text_is_not_sent(cx: &mut TestAppContext) {
-        let (view, cx, events) = open(cx, MockBackend::new(), None);
+        let (view, cx, events) = open(cx, MockBackend::new(), ComposeTarget::New);
         view.update(cx, |v, cx| v.submit(cx));
         view.update_in(cx, |v, window, cx| v.type_text(&"a".repeat(281), window, cx));
         view.update(cx, |v, cx| v.submit(cx));
@@ -263,7 +314,7 @@ mod tests {
     fn failures_keep_the_text_and_explain(cx: &mut TestAppContext) {
         let backend = MockBackend::new();
         backend.fail_next(BackendError::Upstream("X error 187: Status is a duplicate.".into()));
-        let (view, cx, events) = open(cx, backend, None);
+        let (view, cx, events) = open(cx, backend, ComposeTarget::New);
         view.update_in(cx, |v, window, cx| v.type_text("again", window, cx));
         view.update(cx, |v, cx| v.submit(cx));
         cx.run_until_parked();

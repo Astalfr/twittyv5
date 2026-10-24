@@ -1,11 +1,44 @@
-//! Composing a post: X's weighted length limit and the draft sent to the backend.
+//! Composing a post: what it answers or quotes, X's weighted length limit and
+//! the draft sent to the backend.
 //!
 //! X counts text with twitter-text's weighting: characters in the ranges below
 //! count 1, everything else (CJK, emoji…) counts 2, and every link counts 23
 //! whatever its length. The limit is 280. Emoji sequences joined with ZWJ are
 //! counted per code point here, so they can read slightly high.
 
-use twitty_model::{Draft, Post, PostId};
+use std::sync::Arc;
+
+use twitty_model::{Draft, Post};
+
+/// What a post being composed is about.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ComposeTarget {
+    /// A new post on its own.
+    #[default]
+    New,
+    /// A reply to this post.
+    Reply(Arc<Post>),
+    /// A quote of this post: the new post embeds it.
+    Quote(Arc<Post>),
+}
+
+impl ComposeTarget {
+    /// The post replied to, if any.
+    pub fn reply_to(&self) -> Option<&Arc<Post>> {
+        match self {
+            Self::Reply(post) => Some(post),
+            _ => None,
+        }
+    }
+
+    /// The post quoted, if any.
+    pub fn quoted(&self) -> Option<&Arc<Post>> {
+        match self {
+            Self::Quote(post) => Some(post),
+            _ => None,
+        }
+    }
+}
 
 /// Maximum weighted length of a post.
 pub const MAX_LENGTH: usize = 280;
@@ -56,12 +89,12 @@ pub fn can_post(text: &str) -> bool {
     !text.trim().is_empty() && remaining(text) >= 0
 }
 
-/// The draft for `text`, replying to `reply_to` if set.
-pub fn draft(text: &str, reply_to: Option<&Post>) -> Draft {
+/// The draft for `text`, replying to or quoting `target`'s post.
+pub fn draft(text: &str, target: &ComposeTarget) -> Draft {
     Draft {
         text: text.trim().to_owned(),
-        reply_to: reply_to.map(|p| p.id.clone()),
-        quote: None::<PostId>,
+        reply_to: target.reply_to().map(|p| p.id.clone()),
+        quote: target.quoted().map(|p| p.id.clone()),
     }
 }
 
@@ -95,8 +128,28 @@ mod tests {
 
     #[test]
     fn drafts_trim_and_reply() {
-        let d = draft("  hi  ", None);
-        assert_eq!((d.text.as_str(), d.reply_to), ("hi", None));
+        let d = draft("  hi  ", &ComposeTarget::New);
+        assert_eq!((d.text.as_str(), d.reply_to, d.quote), ("hi", None, None));
+    }
+
+    fn some_post() -> Arc<Post> {
+        let backend = twitty_model::mock::MockBackend::new();
+        let draft = Draft { text: "parent".into(), ..Default::default() };
+        let post = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(twitty_model::Backend::publish(&backend, draft))
+            .unwrap();
+        Arc::new(post)
+    }
+
+    #[test]
+    fn drafts_carry_the_reply_or_the_quote() {
+        let post = some_post();
+        let reply = draft("a reply", &ComposeTarget::Reply(Arc::clone(&post)));
+        assert_eq!((reply.reply_to.as_ref(), reply.quote), (Some(&post.id), None));
+        let quote = draft("a quote", &ComposeTarget::Quote(Arc::clone(&post)));
+        assert_eq!((quote.reply_to, quote.quote.as_ref()), (None, Some(&post.id)));
     }
 
     proptest! {
