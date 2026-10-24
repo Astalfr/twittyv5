@@ -127,6 +127,15 @@ pub fn thread(root: &Value, focal: &PostId) -> Option<ThreadView> {
     Some(ThreadView { ancestors, focus, replies: items.collect(), more_replies: page.older })
 }
 
+/// The post a `CreateTweet` response returns.
+pub fn created_post(root: &Value) -> Option<Post> {
+    let result = at(root, &["data", "create_tweet", "tweet_results", "result"])?;
+    match tweet::item(result, "created", &mut Ctx::default()) {
+        FeedItem::Post(post) => Some(post),
+        _ => None,
+    }
+}
+
 fn is_promoted(entry: &str, content: &Value) -> bool {
     entry.starts_with("promoted-") || at(content, &["promotedMetadata"]).is_some()
 }

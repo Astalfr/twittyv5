@@ -4,7 +4,9 @@
 //! a new source must be captured before it is mapped.
 
 use serde_json::{Value, json};
-use twitty_model::{FeedSource, HomeMode, NotificationFilter, PageRequest, SearchSort, UserTab};
+use twitty_model::{
+    Draft, FeedSource, HomeMode, NotificationFilter, PageRequest, PostAction, SearchSort, UserTab,
+};
 
 use crate::client::home_variables;
 
@@ -108,6 +110,47 @@ pub(crate) fn tweet_detail_variables(focal: &str) -> Value {
     })
 }
 
+/// The mutation and variables for a viewer action, as the web client sends them.
+pub(crate) fn action(action: &PostAction) -> (&'static str, Value) {
+    let id = action.post_id().as_str();
+    match action {
+        PostAction::Like(_) => ("FavoriteTweet", json!({"tweet_id": id})),
+        PostAction::Unlike(_) => ("UnfavoriteTweet", json!({"tweet_id": id})),
+        PostAction::Repost(_) => ("CreateRetweet", json!({"tweet_id": id, "dark_request": false})),
+        PostAction::Unrepost(_) => {
+            ("DeleteRetweet", json!({"source_tweet_id": id, "dark_request": false}))
+        }
+        PostAction::Bookmark(_) => ("CreateBookmark", json!({"tweet_id": id})),
+        PostAction::Unbookmark(_) => ("DeleteBookmark", json!({"tweet_id": id})),
+    }
+}
+
+/// Variables of `CreateTweet` for a draft.
+pub(crate) fn create_tweet(draft: &Draft) -> Value {
+    let mut v = json!({
+        "tweet_text": draft.text,
+        "dark_request": false,
+        "media": {"media_entities": [], "possibly_sensitive": false},
+        "semantic_annotation_ids": [],
+        "disallowed_reply_options": null,
+    });
+    if let Some(obj) = v.as_object_mut() {
+        if let Some(parent) = &draft.reply_to {
+            obj.insert(
+                "reply".to_owned(),
+                json!({"in_reply_to_tweet_id": parent.as_str(), "exclude_reply_user_ids": []}),
+            );
+        }
+        if let Some(quoted) = &draft.quote {
+            obj.insert(
+                "attachment_url".to_owned(),
+                json!(format!("https://x.com/i/status/{}", quoted.as_str())),
+            );
+        }
+    }
+    v
+}
+
 /// Variables of `UserByScreenName`.
 pub(crate) fn user_by_screen_name_variables(handle: &str) -> Value {
     json!({"screen_name": handle.trim_start_matches('@')})
@@ -198,6 +241,44 @@ mod tests {
         let (op, vars) = first(FeedSource::List { id: ListId::new("5"), name: None });
         assert_eq!(op, "ListLatestTweetsTimeline");
         assert_eq!(vars, json!({"listId": "5", "count": 20}));
+    }
+
+    #[test]
+    fn actions_use_the_web_mutations() {
+        let id = PostId::new("42");
+        let cases = [
+            (PostAction::Like(id.clone()), "FavoriteTweet", json!({"tweet_id": "42"})),
+            (PostAction::Unlike(id.clone()), "UnfavoriteTweet", json!({"tweet_id": "42"})),
+            (
+                PostAction::Repost(id.clone()),
+                "CreateRetweet",
+                json!({"tweet_id": "42", "dark_request": false}),
+            ),
+            (
+                PostAction::Unrepost(id.clone()),
+                "DeleteRetweet",
+                json!({"source_tweet_id": "42", "dark_request": false}),
+            ),
+            (PostAction::Bookmark(id.clone()), "CreateBookmark", json!({"tweet_id": "42"})),
+            (PostAction::Unbookmark(id), "DeleteBookmark", json!({"tweet_id": "42"})),
+        ];
+        for (a, op, vars) in cases {
+            assert_eq!(action(&a), (op, vars));
+        }
+    }
+
+    #[test]
+    fn create_tweet_variables() {
+        let plain = create_tweet(&Draft { text: "hello".into(), ..Draft::default() });
+        assert_eq!(plain["tweet_text"], "hello");
+        assert!(plain.get("reply").is_none() && plain.get("attachment_url").is_none());
+        let reply = create_tweet(&Draft {
+            text: "hi".into(),
+            reply_to: Some(PostId::new("7")),
+            quote: Some(PostId::new("8")),
+        });
+        assert_eq!(reply["reply"]["in_reply_to_tweet_id"], "7");
+        assert_eq!(reply["attachment_url"], "https://x.com/i/status/8");
     }
 
     #[test]

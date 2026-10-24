@@ -82,6 +82,7 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - `TwittyApp` (root view) owns the `DeckFile`, the column views and the shared `InteractionsHub`.
 - Each `ColumnView` owns its `ColumnModel` (rows + cursors) and its `ListState`. The list has one extra footer row (spinner, retry, "caught up").
 - The viewer's likes, reposts and bookmarks are overrides in `InteractionsHub`, so every column shows the change instantly. Failures roll back.
+- Post rows don't know about panels or dialogs: they emit `hub::Navigate` (`Thread`, `Reply`, `Profile`) through the hub, and `TwittyApp` opens the thread panel, the compose dialog or a User column.
 - Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`.
 - Credentials (`twitty::account`): the sign-in dialog stores the session in Windows Credential Manager (`keyring`, entry `Twitty` / `x-session`, a versioned JSON payload). `main.rs` gives the app an `AccountServices` (a `Connector` that turns `Credentials` into an `Arc<dyn Backend>`, plus the `CredentialStore`), so the UI never sees `twitty-x`. Startup order and sign-out rules: "Signing in" in [x-api.md](x-api.md).
 - Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; today it holds the theme.

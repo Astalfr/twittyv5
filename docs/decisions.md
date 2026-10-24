@@ -4,6 +4,19 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Writes are tested against a mock server only (M8)
+- **Decision**: Likes, reposts, bookmarks and posts were implemented and tested with `wiremock`, but never sent to X during development.
+- **Why**: They change a real account and can't be fully undone (a post is seen, notifications are sent). The user makes the first real write.
+- **Consequences**: The variable sets are from the web client, not from our own captures; the UI surfaces X's error message if one is wrong.
+
+### 2026-10-24: "Already done" is success (M8)
+- **Decision**: X error 139 (already liked) and 327 (already reposted) don't roll back the optimistic state.
+- **Why**: The account is already in the state the user asked for; a rollback would show the wrong state.
+
+### 2026-10-24: Post rows navigate through the hub (M8)
+- **Decision**: Row clicks emit `Navigate` on the shared `InteractionsHub` instead of calling the app.
+- **Why**: Rows are rendered by free functions in columns and in the thread panel; the hub is the one entity they all share, and it keeps `post.rs` independent of the app's layout.
+
 ### 2026-10-24: No fixture from the user's own likes (M7)
 - **Decision**: The `Likes` request was verified live on the signed-in account, but only public data (NASA's replies and media, a public list found through list search) became fixtures. `Likes` uses the same timeline shape, covered by those.
 - **Why**: Even anonymised, a likes capture reveals what the account owner liked.

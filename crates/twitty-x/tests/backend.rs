@@ -293,11 +293,92 @@ async fn profile_looks_up_by_handle() {
     assert_eq!(sent_variables(&server).await, json!({"screen_name": "test_viewer"}));
 }
 
+/// The body of the only request, which must be a POST.
+async fn sent_body(server: &MockServer) -> Value {
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "exactly one request");
+    assert_eq!(requests[0].method, wiremock::http::Method::POST, "mutations are POSTs");
+    serde_json::from_slice(&requests[0].body).unwrap()
+}
+
 #[tokio::test]
-async fn writes_are_refused_without_touching_the_account() {
+async fn actions_post_their_mutation() {
+    let cases = [
+        (PostAction::Like(PostId::new("1")), "FavoriteTweet", "tweet_id"),
+        (PostAction::Unlike(PostId::new("1")), "UnfavoriteTweet", "tweet_id"),
+        (PostAction::Repost(PostId::new("1")), "CreateRetweet", "tweet_id"),
+        (PostAction::Unrepost(PostId::new("1")), "DeleteRetweet", "source_tweet_id"),
+        (PostAction::Bookmark(PostId::new("1")), "CreateBookmark", "tweet_id"),
+        (PostAction::Unbookmark(PostId::new("1")), "DeleteBookmark", "tweet_id"),
+    ];
+    for (action, operation, id_field) in cases {
+        let server = MockServer::start().await;
+        serve(&server, operation, json!({"data": {"result": "Done"}})).await;
+        backend(&server).act(action).await.unwrap();
+        let body = sent_body(&server).await;
+        assert_eq!(body["variables"][id_field], "1", "{operation}");
+        assert!(body["queryId"].is_string(), "{operation}");
+    }
+}
+
+#[tokio::test]
+async fn already_done_actions_succeed() {
+    for body in [
+        json!({"errors": [{"code": 139, "message": "You have already favorited this status."}]}),
+        json!({"data": {}, "errors": [{"code": 139, "message": "already"}]}),
+        json!({"errors": [{"code": 327, "message": "You have already retweeted this Tweet."}]}),
+    ] {
+        let server = MockServer::start().await;
+        serve(&server, "FavoriteTweet", body).await;
+        backend(&server).act(PostAction::Like(PostId::new("1"))).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn failed_actions_report_xs_message() {
     let server = MockServer::start().await;
-    let b = backend(&server);
-    assert!(b.act(PostAction::Like(PostId::new("1"))).await.is_err());
-    assert!(b.publish(twitty_model::Draft::default()).await.is_err());
-    assert!(server.received_requests().await.unwrap().is_empty());
+    serve(
+        &server,
+        "CreateBookmark",
+        json!({"data": {}, "errors": [{"code": 999, "message": "nope"}]}),
+    )
+    .await;
+    let err = backend(&server).act(PostAction::Bookmark(PostId::new("1"))).await.unwrap_err();
+    assert_eq!(err, BackendError::Upstream("X error 999: nope".into()));
+}
+
+#[tokio::test]
+async fn publish_sends_the_draft_and_returns_the_post() {
+    // CreateTweet answers with the new tweet; reuse a captured one.
+    let detail = fixture("tweetdetail");
+    let tweet = detail["data"]["threaded_conversation_with_injections_v2"]["instructions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|i| i.get("entries"))
+        .unwrap()[0]["content"]["itemContent"]["tweet_results"]
+        .clone();
+    let server = MockServer::start().await;
+    serve(&server, "CreateTweet", json!({"data": {"create_tweet": {"tweet_results": tweet}}}))
+        .await;
+    let draft =
+        twitty_model::Draft { text: "hello".into(), reply_to: Some(PostId::new("7")), quote: None };
+    let post = backend(&server).publish(draft).await.unwrap();
+    assert_eq!(post.id.as_str(), "8184262359040044601");
+    let body = sent_body(&server).await;
+    assert_eq!(body["variables"]["tweet_text"], "hello");
+    assert_eq!(body["variables"]["reply"]["in_reply_to_tweet_id"], "7");
+}
+
+#[tokio::test]
+async fn rejected_posts_are_errors() {
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        "CreateTweet",
+        json!({"errors": [{"code": 187, "message": "Status is a duplicate."}]}),
+    )
+    .await;
+    let err = backend(&server).publish(twitty_model::Draft::default()).await.unwrap_err();
+    assert!(matches!(err, BackendError::Upstream(m) if m.contains("duplicate")));
 }

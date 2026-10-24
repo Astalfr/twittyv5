@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use gpui_kit::{Context, EventEmitter};
-use twitty_model::{Backend, BackendError, Post};
+use twitty_model::{Backend, BackendError, Post, PostId, Profile};
 
 use crate::{
     runtime::Runtime,
@@ -14,6 +14,17 @@ use crate::{
 /// Emitted when an optimistic action had to be undone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionFailed(pub BackendError);
+
+/// A request from a post row to open something; the app decides how.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Navigate {
+    /// Show the conversation around a post.
+    Thread(PostId),
+    /// Compose a reply to a post.
+    Reply(Arc<Post>),
+    /// Add a column with an account's posts.
+    Profile(Arc<Profile>),
+}
 
 /// Owns the viewer's optimistic post state for the whole window.
 pub struct InteractionsHub {
@@ -28,6 +39,7 @@ impl std::fmt::Debug for InteractionsHub {
 }
 
 impl EventEmitter<ActionFailed> for InteractionsHub {}
+impl EventEmitter<Navigate> for InteractionsHub {}
 
 impl InteractionsHub {
     pub fn new(backend: Arc<dyn Backend>) -> Self {
@@ -37,6 +49,11 @@ impl InteractionsHub {
     /// State to render for `post`.
     pub fn effective(&self, post: &Post) -> Effective {
         self.state.effective(post)
+    }
+
+    /// Asks the app to open something (see [`Navigate`]).
+    pub fn navigate(&mut self, to: Navigate, cx: &mut Context<Self>) {
+        cx.emit(to);
     }
 
     /// Optimistically flips `toggle`, then confirms with the backend.

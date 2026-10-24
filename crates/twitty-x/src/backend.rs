@@ -2,13 +2,17 @@
 
 use std::sync::Arc;
 
-use serde_json::json;
+use serde_json::{Value, json};
 use twitty_model::{
     Backend, BackendError, BoxFuture, Draft, FeedPage, FeedSource, PageRequest, Post, PostAction,
     PostId, Profile, ThreadView,
 };
 
-use crate::{XClient, requests, translate};
+use crate::{XClient, XError, requests, translate};
+
+/// X error codes meaning the action already happened ("already favorited",
+/// "already retweeted"). The request is idempotent from the UI's view.
+const ALREADY_DONE: [i64; 2] = [139, 327];
 
 /// X as a [`Backend`]. Cheap to clone; clones share the client.
 #[derive(Debug, Clone)]
@@ -34,6 +38,24 @@ impl XBackend {
         let (operation, variables) = requests::feed(source, &page);
         let body = self.client.graphql(operation, variables).await?;
         Ok(translate::feed_page(&body).page)
+    }
+}
+
+/// A mutation succeeded unless X sent errors with empty `data` (the transport
+/// keeps such bodies because queries use them for partial results).
+fn mutation_outcome(body: &Value) -> Result<(), BackendError> {
+    let errors = body.get("errors").and_then(Value::as_array).filter(|e| !e.is_empty());
+    let data_empty = body.get("data").and_then(Value::as_object).is_none_or(|d| d.is_empty());
+    match errors.and_then(|e| e.first()) {
+        Some(first) if data_empty => {
+            let code = first.get("code").and_then(Value::as_i64).unwrap_or(0);
+            if ALREADY_DONE.contains(&code) {
+                return Ok(());
+            }
+            let message = first.get("message").and_then(Value::as_str).unwrap_or("unknown error");
+            Err(BackendError::Upstream(format!("X error {code}: {message}")))
+        }
+        _ => Ok(()),
     }
 }
 
@@ -71,17 +93,23 @@ impl Backend for XBackend {
         })
     }
 
-    // Writes to the account land in M8, with their own tests. Until then the
-    // UI's optimistic toggles roll back on this error.
-    fn act(&self, _action: PostAction) -> BoxFuture<'_, Result<(), BackendError>> {
-        Box::pin(async {
-            Err(BackendError::Upstream(
-                "liking, reposting and bookmarking aren't enabled yet".into(),
-            ))
+    fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>> {
+        Box::pin(async move {
+            let (operation, variables) = requests::action(&action);
+            match self.client.graphql(operation, variables).await {
+                Ok(body) => mutation_outcome(&body),
+                Err(XError::Api { code, .. }) if ALREADY_DONE.contains(&code) => Ok(()),
+                Err(e) => Err(e.into()),
+            }
         })
     }
 
-    fn publish(&self, _draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>> {
-        Box::pin(async { Err(BackendError::Upstream("posting isn't enabled yet".into())) })
+    fn publish(&self, draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>> {
+        Box::pin(async move {
+            let body = self.client.graphql("CreateTweet", requests::create_tweet(&draft)).await?;
+            mutation_outcome(&body)?;
+            translate::created_post(&body)
+                .ok_or_else(|| BackendError::Decode("no post in the CreateTweet response".into()))
+        })
     }
 }

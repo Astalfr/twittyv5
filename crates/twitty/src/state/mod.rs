@@ -3,9 +3,11 @@
 
 pub mod add_column;
 pub mod column;
+pub mod compose;
 pub mod deck;
 pub mod interactions;
 pub mod login;
 pub mod media_layout;
 pub mod settings;
 pub mod sources;
+pub mod thread;

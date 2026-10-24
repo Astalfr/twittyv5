@@ -26,6 +26,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true
+proptest.workspace = true
 tempfile = "3"
 gpui-kit = { workspace = true, features = ["test-support"] }
 

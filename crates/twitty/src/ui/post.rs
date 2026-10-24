@@ -7,7 +7,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::{
     AnyElement, App, Entity, FontWeight, HighlightStyle, Hsla, InteractiveText, IntoElement,
     ObjectFit, ParentElement, SharedString, StatefulInteractiveElement, Styled, StyledImage,
-    StyledText, Window, component::avatar::Avatar, component::*, div, img, prelude::*, px,
+    StyledText, Window, component::avatar::Avatar, component::button::*,
+    component::hover_card::HoverCard, component::*, div, img, prelude::*, px,
 };
 use twitty_model::{
     Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostOrGone, Profile, RichText,
@@ -17,7 +18,7 @@ use twitty_model::{
 use crate::{
     format::{compact_count, relative_time},
     state::{interactions::Toggle, media_layout},
-    ui::hub::InteractionsHub,
+    ui::hub::{InteractionsHub, Navigate},
 };
 
 /// Horizontal padding of a row.
@@ -144,12 +145,55 @@ fn unavailable_text(reason: &UnavailableReason) -> String {
     }
 }
 
-fn avatar(profile: &Profile, size: f32) -> impl IntoElement {
+fn avatar(profile: &Profile, size: f32) -> impl IntoElement + use<> {
     let mut a = Avatar::new().name(profile.display_name.clone()).size(px(size));
     if let Some(src) = &profile.avatar {
         a = a.src(src.url.as_str().to_owned());
     }
     a
+}
+
+/// An avatar that shows the account's card on hover, with a button to add
+/// a column of its posts.
+fn profile_hover(
+    id: (&'static str, usize),
+    profile: &Arc<Profile>,
+    hub: &Entity<InteractionsHub>,
+) -> impl IntoElement {
+    let profile = Arc::clone(profile);
+    let trigger = avatar(&profile, AVATAR);
+    let hub = hub.clone();
+    HoverCard::new(id).trigger(trigger).content(move |_, _, cx| {
+        let theme = cx.theme().clone();
+        let p = Arc::clone(&profile);
+        let hub = hub.clone();
+        v_flex()
+            .w(px(300.))
+            .gap_2()
+            .p_1()
+            .child(avatar(&p, 56.0))
+            .child(
+                v_flex()
+                    .child(div().font_weight(FontWeight::BOLD).child(p.display_name.clone()))
+                    .child(
+                        div().text_color(theme.muted_foreground).child(format!("@{}", p.handle)),
+                    ),
+            )
+            .when(!p.bio.is_empty(), |d| d.child(div().text_sm().child(p.bio.text().to_owned())))
+            .child(
+                h_flex()
+                    .gap_3()
+                    .text_sm()
+                    .child(format!("{} Following", compact_count(p.counts.following)))
+                    .child(format!("{} Followers", compact_count(p.counts.followers))),
+            )
+            .child(Button::new("open-profile").small().label("Open column").on_click(
+                move |_, _, cx| {
+                    let to = Navigate::Profile(Arc::clone(&p));
+                    hub.update(cx, |hub, cx| hub.navigate(to, cx));
+                },
+            ))
+    })
 }
 
 fn post_row(
@@ -206,7 +250,7 @@ fn post_row(
         content = content.child(media_grid(("media", key), &post.media, width, post, &theme));
     }
     if let Some(embed) = &post.embed {
-        content = content.child(render_embed(("embed", key), embed, width, window, cx));
+        content = content.child(render_embed(("embed", key), embed, width, &rcx.hub, window, cx));
     }
     content = content.child(action_bar(key, post, eff, rcx, &theme));
 
@@ -215,17 +259,24 @@ fn post_row(
         .flex_none()
         .w(px(AVATAR))
         .h_full()
-        .child(avatar(&post.author, AVATAR))
+        .child(profile_hover(("author", key), &post.author, &rcx.hub))
         .when(connector, |col| {
             col.child(div().mt_1().w(px(2.)).flex_1().min_h(px(12.)).bg(theme.border))
         });
 
+    let hub = rcx.hub.clone();
+    let id = post.id.clone();
     v_flex()
+        .id(("post", key))
         .w_full()
         .px(px(PAD_X))
         .pt_3()
         .when(!connector, |d| d.pb_2())
+        .cursor_pointer()
         .hover(|s| s.bg(theme.list_hover))
+        .on_click(move |_, _, cx| {
+            hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id.clone()), cx));
+        })
         .when_some(reposted_by, |d, by| {
             d.child(
                 h_flex()
@@ -268,6 +319,8 @@ fn rich_text(
     let ranges = spans.iter().map(|s| s.range.clone()).collect();
     div().w_full().child(InteractiveText::new(id, styled).on_click(ranges, move |ix, _, cx| {
         if let Some(span) = spans.get(ix) {
+            // A link click must not also open the post's thread.
+            cx.stop_propagation();
             cx.open_url(&span_url(&span.kind));
         }
     }))
@@ -375,13 +428,14 @@ fn render_embed(
     id: (&'static str, usize),
     embed: &Embed,
     width: f32,
+    hub: &Entity<InteractionsHub>,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     let theme = cx.theme().clone();
     match embed {
         Embed::Quote { quoted } => match quoted.as_ref() {
-            PostOrGone::Post(q) => quote_card(id, q, width, cx).into_any_element(),
+            PostOrGone::Post(q) => quote_card(id, q, width, hub, cx).into_any_element(),
             PostOrGone::Unavailable { reason } => div()
                 .mt_2()
                 .px_3()
@@ -398,9 +452,16 @@ fn render_embed(
     }
 }
 
-fn quote_card(id: (&'static str, usize), q: &Post, width: f32, cx: &mut App) -> impl IntoElement {
+fn quote_card(
+    id: (&'static str, usize),
+    q: &Post,
+    width: f32,
+    hub: &Entity<InteractionsHub>,
+    cx: &mut App,
+) -> impl IntoElement {
     let theme = cx.theme().clone();
-    let url = q.url.to_string();
+    let hub = hub.clone();
+    let quoted = q.id.clone();
     v_flex()
         .id(id)
         .mt_2()
@@ -413,7 +474,7 @@ fn quote_card(id: (&'static str, usize), q: &Post, width: f32, cx: &mut App) -> 
         .hover(|s| s.bg(theme.list_hover))
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
-            cx.open_url(&url);
+            hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(quoted.clone()), cx));
         })
         .child(
             v_flex()
@@ -541,6 +602,15 @@ impl IfEmpty for String {
     }
 }
 
+/// What an action-bar button does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Click {
+    Toggle(Toggle),
+    Reply,
+    OpenInBrowser,
+    Nothing,
+}
+
 fn action_bar(
     key: usize,
     post: &Post,
@@ -553,24 +623,29 @@ fn action_bar(
                   icon: IconName,
                   count: Option<u64>,
                   active: Option<Hsla>,
-                  toggle: Option<Toggle>| {
+                  on: Click| {
         let color = active.unwrap_or(muted);
         let hub = rcx.hub.clone();
-        let post = post.clone();
-        let url = post.url.to_string();
+        let post = Arc::new(post.clone());
         h_flex()
             .id((name, key))
             .gap_1()
             .min_w(px(48.))
             .text_sm()
             .text_color(color)
-            .cursor_pointer()
-            .hover(|s| s.text_color(theme.primary))
+            .when(on != Click::Nothing, |d| {
+                d.cursor_pointer().hover(|s| s.text_color(theme.primary))
+            })
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
-                match toggle {
-                    Some(t) => hub.update(cx, |hub, cx| hub.toggle(&post, t, cx)),
-                    None => cx.open_url(&url),
+                match on {
+                    Click::Toggle(t) => hub.update(cx, |hub, cx| hub.toggle(&post, t, cx)),
+                    Click::Reply => {
+                        let to = Navigate::Reply(Arc::clone(&post));
+                        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+                    }
+                    Click::OpenInBrowser => cx.open_url(post.url.as_str()),
+                    Click::Nothing => {}
                 }
             })
             .child(Icon::new(icon).size(px(17.)))
@@ -580,29 +655,30 @@ fn action_bar(
     h_flex()
         .mt_1()
         .justify_between()
-        .child(action("reply", IconName::MessageCircle, Some(m.replies), None, None))
+        .child(action("reply", IconName::MessageCircle, Some(m.replies), None, Click::Reply))
         .child(action(
             "repost",
             IconName::Repeat2,
             Some(m.reposts + m.quotes),
             eff.viewer.reposted.then_some(theme.green),
-            Some(Toggle::Repost),
+            Click::Toggle(Toggle::Repost),
         ))
         .child(action(
             "like",
             IconName::Heart,
             Some(m.likes),
             eff.viewer.liked.then_some(theme.red),
-            Some(Toggle::Like),
+            Click::Toggle(Toggle::Like),
         ))
-        .child(action("views", IconName::ChartNoAxesColumn, m.views, None, None))
+        .child(action("views", IconName::ChartNoAxesColumn, m.views, None, Click::Nothing))
         .child(action(
             "bookmark",
             IconName::Bookmark,
             None,
             eff.viewer.bookmarked.then_some(theme.blue),
-            Some(Toggle::Bookmark),
+            Click::Toggle(Toggle::Bookmark),
         ))
+        .child(action("share", IconName::Share, None, None, Click::OpenInBrowser))
 }
 
 #[cfg(test)]

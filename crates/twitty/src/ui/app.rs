@@ -19,9 +19,11 @@ use crate::{
     ui::{
         add_column::{AddColumnEvent, AddColumnView},
         column::{ColumnEvent, ColumnView},
-        hub::{ActionFailed, InteractionsHub},
+        compose::{ComposeEvent, ComposeView},
+        hub::{ActionFailed, InteractionsHub, Navigate},
         login::{LoginEvent, LoginView},
         theme,
+        thread::{CloseThread, ThreadPanel},
     },
 };
 
@@ -60,11 +62,15 @@ pub struct TwittyApp {
     viewer: Option<Profile>,
     login: Option<Entity<LoginView>>,
     add_column: Option<Entity<AddColumnView>>,
+    compose: Option<Entity<ComposeView>>,
+    thread: Option<Entity<ThreadPanel>>,
     account_panel: bool,
     session_check: Option<Task<()>>,
     _login_sub: Option<Subscription>,
     _add_sub: Option<Subscription>,
-    _hub_sub: Option<Subscription>,
+    _compose_sub: Option<Subscription>,
+    _thread_sub: Option<Subscription>,
+    _hub_subs: Vec<Subscription>,
     /// Column event subscriptions; replaced with the columns.
     _subs: Vec<Subscription>,
 }
@@ -100,14 +106,18 @@ impl TwittyApp {
             viewer: None,
             login: None,
             add_column: None,
+            compose: None,
+            thread: None,
             account_panel: false,
             session_check: None,
             _login_sub: None,
             _add_sub: None,
-            _hub_sub: None,
+            _compose_sub: None,
+            _thread_sub: None,
+            _hub_subs: Vec::new(),
             _subs: Vec::new(),
         };
-        this.build_hub(cx);
+        this.build_hub(window, cx);
         this.build_columns(cx);
         if this.options.session.is_some() {
             this.check_session(window, cx);
@@ -134,11 +144,80 @@ impl TwittyApp {
 
     /// (Re)creates the hub on the current backend, dropping the old account's
     /// like/repost/bookmark overrides.
-    fn build_hub(&mut self, cx: &mut Context<Self>) {
+    fn build_hub(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hub = cx.new(|_| InteractionsHub::new(Arc::clone(&self.backend)));
-        self._hub_sub = Some(cx.subscribe(&self.hub, |_, _, e: &ActionFailed, _| {
-            tracing::warn!("action failed: {}", e.0);
+        self._hub_subs = vec![
+            cx.subscribe(&self.hub, |_, _, e: &ActionFailed, _| {
+                tracing::warn!("action failed: {}", e.0);
+            }),
+            cx.subscribe_in(&self.hub, window, |this, _, e: &Navigate, window, cx| {
+                this.navigate(e.clone(), window, cx);
+            }),
+        ];
+        // Panels show the old account's data.
+        self.thread = None;
+        self._thread_sub = None;
+    }
+
+    pub fn thread_panel(&self) -> Option<&Entity<ThreadPanel>> {
+        self.thread.as_ref()
+    }
+
+    pub fn compose(&self) -> Option<&Entity<ComposeView>> {
+        self.compose.as_ref()
+    }
+
+    /// Handles a request from a post row.
+    pub fn navigate(&mut self, to: Navigate, window: &mut Window, cx: &mut Context<Self>) {
+        match to {
+            Navigate::Thread(id) => self.open_thread(id, cx),
+            Navigate::Reply(post) => self.open_compose(Some(post), window, cx),
+            Navigate::Profile(p) => {
+                let source = crate::state::add_column::user_source(p.id.clone(), &p.handle);
+                self.add_column(source, cx);
+            }
+        }
+    }
+
+    /// Shows the conversation around `id` in the side panel.
+    pub fn open_thread(&mut self, id: twitty_model::PostId, cx: &mut Context<Self>) {
+        let backend = Arc::clone(&self.backend);
+        let hub = self.hub.clone();
+        let panel = cx.new(|cx| ThreadPanel::new(id, backend, hub, cx));
+        self._thread_sub = Some(cx.subscribe(&panel, |this, _, _: &CloseThread, cx| {
+            this.thread = None;
+            this._thread_sub = None;
+            cx.notify();
         }));
+        self.thread = Some(panel);
+        cx.notify();
+    }
+
+    /// Shows the compose dialog, for a reply when `reply_to` is set.
+    pub fn open_compose(
+        &mut self,
+        reply_to: Option<Arc<twitty_model::Post>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let backend = Arc::clone(&self.backend);
+        let view = cx.new(|cx| ComposeView::new(backend, reply_to, window, cx));
+        self._compose_sub = Some(cx.subscribe(&view, |this, _, e: &ComposeEvent, cx| {
+            if let ComposeEvent::Published(post) = e {
+                tracing::info!("published post {}", post.id);
+                // A reply shows up in the open conversation.
+                let parent = post.reply_to.as_ref().and_then(|r| r.post.as_ref());
+                if let Some(panel) = &this.thread
+                    && parent.is_some_and(|p| p == panel.read(cx).root())
+                {
+                    panel.update(cx, |panel, cx| panel.reload(cx));
+                }
+            }
+            this.close_overlays(cx);
+        }));
+        self.compose = Some(view);
+        self.account_panel = false;
+        cx.notify();
     }
 
     /// (Re)creates every column of the active deck. Old views are dropped,
@@ -199,9 +278,9 @@ impl TwittyApp {
         };
         let view = cx.new(|cx| LoginView::new(services, notice, window, cx));
         self._login_sub =
-            Some(cx.subscribe_in(&view, window, |this, _, e: &LoginEvent, _, cx| match e {
+            Some(cx.subscribe_in(&view, window, |this, _, e: &LoginEvent, window, cx| match e {
                 LoginEvent::SignedIn { backend, viewer } => {
-                    this.signed_in(Arc::clone(backend), Profile::clone(viewer), cx);
+                    this.signed_in(Arc::clone(backend), Profile::clone(viewer), window, cx);
                 }
                 LoginEvent::Dismissed => this.close_overlays(cx),
             }));
@@ -215,6 +294,8 @@ impl TwittyApp {
         self._login_sub = None;
         self.add_column = None;
         self._add_sub = None;
+        self.compose = None;
+        self._compose_sub = None;
         self.account_panel = false;
         cx.notify();
     }
@@ -273,6 +354,7 @@ impl TwittyApp {
         &mut self,
         backend: Arc<dyn Backend>,
         viewer: Profile,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         tracing::info!("signed in as @{}", viewer.handle);
@@ -281,13 +363,13 @@ impl TwittyApp {
         self.session_check = None;
         self.backend = backend;
         self.close_overlays(cx);
-        self.build_hub(cx);
+        self.build_hub(window, cx);
         self.build_columns(cx);
     }
 
     /// Forgets the stored session and goes back to demo data. Only sessions
     /// the app stored itself can be removed.
-    pub fn sign_out(&mut self, cx: &mut Context<Self>) {
+    pub fn sign_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.options.session != Some(SessionSource::Keyring) {
             return;
         }
@@ -301,7 +383,7 @@ impl TwittyApp {
         self.session_check = None;
         self.backend = Arc::new(MockBackend::new());
         self.close_overlays(cx);
-        self.build_hub(cx);
+        self.build_hub(window, cx);
         self.build_columns(cx);
     }
 
@@ -517,7 +599,9 @@ impl TwittyApp {
                                 .danger()
                                 .icon(IconName::LogOut)
                                 .label("Sign out")
-                                .on_click(cx.listener(|this, _, _, cx| this.sign_out(cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.sign_out(window, cx)),
+                                ),
                         )
                     }),
             )
@@ -568,10 +652,13 @@ impl TwittyApp {
                 Button::new("compose")
                     .primary()
                     .icon(Icon::new(IconName::PenLine).size(px(22.)))
-                    .tooltip("Post (coming soon)")
+                    .tooltip("Post")
                     .rounded_full()
                     .w(px(52.))
-                    .h(px(52.)),
+                    .h(px(52.))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_compose(None, window, cx)),
+                    ),
             )
     }
 }
@@ -618,6 +705,8 @@ impl Render for TwittyApp {
             Some(login.clone().into_any_element())
         } else if let Some(add) = &self.add_column {
             Some(add.clone().into_any_element())
+        } else if let Some(compose) = &self.compose {
+            Some(compose.clone().into_any_element())
         } else if self.account_panel {
             Some(self.render_account_panel(cx))
         } else {
@@ -654,14 +743,19 @@ impl Render for TwittyApp {
                 )
             })
             .child(
-                h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .child(self.render_deck_bar(cx))
-                        .child(div().flex_1().min_h_0().flex().child(body)),
-                ),
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.render_rail(cx))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .child(self.render_deck_bar(cx))
+                            .child(div().flex_1().min_h_0().flex().child(body)),
+                    )
+                    .children(self.thread.clone()),
             )
             .when_some(overlay, |d, overlay| {
                 d.child(
@@ -800,7 +894,7 @@ mod tests {
         let store = MemoryStore::default();
         store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
         let (app, cx) = start(cx, MockBackend::new(), Some(SessionSource::Keyring), &store);
-        app.update(cx, |app, cx| app.sign_out(cx));
+        app.update_in(cx, |app, window, cx| app.sign_out(window, cx));
         assert_eq!(store.load().unwrap(), None);
         app.read_with(cx, |app, _| {
             assert_eq!(app.session(), None);
@@ -814,7 +908,7 @@ mod tests {
         store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
         let source = SessionSource::External("session.json".into());
         let (app, cx) = start(cx, MockBackend::new(), Some(source.clone()), &store);
-        app.update(cx, |app, cx| app.sign_out(cx));
+        app.update_in(cx, |app, window, cx| app.sign_out(window, cx));
         assert!(store.load().unwrap().is_some());
         assert_eq!(app.read_with(cx, |app, _| app.session().cloned()), Some(source));
     }
@@ -879,5 +973,58 @@ mod tests {
             assert_eq!(app.deck().decks.len(), 1);
             assert_eq!(app.columns().count(), main_columns.len());
         });
+    }
+
+    fn first_post(app: &Entity<TwittyApp>, cx: &mut VisualTestContext) -> Arc<twitty_model::Post> {
+        let column = app.read_with(cx, |app, _| app.columns().next().cloned()).unwrap();
+        column.read_with(cx, |c, _| {
+            Arc::new(c.model().items().iter().flat_map(|i| i.posts()).next().unwrap().clone())
+        })
+    }
+
+    #[gpui_kit::test]
+    fn clicking_a_post_opens_its_thread(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let post = first_post(&app, cx);
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(post.id.clone()), cx));
+        cx.run_until_parked();
+        let panel = app.read_with(cx, |app, _| app.thread_panel().cloned()).expect("panel open");
+        assert_eq!(panel.read_with(cx, |p, _| p.root().clone()), post.id);
+        assert!(panel.read_with(cx, |p, _| matches!(
+            p.state(),
+            crate::state::thread::ThreadState::Loaded(_)
+        )));
+    }
+
+    #[gpui_kit::test]
+    fn replying_publishes_and_closes_the_dialog(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let post = first_post(&app, cx);
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Reply(Arc::clone(&post)), cx));
+        let compose = app.read_with(cx, |app, _| app.compose().cloned()).expect("compose open");
+        assert_eq!(
+            compose.read_with(cx, |c, _| c.reply_to().map(|p| p.id.clone())),
+            Some(post.id.clone())
+        );
+        compose.update_in(cx, |c, window, cx| c.type_text("nice", window, cx));
+        compose.update(cx, |c, cx| c.submit(cx));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.compose().is_none()), "closed after posting");
+    }
+
+    #[gpui_kit::test]
+    fn profile_card_adds_a_user_column(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let post = first_post(&app, cx);
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Profile(Arc::clone(&post.author)), cx));
+        cx.run_until_parked();
+        let last = app.read_with(cx, |app, _| app.deck().active().columns.last().cloned()).unwrap();
+        assert_eq!(last.source.title(), format!("@{}", post.author.handle));
     }
 }

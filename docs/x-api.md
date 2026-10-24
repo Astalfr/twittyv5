@@ -4,6 +4,8 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 > Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
 
+**M8:** `XBackend::act` and `publish` send the web client's mutations (below). They are tested against a mock server only; the first real use is the user's.
+
 **M7:** every `FeedSource` is mapped to a live-verified operation (user replies, media and likes, and lists added on 2026-10-24). Media grids page through `TimelineAddToModule`.
 
 **M5:** `XBackend` implements `twitty-model`'s `Backend` and the app uses it when it finds a session. Reads (`viewer`, `feed`, `thread`, `profile`) are wired; writes (`act`, `publish`) return an error until M8. Verified live on 2026-10-24: Home, Notifications and Search columns load with images.
@@ -157,6 +159,22 @@ The real web client builds this from an animation key in the home page plus a ha
 | 429 | `RateLimited` | `RateLimited` |
 | 5xx (after retries), other | `Http { status, snippet }` | `Upstream` |
 | connection / TLS / timeout | `Network` | `Network` |
+
+## Mutations (M8)
+
+| Action | Operation | Variables |
+|---|---|---|
+| Like / unlike | `FavoriteTweet` / `UnfavoriteTweet` | `{"tweet_id"}` |
+| Repost / undo | `CreateRetweet` / `DeleteRetweet` | `{"tweet_id", "dark_request": false}` / `{"source_tweet_id", "dark_request": false}` |
+| Bookmark / remove | `CreateBookmark` / `DeleteBookmark` | `{"tweet_id"}` |
+| Post / reply | `CreateTweet` | `{"tweet_text", "dark_request": false, "media": {"media_entities": [], "possibly_sensitive": false}, "semantic_annotation_ids": [], "disallowed_reply_options": null}` plus `reply: {"in_reply_to_tweet_id", "exclude_reply_user_ids": []}` for replies, `attachment_url: "https://x.com/i/status/<id>"` for quotes |
+
+All are POSTs with `{variables, features, queryId}`. Error handling (`backend.rs`):
+- codes **139** ("already favorited") and **327** ("already retweeted") count as success, so a double click or a stale view doesn't roll back a state that is in fact right;
+- any other `errors` with empty `data` becomes `BackendError::Upstream("X error <code>: <message>")`, which the UI shows (rollback for toggles, error text in compose);
+- `CreateTweet` returns the new tweet in `data.create_tweet.tweet_results.result`, translated with `translate::created_post`.
+
+**Not verified live**: these shapes come from the web client and community clients. If a write fails with a new error code, capture it (the message is in the UI and the log) and record it here.
 
 ## Response structure (wire, M4)
 
