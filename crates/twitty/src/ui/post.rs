@@ -104,7 +104,14 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
                                         .child(avatar(a, 32.0))
                                 }),
                             ))
-                            .child(rich_text(("notif", rcx.ix), &n.text, theme.link, window, cx))
+                            .child(rich_text(
+                                ("notif", rcx.ix),
+                                &n.text,
+                                &rcx.hub,
+                                theme.link,
+                                window,
+                                cx,
+                            ))
                             .children(n.target.as_ref().filter(|p| !p.body.is_empty()).map(|p| {
                                 div()
                                     .text_color(theme.muted_foreground)
@@ -322,7 +329,8 @@ fn post_row(
     }
 
     if !post.body.is_empty() {
-        content = content.child(rich_text(("body", key), &post.body, theme.link, window, cx));
+        content =
+            content.child(rich_text(("body", key), &post.body, &rcx.hub, theme.link, window, cx));
     }
     if !post.media.is_empty() {
         content =
@@ -399,10 +407,11 @@ pub(crate) fn verified_badge(
 }
 
 /// Text with clickable mentions, hashtags and links. The hovered one is
-/// underlined.
+/// underlined. A mention opens the account in the app, the others the browser.
 pub(crate) fn rich_text(
     id: (&'static str, usize),
     text: &RichText,
+    hub: &Entity<InteractionsHub>,
     link: Hsla,
     window: &mut Window,
     cx: &mut App,
@@ -428,12 +437,18 @@ pub(crate) fn rich_text(
     let ranges = spans.iter().map(|s| s.range.clone()).collect();
     let hover_spans = spans.clone();
     let on_text = hovered.clone();
+    let hub = hub.clone();
     let text = InteractiveText::new(id, styled)
         .on_click(ranges, move |ix, _, cx| {
-            if let Some(span) = spans.get(ix) {
-                // A link click must not also open the post's thread.
-                cx.stop_propagation();
-                cx.open_url(&span_url(&span.kind));
+            let Some(span) = spans.get(ix) else { return };
+            // A link click must not also open the post's thread.
+            cx.stop_propagation();
+            match &span.kind {
+                SpanKind::Mention(user) => {
+                    let to = Navigate::Mention(user.clone());
+                    hub.update(cx, |hub, cx| hub.navigate(to, cx));
+                }
+                kind => cx.open_url(&span_url(kind)),
             }
         })
         .on_hover(move |byte, _, _, cx| {
@@ -449,6 +464,7 @@ pub(crate) fn rich_text(
     // straight from a link would keep the underline.
     div()
         .id(ElementId::named_usize(format!("{}-text", id.0), id.1))
+        .debug_selector(move || format!("{}-text-{}", id.0, id.1))
         .w_full()
         .on_hover(move |inside, _, cx| {
             if !inside {
@@ -469,7 +485,7 @@ pub fn span_at(spans: &[Span], ix: usize) -> Option<usize> {
     spans.get(i).filter(|s| s.range.contains(&ix)).map(|_| i)
 }
 
-/// Where a click on a span leads (until in-app navigation exists).
+/// The web page of a span, for the browser.
 pub fn span_url(kind: &SpanKind) -> String {
     match kind {
         SpanKind::Mention(user) => format!("https://x.com/{}", user.handle),
@@ -677,12 +693,25 @@ fn quote_card(
         .children(q.media.first().map(|m| {
             let inner = (width - 2.0 * BORDER).max(0.0);
             let h = media_layout::layout(1, m.preview().aspect(), inner).height.min(220.);
-            div().w_full().h(px(h)).child(rounded_img(
-                remote_image::source(m.preview().url.as_str(), inner, h),
-                inner,
-                h,
-                media_layout::Corners::BOTTOM,
-            ))
+            let hub = hub.clone();
+            let post = Arc::new(q.clone());
+            div()
+                .id(("quote-media", id.1))
+                .debug_selector(move || format!("quote-media-{}", id.1))
+                .w_full()
+                .h(px(h))
+                .on_click(move |_, _, cx| {
+                    // The media opens fullscreen, not the quoted post.
+                    cx.stop_propagation();
+                    let to = Navigate::Media { post: Arc::clone(&post), index: 0 };
+                    hub.update(cx, |hub, cx| hub.navigate(to, cx));
+                })
+                .child(rounded_img(
+                    remote_image::source(m.preview().url.as_str(), inner, h),
+                    inner,
+                    h,
+                    media_layout::Corners::BOTTOM,
+                ))
         }))
 }
 
@@ -1088,6 +1117,16 @@ mod tests {
         item: FeedItem,
         target: &'static str,
     ) -> Vec<Navigate> {
+        navigations_at(cx, item, target, |b| b.center())
+    }
+
+    /// The navigations requested by a click on `target` at `at(its bounds)`.
+    fn navigations_at(
+        cx: &mut gpui_kit::TestAppContext,
+        item: FeedItem,
+        target: &'static str,
+        at: impl Fn(gpui_kit::Bounds<gpui_kit::Pixels>) -> gpui_kit::Point<gpui_kit::Pixels>,
+    ) -> Vec<Navigate> {
         use std::{cell::RefCell, rc::Rc};
         let backend: Arc<dyn twitty_model::Backend> =
             Arc::new(twitty_model::mock::MockBackend::new());
@@ -1100,7 +1139,7 @@ mod tests {
         let (_view, cx) = cx.add_window_view(|_, _| OnePost { item, hub });
         cx.run_until_parked();
         let bounds = cx.debug_bounds(target).unwrap_or_else(|| panic!("{target} rendered"));
-        cx.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
+        cx.simulate_click(at(bounds), gpui_kit::Modifiers::default());
         cx.run_until_parked();
         seen.take()
     }
@@ -1113,6 +1152,30 @@ mod tests {
             .block_on(MockBackend::new().feed(&source, PageRequest::First))
             .unwrap()
             .items
+    }
+
+    #[gpui_kit::test]
+    fn clicking_a_mention_opens_the_profile_in_the_app(cx: &mut gpui_kit::TestAppContext) {
+        use twitty_model::FeedSource;
+        cx.update(gpui_kit::init);
+        // The mock's rich posts start with a mention.
+        let post = mock_items(FeedSource::Bookmarks)
+            .iter()
+            .flat_map(|i| i.posts())
+            .find(|p| p.body.spans().first().is_some_and(|s| s.range.start == 0))
+            .cloned()
+            .expect("the mock has a post starting with a mention");
+        let SpanKind::Mention(user) = &post.body.spans()[0].kind else {
+            panic!("the post starts with a mention")
+        };
+        let user = user.clone();
+        let start =
+            |b: gpui_kit::Bounds<gpui_kit::Pixels>| b.origin + gpui_kit::point(px(6.), px(8.));
+        assert_eq!(
+            navigations_at(cx, FeedItem::Post(post), "body-text-0", start),
+            vec![Navigate::Mention(user)],
+            "the mention opens in the app, not the browser or the thread"
+        );
     }
 
     #[gpui_kit::test]
@@ -1171,6 +1234,41 @@ mod tests {
         let FeedItem::Notification(n) = &notification else { unreachable!() };
         let actor = Arc::clone(&n.actors[0]);
         assert_eq!(navigations(cx, notification, "notif-actor-0"), vec![Navigate::Profile(actor)]);
+    }
+
+    #[gpui_kit::test]
+    fn clicking_a_quoted_posts_media_opens_it_fullscreen(cx: &mut gpui_kit::TestAppContext) {
+        use twitty_model::FeedSource;
+        cx.update(gpui_kit::init);
+        let items = mock_items(FeedSource::Bookmarks);
+        let image = items
+            .iter()
+            .flat_map(|i| i.posts())
+            .flat_map(|p| p.media.iter())
+            .find(|m| matches!(m, Media::Image { .. }))
+            .cloned()
+            .expect("the mock has an image");
+        let (mut quoting, mut quoted) = items
+            .iter()
+            .find_map(|i| match i {
+                FeedItem::Post(p) => match p.embed.as_ref() {
+                    Some(Embed::Quote { quoted }) => match quoted.as_ref() {
+                        PostOrGone::Post(q) => Some((p.clone(), q.clone())),
+                        PostOrGone::Unavailable { .. } => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the mock has a quote");
+        quoted.media = vec![image];
+        quoting.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted.clone())) });
+
+        assert_eq!(
+            navigations(cx, FeedItem::Post(quoting), "quote-media-0"),
+            vec![Navigate::Media { post: Arc::new(quoted), index: 0 }],
+            "not the quoted post"
+        );
     }
 
     #[gpui_kit::test]

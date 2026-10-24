@@ -8,7 +8,9 @@ use gpui_kit::{
     Task, Window, assets::IconName, component::button::*, component::checkbox::Checkbox,
     component::scroll::ScrollableElement, component::*, div, img, prelude::*, px,
 };
-use twitty_model::{Backend, BackendError, FeedSource, Profile, mock::MockBackend};
+use twitty_model::{
+    Backend, BackendError, FeedSource, Profile, SpanKind, UserRef, mock::MockBackend,
+};
 
 use crate::{
     account::{AccountServices, SessionSource},
@@ -27,6 +29,7 @@ use crate::{
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
         login::{LoginEvent, LoginView},
+        post::span_url,
         profile::{CloseProfile, ProfilePanel},
         theme,
         thread::{CloseThread, ThreadPanel},
@@ -118,6 +121,8 @@ pub struct TwittyApp {
     compose: Option<Entity<ComposeView>>,
     /// The side sheet: a conversation or a profile.
     sheet: Option<Sheet>,
+    /// The lookup of a mentioned account, before its profile opens.
+    mention_lookup: Option<Task<()>>,
     account_panel: bool,
     settings_panel: bool,
     /// The latest settings write. Each save waits for the previous one, so the
@@ -179,6 +184,7 @@ impl TwittyApp {
             add_column: None,
             compose: None,
             sheet: None,
+            mention_lookup: None,
             account_panel: false,
             settings_panel: false,
             settings_save: None,
@@ -252,6 +258,7 @@ impl TwittyApp {
         // Panels show the old account's data.
         self.sheet = None;
         self._sheet_sub = None;
+        self.mention_lookup = None;
     }
 
     pub fn thread_panel(&self) -> Option<&Entity<ThreadPanel>> {
@@ -278,6 +285,7 @@ impl TwittyApp {
             Navigate::Thread(id) => self.open_thread(id, cx),
             Navigate::Reply(post) => self.open_compose(Some(post), window, cx),
             Navigate::Profile(p) => self.open_profile(p, cx),
+            Navigate::Mention(user) => self.open_mention(user, cx),
             Navigate::UserColumn(p) => {
                 let source = crate::state::add_column::user_source(p.id.clone(), &p.handle);
                 self.add_column(source, cx);
@@ -559,6 +567,31 @@ impl TwittyApp {
         let panel = cx.new(|cx| ProfilePanel::new(profile, backend, hub, cx));
         let sub = cx.subscribe(&panel, |this, _, _: &CloseProfile, cx| this.close_sheet(cx));
         self.show_sheet(Sheet::Profile(panel), sub, cx);
+    }
+
+    /// Looks up the account a text mentions, then shows its profile. If it
+    /// can't be found (e.g. suspended), x.com shows why.
+    pub fn open_mention(&mut self, user: UserRef, cx: &mut Context<Self>) {
+        if let Some(panel) = self.profile_panel()
+            && panel.read(cx).profile().handle.eq_ignore_ascii_case(&user.handle)
+        {
+            return;
+        }
+        let backend = Arc::clone(&self.backend);
+        let handle = user.handle.to_string();
+        let result = Runtime::global(cx).spawn(async move { backend.profile(&handle).await });
+        self.mention_lookup = Some(cx.spawn(async move |this, cx| {
+            let error = match result.await {
+                Ok(Ok(profile)) => {
+                    this.update(cx, |this, cx| this.open_profile(Arc::new(profile), cx)).ok();
+                    return;
+                }
+                Ok(Err(e)) => e.to_string(),
+                Err(e) => e.to_string(),
+            };
+            tracing::warn!("profile lookup of a mention failed: {error}");
+            cx.update(|cx| cx.open_url(&span_url(&SpanKind::Mention(user))));
+        }));
     }
 
     /// Puts `sheet` in the side panel, replacing what it showed.
@@ -1993,6 +2026,26 @@ mod tests {
         let last = app.read_with(cx, |app, _| app.deck().active().columns.last().cloned()).unwrap();
         assert_eq!(last.source.title(), format!("@{}", post.author.handle));
         assert!(app.read_with(cx, |app, _| app.profile_panel().is_none()), "no sheet");
+    }
+
+    #[gpui_kit::test]
+    fn a_mention_is_looked_up_and_opens_in_a_profile_sheet(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let author = Arc::clone(&first_post(&app, cx).author);
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        // Mentions can differ in case from the handle.
+        let user = UserRef { id: None, handle: author.handle.to_uppercase().into() };
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Mention(user), cx));
+        cx.run_until_parked();
+        let panel = app.read_with(cx, |app, _| app.profile_panel().cloned()).expect("sheet open");
+        assert_eq!(panel.read_with(cx, |p, _| p.profile().id.clone()), author.id);
+
+        let unknown = UserRef { id: None, handle: "nobody_here".into() };
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Mention(unknown), cx));
+        cx.run_until_parked();
+        let still = app.read_with(cx, |app, _| app.profile_panel().cloned());
+        assert_eq!(still, Some(panel), "an unknown account keeps the sheet");
     }
 
     fn open_profile(

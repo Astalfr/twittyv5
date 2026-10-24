@@ -297,7 +297,7 @@ impl ProfilePanel {
                     ),
             )
             .when(!p.bio.is_empty(), |d| {
-                d.child(rich_text(("bio", 0), &p.bio, theme.link, window, cx))
+                d.child(rich_text(("bio", 0), &p.bio, &self.hub, theme.link, window, cx))
             })
             .child(
                 h_flex()

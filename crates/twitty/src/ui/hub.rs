@@ -4,7 +4,7 @@
 use std::{sync::Arc, time::Instant};
 
 use gpui_kit::{Context, EventEmitter};
-use twitty_model::{Backend, BackendError, Post, PostId, Profile};
+use twitty_model::{Backend, BackendError, Post, PostId, Profile, UserRef};
 
 use crate::{
     runtime::Runtime,
@@ -27,6 +27,9 @@ pub enum Navigate {
     Reply(Arc<Post>),
     /// Show an account's profile.
     Profile(Arc<Profile>),
+    /// Show the profile of an account mentioned in a text, which must be
+    /// looked up first.
+    Mention(UserRef),
     /// Add a column with an account's posts.
     UserColumn(Arc<Profile>),
     /// Show a post's media in the viewer, starting at `index`.
