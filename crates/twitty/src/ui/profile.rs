@@ -18,6 +18,7 @@ use crate::{
         column::{ColumnModel, ListChange, LoadKind, Status},
         follow::Follow,
         profile::{self, ProfileTab, Row, Tile},
+        toasts::Notice,
     },
     ui::button::TextButton,
     ui::{
@@ -203,6 +204,11 @@ impl ProfilePanel {
                 tracing::warn!("follow change failed: {e}");
             }
             this.update(cx, |this, cx| {
+                let notice = match &result {
+                    Ok(_) => Notice::follow_done(action, &this.profile.handle),
+                    Err(e) => Notice::follow_failed(action, e, chrono::Utc::now()),
+                };
+                this.hub.update(cx, |hub, cx| hub.notice(notice, cx));
                 this.follow.answered(result);
                 this.header_changed(cx);
             })

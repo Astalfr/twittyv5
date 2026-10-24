@@ -1,22 +1,20 @@
 //! Shared, observable wrapper around [`Interactions`] that also sends the
-//! actions to the backend and rolls back on failure.
+//! actions to the backend, rolls back on failure, and reports both outcomes
+//! as [`Notice`]s for the app's toasts.
 
 use std::{sync::Arc, time::Instant};
 
 use gpui_kit::{Context, EventEmitter};
-use twitty_model::{Backend, BackendError, Post, PostId, Profile, UserRef};
+use twitty_model::{Backend, BackendError, Post, PostAction, PostId, Profile, UserRef};
 
 use crate::{
     runtime::Runtime,
     state::{
         interactions::{Effective, Interactions, Toggle},
         motion::{self, Recent},
+        toasts::Notice,
     },
 };
-
-/// Emitted when an optimistic action had to be undone.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ActionFailed(pub BackendError);
 
 /// A request from a post row to open something; the app decides how.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +48,7 @@ impl std::fmt::Debug for InteractionsHub {
     }
 }
 
-impl EventEmitter<ActionFailed> for InteractionsHub {}
+impl EventEmitter<Notice> for InteractionsHub {}
 impl EventEmitter<Navigate> for InteractionsHub {}
 
 impl InteractionsHub {
@@ -74,6 +72,11 @@ impl InteractionsHub {
         cx.emit(to);
     }
 
+    /// Asks the app to show a toast.
+    pub fn notice(&mut self, notice: Notice, cx: &mut Context<Self>) {
+        cx.emit(notice);
+    }
+
     /// Optimistically flips `toggle`, then confirms with the backend.
     pub fn toggle(&mut self, post: &Post, toggle: Toggle, cx: &mut Context<Self>) {
         let pending = self.state.toggle(post, toggle);
@@ -86,22 +89,33 @@ impl InteractionsHub {
         cx.notify();
         let backend = Arc::clone(&self.backend);
         let action = pending.action.clone();
-        let result = Runtime::global(cx).spawn(async move { backend.act(action).await });
+        let sent = action.clone();
+        let result = Runtime::global(cx).spawn(async move { backend.act(sent).await });
         cx.spawn(async move |this, cx| {
             let error = match result.await {
-                Ok(Ok(())) => return,
+                Ok(Ok(())) => {
+                    this.update(cx, |_, cx| done(&action, cx)).ok();
+                    return;
+                }
                 Ok(Err(e)) => e,
                 Err(e) => BackendError::Network(e.to_string()),
             };
             tracing::warn!("post action failed, rolling back: {error}");
             this.update(cx, |this, cx| {
                 this.state.rollback(pending);
-                cx.emit(ActionFailed(error));
+                cx.emit(Notice::action_failed(&action, &error, chrono::Utc::now()));
                 cx.notify();
             })
             .ok();
         })
         .detach();
+    }
+}
+
+/// Reports an action that went through, if it says anything.
+fn done(action: &PostAction, cx: &mut Context<InteractionsHub>) {
+    if let Some(notice) = Notice::action_done(action) {
+        cx.emit(notice);
     }
 }
 
@@ -157,17 +171,12 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    async fn failed_action_rolls_back_and_emits(cx: &mut TestAppContext) {
+    async fn failed_action_rolls_back_and_reports_why(cx: &mut TestAppContext) {
         cx.update(|cx| cx.set_global(Runtime::inline()));
         let backend = MockBackend::new();
         let post = first_post(&backend).await;
         let hub = cx.new(|_| InteractionsHub::new(Arc::new(backend.clone())));
-        let failures = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let seen = Arc::clone(&failures);
-        cx.update(|cx| {
-            cx.subscribe(&hub, move |_, e: &ActionFailed, _| seen.lock().unwrap().push(e.clone()))
-                .detach();
-        });
+        let notices = notices(&hub, cx);
 
         backend.fail_next(BackendError::Upstream("nope".into()));
         hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Repost, cx));
@@ -176,6 +185,39 @@ mod tests {
         cx.run_until_parked();
 
         assert!(!hub.read_with(cx, |hub, _| hub.effective(&post).viewer.reposted));
-        assert_eq!(failures.lock().unwrap().len(), 1);
+        assert_eq!(*notices.lock().unwrap(), [Notice::error("Couldn't repost: nope")]);
+    }
+
+    #[gpui_kit::test]
+    async fn actions_that_went_through_are_reported_except_likes(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_global(Runtime::inline()));
+        let backend = MockBackend::new();
+        let post = first_post(&backend).await;
+        let hub = cx.new(|_| InteractionsHub::new(Arc::new(backend.clone())));
+        let notices = notices(&hub, cx);
+
+        hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Like, cx));
+        hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Repost, cx));
+        hub.update(cx, |hub, cx| hub.toggle(&post, Toggle::Bookmark, cx));
+        cx.run_until_parked();
+
+        assert_eq!(
+            *notices.lock().unwrap(),
+            [Notice::success("Reposted"), Notice::success("Added to Bookmarks")]
+        );
+    }
+
+    /// Every notice `hub` emits, in order.
+    fn notices(
+        hub: &gpui_kit::Entity<InteractionsHub>,
+        cx: &mut TestAppContext,
+    ) -> Arc<std::sync::Mutex<Vec<Notice>>> {
+        let notices = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = Arc::clone(&notices);
+        cx.update(|cx| {
+            cx.subscribe(hub, move |_, e: &Notice, _| seen.lock().unwrap().push(e.clone()))
+                .detach();
+        });
+        notices
     }
 }

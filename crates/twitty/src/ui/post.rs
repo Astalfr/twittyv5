@@ -30,7 +30,7 @@ use twitty_model::{
 
 use crate::{
     format::{compact_count, exact_count, exact_time, relative_time},
-    state::{interactions::Toggle, links, media_layout, motion},
+    state::{interactions::Toggle, links, media_layout, motion, toasts::Notice},
     ui::button::TextButton,
     ui::{
         assets::{BOOKMARK_FILL, HEART_FILL},
@@ -477,6 +477,7 @@ fn post_row(
     content = content.pt(px(top)).pb_2();
 
     let hub = rcx.hub.clone();
+    let menu_hub = rcx.hub.clone();
     let id = post.id.clone();
     v_flex()
         .id(("post", key))
@@ -512,8 +513,10 @@ fn post_row(
         .child(h_flex().items_stretch().gap(px(GAP)).child(avatar_col).child(content))
         .context_menu(move |menu, _, _| {
             let link = link.clone();
+            let hub = menu_hub.clone();
             menu.item(PopupMenuItem::new("Copy tweet link").on_click(move |_, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+                hub.update(cx, |hub, cx| hub.notice(Notice::success("Link copied"), cx));
             }))
         })
         .into_any_element()

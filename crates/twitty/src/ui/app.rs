@@ -24,6 +24,7 @@ use crate::{
         playback::{self, Autoplay, State},
         poll,
         settings::Settings,
+        toasts::{Notice, Toasts},
     },
     ui::button::TextButton,
     ui::{
@@ -32,7 +33,7 @@ use crate::{
         column_settings::{ColumnSettingsEvent, ColumnSettingsView},
         compose::{ComposeEvent, ComposeView},
         gif::GifAutoplay,
-        hub::{ActionFailed, InteractionsHub, Navigate},
+        hub::{InteractionsHub, Navigate},
         keys,
         login::{LoginEvent, LoginView},
         player::{Options as PlayerOptions, Quality, VideoPlayer, play_pause_sign},
@@ -40,7 +41,7 @@ use crate::{
         profile::{CloseProfile, ProfilePanel},
         theme,
         thread::{CloseThread, ThreadPanel},
-        title_bar,
+        title_bar, toasts as toast_view,
     },
 };
 
@@ -165,6 +166,9 @@ pub struct TwittyApp {
     _compose_sub: Option<Subscription>,
     _sheet_sub: Option<Subscription>,
     _hub_subs: Vec<Subscription>,
+    /// Messages at the bottom of the window, and the timer that hides them.
+    toasts: Toasts,
+    _toast_timer: Option<Task<()>>,
     /// Column event subscriptions; replaced with the columns.
     _subs: Vec<Subscription>,
 }
@@ -225,6 +229,8 @@ impl TwittyApp {
             _compose_sub: None,
             _sheet_sub: None,
             _hub_subs: Vec::new(),
+            toasts: Toasts::default(),
+            _toast_timer: None,
             _subs: Vec::new(),
         };
         // GPUI never sets this from the OS; only the setting turns motion off.
@@ -273,8 +279,8 @@ impl TwittyApp {
     fn build_hub(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.hub = cx.new(|_| InteractionsHub::new(Arc::clone(&self.backend)));
         self._hub_subs = vec![
-            cx.subscribe(&self.hub, |_, _, e: &ActionFailed, _| {
-                tracing::warn!("action failed: {}", e.0);
+            cx.subscribe(&self.hub, |this, _, notice: &Notice, cx| {
+                this.show_toast(notice.clone(), cx);
             }),
             cx.subscribe_in(&self.hub, window, |this, _, e: &Navigate, window, cx| {
                 this.navigate(e.clone(), window, cx);
@@ -284,6 +290,45 @@ impl TwittyApp {
         self.sheet = None;
         self._sheet_sub = None;
         self.mention_lookup = None;
+    }
+
+    /// The toasts on screen.
+    pub fn toasts(&self) -> &Toasts {
+        &self.toasts
+    }
+
+    /// Shows `notice` at the bottom of the window for a few seconds.
+    pub fn show_toast(&mut self, notice: Notice, cx: &mut Context<Self>) {
+        self.toasts.push(notice, cx.background_executor().now());
+        self.schedule_toasts(cx);
+        cx.notify();
+    }
+
+    /// Starts fading out toast `id` (it was clicked).
+    fn dismiss_toast(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.toasts.dismiss(id, cx.background_executor().now());
+        self.schedule_toasts(cx);
+        cx.notify();
+    }
+
+    /// Wakes up when the next toast hides or finishes fading out. Time comes
+    /// from the executor, so tests can move it.
+    fn schedule_toasts(&mut self, cx: &mut Context<Self>) {
+        let now = cx.background_executor().now();
+        let Some(next) = self.toasts.next_change(now) else {
+            self._toast_timer = None;
+            return;
+        };
+        let wait = next.saturating_duration_since(now);
+        self._toast_timer = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            this.update(cx, |this, cx| {
+                this.toasts.expire(cx.background_executor().now());
+                this.schedule_toasts(cx);
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     pub fn thread_panel(&self) -> Option<&Entity<ThreadPanel>> {
@@ -744,6 +789,7 @@ impl TwittyApp {
         self._compose_sub = Some(cx.subscribe(&view, |this, _, e: &ComposeEvent, cx| {
             if let ComposeEvent::Published(post) = e {
                 tracing::info!("published post {}", post.id);
+                this.show_toast(Notice::published(post), cx);
                 // A reply shows up in the open conversation.
                 let parent = post.reply_to.as_ref().and_then(|r| r.post.as_ref());
                 if let Some(panel) = this.thread_panel()
@@ -1841,12 +1887,20 @@ impl Render for TwittyApp {
                 )
             })
             .children(leaving);
+        let toasts = toast_view::render(
+            &self.toasts,
+            cx.background_executor().now(),
+            &theme,
+            cx.reduce_motion(),
+            cx.listener(|this, id: &u64, _, cx| this.dismiss_toast(*id, cx)),
+        );
         v_flex()
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
             .child(render_title_bar(&theme))
-            .child(content)
+            // Over the overlays too, so a result shows whatever is open.
+            .child(content.children(toasts))
     }
 }
 
@@ -2533,12 +2587,19 @@ mod tests {
     }
 
     fn keyboard_app(cx: &mut TestAppContext) -> (Entity<TwittyApp>, &mut VisualTestContext) {
+        keyboard_app_on(MockBackend::new(), cx)
+    }
+
+    fn keyboard_app_on(
+        backend: MockBackend,
+        cx: &mut TestAppContext,
+    ) -> (Entity<TwittyApp>, &mut VisualTestContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             keys::bind(cx);
             cx.set_global(Runtime::inline());
         });
-        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let backend: Arc<dyn Backend> = Arc::new(backend);
         let (app, cx) = cx.add_window_view(|window, cx| {
             TwittyApp::new(
                 DeckFile::default(),
@@ -2589,6 +2650,45 @@ mod tests {
         assert_eq!(panel.read_with(cx, |p, _| p.root().clone()), post.id);
         cx.simulate_keystrokes("escape");
         assert!(app.read_with(cx, |app, _| app.thread_panel().is_none()), "Esc closes the panel");
+    }
+
+    fn toast_texts(app: &Entity<TwittyApp>, cx: &mut VisualTestContext) -> Vec<String> {
+        app.read_with(cx, |app, _| app.toasts().items().iter().map(|t| t.text.clone()).collect())
+    }
+
+    #[gpui_kit::test]
+    fn a_bookmark_shows_a_toast_that_hides_by_itself(cx: &mut TestAppContext) {
+        use crate::state::toasts::{EXIT, SUCCESS_TTL};
+        let (app, cx) = keyboard_app(cx);
+        cx.simulate_keystrokes("j b");
+        cx.run_until_parked();
+        assert_eq!(toast_texts(&app, cx), ["Added to Bookmarks"]);
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        let toasts = cx.debug_bounds("toasts").expect("the toast is drawn");
+        let window = cx.debug_bounds("app-content").expect("content is drawn");
+        assert_eq!(window.right() - toasts.right(), px(16.), "16px from the right edge");
+        assert_eq!(window.bottom() - toasts.bottom(), px(16.), "16px from the bottom edge");
+
+        cx.executor().advance_clock(SUCCESS_TTL);
+        cx.run_until_parked();
+        assert_eq!(toast_texts(&app, cx).len(), 1, "fading out");
+        cx.executor().advance_clock(EXIT);
+        cx.run_until_parked();
+        assert!(toast_texts(&app, cx).is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn a_failed_action_shows_why(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        let (app, cx) = keyboard_app_on(backend.clone(), cx);
+        // After the columns loaded: the like is the next call.
+        backend.fail_next(BackendError::Upstream("X error 226: automated".into()));
+        cx.simulate_keystrokes("j l");
+        cx.run_until_parked();
+        assert_eq!(toast_texts(&app, cx), ["Couldn't like: X error 226: automated"]);
+        let kind = app.read_with(cx, |app, _| app.toasts().items()[0].kind);
+        assert_eq!(kind, crate::state::toasts::ToastKind::Error);
     }
 
     #[gpui_kit::test]
