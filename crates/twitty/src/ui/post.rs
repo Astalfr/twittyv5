@@ -216,21 +216,30 @@ fn post_row(
     let width = content_width(rcx.column_width);
     let key = rcx.ix * 16 + sub;
 
+    // A long name or handle truncates; the time never does.
     let header = h_flex()
         .gap_1()
         .min_w_0()
         .overflow_hidden()
+        .text_color(theme.muted_foreground)
         .child(
             div()
+                .min_w_0()
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme.foreground)
                 .truncate()
                 .child(post.author.display_name.clone()),
         )
         .children(post.author.badges.verified.map(|v| verified_badge(v, &theme)))
-        .child(div().text_color(theme.muted_foreground).truncate().flex_shrink_0().flex_1().child(
-            format!("@{} · {}", post.author.handle, relative_time(post.created_at, Utc::now())),
-        ));
+        .child(div().min_w_0().truncate().child(format!("@{}", post.author.handle)))
+        .child(
+            div()
+                .id(("time", key))
+                .debug_selector(|| format!("post-time-{key}"))
+                .flex_none()
+                .whitespace_nowrap()
+                .child(format!("· {}", relative_time(post.created_at, Utc::now()))),
+        );
 
     let mut content = v_flex().flex_1().min_w_0().gap_1().child(header);
 
@@ -829,6 +838,49 @@ mod tests {
     fn unavailable_texts_are_human() {
         assert!(unavailable_text(&UnavailableReason::Deleted).contains("deleted"));
         assert_eq!(unavailable_text(&UnavailableReason::Other(Some("x".into()))), "x");
+    }
+
+    /// Renders one post in the narrowest column width.
+    struct OnePost {
+        item: FeedItem,
+        hub: Entity<InteractionsHub>,
+    }
+
+    impl gpui_kit::Render for OnePost {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl IntoElement {
+            let rcx = RowCtx { ix: 0, column_width: 310., hub: self.hub.clone() };
+            div().w(px(310.)).child(render_item(&self.item, &rcx, window, cx))
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_long_name_never_hides_the_time(cx: &mut gpui_kit::TestAppContext) {
+        use twitty_model::{Backend, FeedSource, PageRequest, mock::MockBackend};
+        cx.update(gpui_kit::init);
+        let backend = MockBackend::new();
+        let page = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(backend.feed(&FeedSource::Bookmarks, PageRequest::First))
+            .unwrap();
+        let mut post =
+            page.items.iter().find_map(|i| i.posts().first().map(|p| (*p).clone())).unwrap();
+        let author = Arc::make_mut(&mut post.author);
+        author.display_name = "A display name far too long to fit in any column at all".into();
+        author.handle = "a_rather_long_handle_too".into();
+        post.reply_to = None;
+        let shared: Arc<dyn Backend> = Arc::new(backend);
+        let hub = cx.new(|_| InteractionsHub::new(shared));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+
+        let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
+        assert!(time.size.width > px(10.), "the time keeps its width: {time:?}");
+        assert!(time.right() <= px(310.), "the time is inside the row: {time:?}");
     }
 
     #[gpui_kit::test]
