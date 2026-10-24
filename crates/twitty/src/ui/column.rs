@@ -25,6 +25,7 @@ use crate::{
         poll,
         sources::{self, Tab},
     },
+    ui::button::TextButton,
     ui::{
         hub::InteractionsHub,
         post::{RowCtx, render_item},
@@ -355,7 +356,7 @@ impl ColumnView {
                     .child(div().text_color(theme.muted_foreground).child(error.to_string()))
                     .child(
                         Button::new("retry-older")
-                            .small()
+                            .text_button(Size::Small)
                             .label("Retry")
                             .on_click(cx.listener(move |this, _, _, cx| this.load(retry, cx))),
                     )
@@ -495,24 +496,28 @@ impl ColumnView {
         let theme = cx.theme().clone();
         if !self.model.loaded_once() {
             return match self.model.status() {
-                Status::Failed { error, .. } => {
-                    v_flex()
-                        .size_full()
-                        .items_center()
-                        .justify_center()
-                        .gap_3()
-                        .px_6()
-                        .child(
-                            Icon::new(IconName::CircleAlert)
-                                .size(px(28.))
-                                .text_color(theme.muted_foreground),
-                        )
-                        .child(div().text_color(theme.muted_foreground).child(error.to_string()))
-                        .child(Button::new("retry").primary().label("Retry").on_click(
-                            cx.listener(|this, _, _, cx| this.load(LoadKind::Refresh, cx)),
-                        ))
-                        .into_any_element()
-                }
+                Status::Failed { error, .. } => v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .px_6()
+                    .child(
+                        Icon::new(IconName::CircleAlert)
+                            .size(px(28.))
+                            .text_color(theme.muted_foreground),
+                    )
+                    .child(div().text_color(theme.muted_foreground).child(error.to_string()))
+                    .child(
+                        Button::new("retry")
+                            .primary()
+                            .text_button(Size::Medium)
+                            .label("Retry")
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.load(LoadKind::Refresh, cx)),
+                            ),
+                    )
+                    .into_any_element(),
                 _ => skeleton_rows().into_any_element(),
             };
         }
@@ -526,8 +531,8 @@ impl ColumnView {
             .when(unseen > 0, |d| {
                 let pill = Button::new("new-posts")
                     .primary()
-                    .small()
                     .icon(Icon::new(IconName::ArrowUp))
+                    .text_button(Size::Small)
                     .label(SharedString::from(format!(
                         "{unseen} new post{}",
                         if unseen == 1 { "" } else { "s" }

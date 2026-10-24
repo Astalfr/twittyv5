@@ -31,6 +31,7 @@ use twitty_model::{
 use crate::{
     format::{compact_count, exact_count, exact_time, relative_time},
     state::{interactions::Toggle, links, media_layout, motion},
+    ui::button::TextButton,
     ui::{
         assets::{BOOKMARK_FILL, HEART_FILL},
         gif::inline_gif,
@@ -296,12 +297,14 @@ fn profile_hover(
                     .child(format!("{} Following", compact_count(p.counts.following)))
                     .child(format!("{} Followers", compact_count(p.counts.followers))),
             )
-            .child(Button::new("open-profile").small().label("Open column").on_click(
-                move |_, _, cx| {
-                    let to = Navigate::UserColumn(Arc::clone(&p));
-                    hub.update(cx, |hub, cx| hub.navigate(to, cx));
-                },
-            ))
+            .child(
+                Button::new("open-profile").text_button(Size::Small).label("Open column").on_click(
+                    move |_, _, cx| {
+                        let to = Navigate::UserColumn(Arc::clone(&p));
+                        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+                    },
+                ),
+            )
     })
 }
 

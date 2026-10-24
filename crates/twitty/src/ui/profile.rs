@@ -18,6 +18,7 @@ use crate::{
         column::{ColumnModel, ListChange, LoadKind, Status},
         profile::{self, ProfileTab, Row, Tile},
     },
+    ui::button::TextButton,
     ui::{
         hub::{InteractionsHub, Navigate},
         post::{RowCtx, avatar, fmt_duration, render_item, rich_text, verified_badge, video_badge},
@@ -435,7 +436,7 @@ impl ProfilePanel {
                     .child(div().text_color(theme.muted_foreground).child(error.to_string()))
                     .child(
                         Button::new("profile-retry")
-                            .small()
+                            .text_button(Size::Small)
                             .label("Retry")
                             .on_click(cx.listener(move |this, _, _, cx| this.load(tab, retry, cx))),
                     )

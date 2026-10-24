@@ -11,6 +11,7 @@ use twitty_model::FeedSource;
 use crate::{
     sound,
     state::deck::{ColumnId, ColumnSettings, ColumnWidth, Volume},
+    ui::button::TextButton,
     ui::column,
 };
 
@@ -250,7 +251,7 @@ impl Render for ColumnSettingsView {
                     .child(
                         Button::new("column-test-notification")
                             .debug_selector(|| "column-test-notification".into())
-                            .xsmall()
+                            .text_button(Size::XSmall)
                             .label("Test")
                             .tooltip("Send a test notification")
                             .on_click(cx.listener(|this, _, _, cx| this.test_notification(cx))),
@@ -258,9 +259,13 @@ impl Render for ColumnSettingsView {
             )
             .child(
                 h_flex().justify_end().pt_2().child(
-                    Button::new("column-settings-done").primary().label("Done").on_click(
-                        cx.listener(|_, _, _, cx| cx.emit(ColumnSettingsEvent::Dismissed)),
-                    ),
+                    Button::new("column-settings-done")
+                        .primary()
+                        .text_button(Size::Medium)
+                        .label("Done")
+                        .on_click(
+                            cx.listener(|_, _, _, cx| cx.emit(ColumnSettingsEvent::Dismissed)),
+                        ),
                 ),
             )
     }

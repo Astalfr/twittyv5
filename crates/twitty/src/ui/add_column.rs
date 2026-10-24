@@ -13,6 +13,7 @@ use twitty_model::{Backend, BackendError, FeedSource};
 use crate::{
     runtime::Runtime,
     state::add_column::{self, ColumnKind, Parsed},
+    ui::button::TextButton,
     ui::column::source_icon,
 };
 
@@ -158,8 +159,8 @@ impl Render for AddColumnView {
             let icon = source_icon(&sample_source(kind));
             let button = Button::new(kind.label())
                 .icon(Icon::new(icon))
+                .text_button(Size::Small)
                 .label(kind.label())
-                .small()
                 .on_click(cx.listener(move |this, _, window, cx| this.choose(kind, window, cx)));
             if kind == selected && kind.prompt().is_some() {
                 button.primary()
@@ -190,14 +191,19 @@ impl Render for AddColumnView {
                     .justify_end()
                     .gap_2()
                     .child(
-                        Button::new("add-cancel").ghost().label("Cancel").on_click(
-                            cx.listener(|_, _, _, cx| cx.emit(AddColumnEvent::Dismissed)),
-                        ),
+                        Button::new("add-cancel")
+                            .ghost()
+                            .text_button(Size::Medium)
+                            .label("Cancel")
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(AddColumnEvent::Dismissed)),
+                            ),
                     )
                     .when(selected.prompt().is_some(), |d| {
                         d.child(
                             Button::new("add-submit")
                                 .primary()
+                                .text_button(Size::Medium)
                                 .label(if looking_up { "Looking up…" } else { "Add" })
                                 .loading(looking_up)
                                 .on_click(

@@ -25,6 +25,7 @@ use crate::{
         poll,
         settings::Settings,
     },
+    ui::button::TextButton,
     ui::{
         add_column::{AddColumnEvent, AddColumnView},
         column::{ColumnEvent, ColumnView, source_icon},
@@ -657,6 +658,7 @@ impl TwittyApp {
                                 .debug_selector(|| "media-play".into())
                                 .primary()
                                 .icon(IconName::Play)
+                                .text_button(Size::Medium)
                                 .label("Play on x.com")
                                 .when(interactive, |b| {
                                     b.on_click(move |_, _, cx| {
@@ -1177,7 +1179,7 @@ impl TwittyApp {
         let current = self.theme_name;
         let themes = theme::NAMES.into_iter().map(|name| {
             let button = Button::new(name)
-                .small()
+                .text_button(Size::Small)
                 .label(name)
                 .on_click(cx.listener(move |this, _, window, cx| this.set_theme(name, window, cx)));
             if name == current { button.primary() } else { button.ghost() }
@@ -1266,7 +1268,7 @@ impl TwittyApp {
                         .child(div().flex_1().truncate().child(format!("Log: {}", log.display())))
                         .child(
                             Button::new("open-log")
-                                .xsmall()
+                                .text_button(Size::XSmall)
                                 .label("Show")
                                 .on_click(move |_, _, cx| cx.reveal_path(&log)),
                         ),
@@ -1275,6 +1277,7 @@ impl TwittyApp {
             .child(
                 h_flex().justify_end().child(
                     Button::new("settings-close")
+                        .text_button(Size::Medium)
                         .label("Done")
                         .on_click(cx.listener(|this, _, _, cx| this.close_overlays(cx))),
                 ),
@@ -1446,6 +1449,7 @@ impl TwittyApp {
                     .child(
                         Button::new("account-close")
                             .ghost()
+                            .text_button(Size::Medium)
                             .label("Close")
                             .on_click(cx.listener(|this, _, _, cx| this.close_overlays(cx))),
                     )
@@ -1454,6 +1458,7 @@ impl TwittyApp {
                             Button::new("sign-out")
                                 .danger()
                                 .icon(IconName::LogOut)
+                                .text_button(Size::Medium)
                                 .label("Sign out")
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.sign_out(window, cx)),
@@ -1617,24 +1622,30 @@ impl Render for TwittyApp {
         let demo = self.options.session.is_none();
         let can_sign_in = self.options.account.is_some();
         // At the top of the deck area, so the rail and the title bar still meet.
-        let banner = demo.then(|| {
-            h_flex()
-                .w_full()
-                .justify_center()
-                .items_center()
-                .gap_3()
-                .py_1()
-                .text_xs()
-                .rounded_tl(px(CHROME_RADIUS - 1.))
-                .bg(theme.primary.opacity(0.15))
-                .text_color(theme.primary)
-                .child("Demo mode: showing generated posts")
-                .when(can_sign_in, |d| {
-                    d.child(Button::new("banner-sign-in").xsmall().label("Sign in").on_click(
-                        cx.listener(|this, _, window, cx| this.open_login(None, window, cx)),
-                    ))
-                })
-        });
+        let banner =
+            demo.then(|| {
+                h_flex()
+                    .w_full()
+                    .justify_center()
+                    .items_center()
+                    .gap_3()
+                    .py_1()
+                    .text_xs()
+                    .rounded_tl(px(CHROME_RADIUS - 1.))
+                    .bg(theme.primary.opacity(0.15))
+                    .text_color(theme.primary)
+                    .child("Demo mode: showing generated posts")
+                    .when(can_sign_in, |d| {
+                        d.child(
+                            Button::new("banner-sign-in")
+                                .text_button(Size::XSmall)
+                                .label("Sign in")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_login(None, window, cx)
+                                })),
+                        )
+                    })
+            });
         // Overlays cover this part only, so the title bar always stays usable.
         let content = v_flex()
             .debug_selector(|| "app-content".into())
@@ -1773,8 +1784,12 @@ impl Render for TwittyApp {
                 // The image viewer fills the window, so it only fades; cards
                 // also rise a little into place.
                 let content = if card {
+                    // Occluding, so only clicks beside the card reach the
+                    // backdrop under it.
                     div()
+                        .debug_selector(|| "overlay-card".into())
                         .relative()
+                        .occlude()
                         .child(overlay)
                         .with_animation(anim_id("overlay-in", name), enter(), |d, t| {
                             d.opacity(t).top(px(motion::TRAVEL * (1. - t)))
@@ -1789,7 +1804,21 @@ impl Render for TwittyApp {
                 };
                 // Over the thread panel, the panel's own backdrop was already
                 // drawn: fading this one in would flash lighter.
-                let shade = div().absolute().top_0().left_0().size_full().bg(backdrop);
+                let shade = div()
+                    .debug_selector(|| "overlay-backdrop".into())
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .bg(backdrop)
+                    // A press beside a dialog closes it, like Esc. The image
+                    // viewer handles its own clicks.
+                    .when(card, |d| {
+                        d.on_any_mouse_down(cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.dismiss(cx);
+                        }))
+                    });
                 let shade = if sheet_open {
                     shade.into_any_element()
                 } else {
@@ -2976,6 +3005,49 @@ mod tests {
         );
         cx.run_until_parked();
         assert_eq!(index(cx), None);
+    }
+
+    /// Opens one kind of dialog (some need the column's id).
+    type OpenDialog = fn(&mut TwittyApp, ColumnId, &mut Window, &mut Context<TwittyApp>);
+
+    #[gpui_kit::test]
+    fn a_press_beside_a_dialog_closes_it_but_not_one_inside(cx: &mut TestAppContext) {
+        // With account services, so the sign-in dialog opens too.
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let column = app.read_with(cx, |app, _| app.columns[0].0);
+        let openers: [(&str, OpenDialog); 6] = [
+            ("compose", |app, _, window, cx| app.open_compose(None, window, cx)),
+            ("add column", |app, _, window, cx| app.open_add_column(window, cx)),
+            ("column settings", |app, id, window, cx| app.open_column_settings(id, window, cx)),
+            ("login", |app, _, window, cx| app.open_login(None, window, cx)),
+            ("settings", |app, _, _, cx| app.open_settings(cx)),
+            ("account", |app, _, _, cx| {
+                app.account_panel = true;
+                cx.notify();
+            }),
+        ];
+        let has_dialog = |cx: &mut VisualTestContext| app.read_with(cx, |app, _| app.has_dialog());
+        for (name, open) in openers {
+            cx.update(|window, cx| app.update(cx, |app, cx| open(app, column, window, cx)));
+            cx.run_until_parked();
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            assert!(has_dialog(cx), "{name} opened");
+
+            // The card's own padding, clear of its controls.
+            let card = cx.debug_bounds("overlay-card").expect("the card is drawn");
+            cx.simulate_click(card.origin + point(px(4.), px(4.)), Modifiers::default());
+            cx.run_until_parked();
+            assert!(has_dialog(cx), "a press inside {name} keeps it open");
+
+            // The backdrop's corner, below the title bar.
+            cx.simulate_click(point(px(10.), title_bar::HEIGHT + px(10.)), Modifiers::default());
+            cx.run_until_parked();
+            assert!(!has_dialog(cx), "a press beside {name} closes it");
+            assert_eq!(panel_root(&app, cx), None, "the press reaches nothing under {name}");
+            finish_exits(cx);
+        }
     }
 
     /// Lets every exit animation finish.

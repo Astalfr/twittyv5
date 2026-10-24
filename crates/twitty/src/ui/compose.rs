@@ -12,6 +12,7 @@ use twitty_model::{Backend, BackendError, Post};
 use crate::{
     runtime::Runtime,
     state::compose::{self, MAX_LENGTH},
+    ui::button::TextButton,
 };
 
 /// What the dialog reports to the app.
@@ -169,12 +170,14 @@ impl Render for ComposeView {
                     .child(
                         Button::new("compose-cancel")
                             .ghost()
+                            .text_button(Size::Medium)
                             .label("Cancel")
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Dismissed))),
                     )
                     .child(
                         Button::new("compose-post")
                             .primary()
+                            .text_button(Size::Medium)
                             .label(if self.reply_to.is_some() { "Reply" } else { "Post" })
                             .loading(sending)
                             .disabled(!can_post || sending)

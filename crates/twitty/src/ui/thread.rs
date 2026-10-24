@@ -13,6 +13,7 @@ use twitty_model::{Backend, BackendError, PostId};
 use crate::{
     runtime::Runtime,
     state::thread::{self, ThreadState},
+    ui::button::TextButton,
     ui::{
         hub::InteractionsHub,
         post::{RowCtx, render_item},
@@ -110,6 +111,7 @@ impl Render for ThreadPanel {
                 .child(e.to_string())
                 .child(
                     Button::new("thread-retry")
+                        .text_button(Size::Medium)
                         .label("Retry")
                         .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
                 )

@@ -14,6 +14,7 @@ use crate::{
     account::{AccountServices, Credentials},
     runtime::Runtime,
     state::login::{LoginForm, LoginStatus},
+    ui::button::TextButton,
 };
 
 /// What the dialog reports to the app.
@@ -210,13 +211,13 @@ impl Render for LoginView {
                     .child(
                         Button::new("login-cancel")
                             .ghost()
-                            .label("Cancel")
+                            .text_button(Size::Medium).label("Cancel")
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(LoginEvent::Dismissed))),
                     )
                     .child(
                         Button::new("login-submit")
                             .primary()
-                            .label(if checking { "Checking…" } else { "Sign in" })
+                            .text_button(Size::Medium).label(if checking { "Checking…" } else { "Sign in" })
                             .loading(checking)
                             .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
                     ),
