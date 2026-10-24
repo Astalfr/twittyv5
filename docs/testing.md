@@ -32,8 +32,8 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 
 ## Current coverage (M3)
 
-129 tests (+3 opt-in live tests):
-- 51 in `twitty-x`: 37 unit tests (session, errors, headers, cookies, rate limits, interpretation, catalog, discovery) and 14 mock-server integration tests.
+132 tests (+3 opt-in live tests):
+- 54 in `twitty-x`: 39 unit tests (session, errors, headers, cookies, rate limits, interpretation, catalog, discovery incl. webpack chunk maps) and 15 mock-server integration tests.
 
 From M2:
 - 23 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging and notifications.

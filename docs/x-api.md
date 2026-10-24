@@ -4,7 +4,7 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 > Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
 
-**Status (M3):** transport, catalog, discovery, `XClient` and the dev CLI are implemented and tested against a mock server. **No authenticated call has been verified against live X yet.** Translation into `twitty-model` (`wire` + `translate`) is M4.
+**Status (M3, done):** transport, catalog, discovery, `XClient` and the dev CLI are implemented, tested against a mock server, and **verified live on 2026-10-24**: `HomeTimeline` and `HomeLatestTimeline` returned data with the declared feature subsets, and logged-in discovery found every operation Twitty uses. Translation into `twitty-model` (`wire` + `translate`) is M4.
 
 ## Code map
 
@@ -16,7 +16,7 @@ X doesn't document this API. Everything here comes from community clients and ou
 | `discovery.rs` | Best-effort query-id discovery from x.com's bundles (legacy + Relay formats). |
 | `client.rs` | `XClient::graphql(op, variables)` and helpers like `home_timeline`. Recovers once from stale ids. |
 | `bin/twitty-x-cli.rs` | Dev tool: `ops`, `refresh-ids`, `capture home`. |
-| `data/operations.json` | Embedded fallback ids (provenance per entry). |
+| `data/operations.json` | Embedded fallback ids with feature switches and field toggles, regenerated from a live discovery run. |
 | `data/default_features.json` | Default `features` values (from `bun_x`, Apache-2.0). |
 
 ## Endpoint shape
@@ -26,7 +26,7 @@ GET  https://x.com/i/api/graphql/<queryId>/<OperationName>?variables=<json>&feat
 POST https://x.com/i/api/graphql/<queryId>/<OperationName>    (mutations, JSON body {variables, features, queryId[, fieldToggles]})
 ```
 
-The `HomeTimeline` id `0toR0MxC06yY3Fc57GXBpA` was seen in live logged-in traffic on 2026-10-24, with the old-style `<id>/<OperationName>` path.
+Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>/<OperationName>` path (e.g. `0toR0MxC06yY3Fc57GXBpA/HomeTimeline`) with `features` and `fieldToggles` in the query string.
 
 ## Authentication
 
@@ -65,26 +65,27 @@ x.com now serves two different web clients:
 
 | | Legacy (`responsive-web/client-web/*.js`) | New (`x-web/x-web/*.js`, Vite + Relay) |
 |---|---|---|
-| Seen on | The logged-in app (inferred from the live `HomeTimeline` URL; not yet confirmed) | The logged-out site (`https://x.com/?lang=en`) |
+| Seen on | The logged-in app (`https://x.com/home` with a session): `main`, `vendor` and a locale script, plus ~650 lazily loaded webpack chunks | The logged-out site (`https://x.com/?lang=en`) |
 | Operation declaration | `{queryId:"…",operationName:"HomeTimeline",operationType:"query",metadata:{featureSwitches:[…],fieldToggles:[…]}}` | `params:{id:"…",metadata:{},name:"HomeLatestTimelineQuery",operationKind:"query",text:null}` (Relay persisted query) |
 | Feature switches in bundle | Yes | No |
-| Bundle list | Script tags of the page | Entry script, then lazily loaded `assets/*.js` chunks (paths relative to the bundle base) |
+| Bundle list | Script tags of the page, plus the **inline webpack chunk maps** in the HTML: `{id:"bundle.HomeTimeline",…}` and `{id:"<16 hex>",…}`; a chunk's URL is `<dir of main.js>/<name>.<hash>a.js` | Entry script, then lazily loaded `assets/*.js` chunks (paths relative to the bundle base) |
 
-The service worker (`sw.js`) and the logged-out HTML no longer list `responsive-web` bundles, so discovery methods that rely on them (`bun_x`, twitter-graphql-scraper) find nothing on the logged-out site. Twitty's discovery extracts both formats. A live logged-out run found 204 Relay operations in 250 scripts in ~1.5s (`HomeLatestTimelineQuery` among them, `HomeTimeline` not).
+The service worker (`sw.js`) and the logged-out HTML no longer list `responsive-web` bundles, so discovery methods that rely on them find nothing on the logged-out site.
 
-**Still unknown, needs one logged-in capture:**
-- whether the logged-in client calls Relay ids with the `…Query` name or a different path name;
-- whether Relay calls still send `features` / `fieldToggles`;
-- whether response shapes differ between the two clients;
-- which bundles the logged-in HTML loads.
+What the live runs showed:
+- **Logged out:** 204 Relay operations in 250 `x-web` scripts in ~1.5s.
+- **Logged in:** the legacy client. Its `main.js` declares ~100 operations; the rest (including `HomeTimeline`, `HomeLatestTimeline`, `Bookmarks`, `NotificationsTimeline`, `ListLatestTweetsTimeline`) are only in lazily loaded chunks reachable through the inline chunk maps. The logged-in chunks also contain Relay persisted queries. One run: 464 scripts, 585 legacy + 465 Relay declarations, ~6s.
+- 11 of the 18 ids `bun_x` published the day before were already stale (`HomeLatestTimeline`, `TweetDetail`, `SearchTimeline`, `UserByScreenName`, `UserTweets`, `UserTweetsAndReplies`, `UserMedia`, `Likes`, `ListLatestTweetsTimeline`, `Viewer`, `CreateTweet`); the like/repost/bookmark mutations were unchanged.
+- Twitty only calls legacy-named operations. How the logged-in client names Relay operations in URLs is still unknown and not needed yet.
 
 ### Discovery algorithm
 
 1. Fetch `https://x.com/home` and `https://x.com/?lang=en`, with the session cookie when there is one.
-2. Collect `<script src>` URLs and any `https://abs.twimg.com/…js` URL in the HTML.
-3. Download scripts 8 at a time (at most 250 per run). Extract operations in both formats.
+2. Collect `<script src>` URLs, any `https://abs.twimg.com/…js` URL, and the legacy webpack chunks from the inline chunk maps (relevant names first; locales skipped).
+3. Download scripts 8 at a time (at most 600 per run). Extract operations in both formats.
 4. Follow `assets/<name>.js` references whose name looks relevant (`graphql`, `timeline`, `home`, `tweet`, `search`, `bookmark`, `notif`, `list`, `profile`, `user`, …), resolved against the bundle base.
-5. Merge the results into the cache file.
+5. Stop early once every operation of the embedded catalog was found (checked after each batch).
+6. Merge the results into the cache file.
 
 ## `x-client-transaction-id`
 
@@ -134,6 +135,12 @@ tweet: rest_id, core.user_results.result, legacy{full_text, entities, extended_e
 ```
 
 Promoted entries (`promoted-tweet-*`, or items with `promotedMetadata`) will be dropped in `wire`. Who-to-follow and topic modules are skipped in v1. Tombstones get their `FeedItem` row key from the timeline `entryId`.
+
+Observed live on 2026-10-24 (input for M4):
+- `HomeTimeline`: one `TimelineAddEntries` with `cursor-top`, 28 `tweet-*`, 7 `promoted-tweet-*`, `cursor-bottom`; all results were `Tweet`.
+- **User objects changed**: `core.user_results.result` has no `legacy` block anymore. Name and handle are in `core.{name, screen_name, created_at}`, and there are `avatar`, `banner`, `profile_bio`, `location`, `website`, `verification`, `is_blue_verified`, `relationship_counts`, `relationship_perspectives`, `tweet_counts`, `privacy`.
+- Tweets still have `legacy` (`full_text`, `entities`, `extended_entities`, counts, `favorited`, `retweeted`, `bookmarked`, `created_at`, `quoted_status_id_str`), plus `views`, `quoted_status_result`, `edit_control`, `grok_*`.
+- `HomeLatestTimeline` on the test account returned no posts: a `TimelineShowCover` (email review prompt) and an entry `flip-prompt-message-grok-bot-inline`. Covers and prompts must be skipped.
 
 ## Dev CLI
 

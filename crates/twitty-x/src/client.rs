@@ -45,7 +45,8 @@ impl XClient {
             .ok_or_else(|| XError::Discovery("discovery is disabled".into()))?;
         let _guard = self.refreshing.lock().await;
         let session = self.transport.session();
-        let (ops, report) = discovery.run(Some(&session)).await?;
+        let targets = self.catalog.embedded_names();
+        let (ops, report) = discovery.run(Some(&session), &targets).await?;
         let changed = self
             .catalog
             .merge_discovered(ops, Utc::now())

@@ -2,7 +2,7 @@
 
 These docs explain **how Twitty works**. They change with the code: any change to architecture, data flow, protocol handling, persisted formats or testing updates the matching page in the same commit.
 
-> Project status: **M0–M2 done, M3 implemented**. `twitty-model` (with `MockBackend`) and the `twitty` UI on demo data work. `twitty-x` has the transport, catalog, discovery and dev CLI, tested against a mock server. No authenticated call has been verified live yet, and translation (M4) doesn't exist yet, so the app still runs on demo data.
+> Project status: **M0–M3 done**. `twitty-model` (with `MockBackend`) and the `twitty` UI on demo data work. `twitty-x` talks to X for real (verified live), but translation into `twitty-model` (M4) doesn't exist yet, so the app still runs on demo data.
 
 | Page | What it covers |
 |---|---|

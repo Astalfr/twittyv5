@@ -8,6 +8,10 @@
 //!
 //! Both formats are extracted. Discovery never blocks the app: when it finds
 //! nothing, the cached or embedded catalog is used. See `docs/x-api.md`.
+//!
+//! The logged-in (legacy) client declares most operations in lazily loaded
+//! webpack chunks. Their names and content hashes are inlined in the page HTML
+//! as two `{id:"…"}` maps; a chunk's URL is `<base>/<name>.<hash>a.js`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::LazyLock;
@@ -25,7 +29,9 @@ use crate::{
 /// Pages whose HTML references the client bundles.
 pub const DEFAULT_PAGES: &[&str] = &["https://x.com/home", "https://x.com/?lang=en"];
 /// Upper bound on scripts fetched in one discovery run.
-const MAX_SCRIPTS: usize = 250;
+const MAX_SCRIPTS: usize = 600;
+/// Where legacy chunks live when the page gives no better hint.
+const LEGACY_BASE: &str = "https://abs.twimg.com/responsive-web/client-web/";
 /// Concurrent downloads.
 const CONCURRENCY: usize = 8;
 
@@ -74,6 +80,9 @@ static SCRIPT_SRC: LazyLock<Regex> =
 static ABS_JS: LazyLock<Regex> =
     LazyLock::new(|| re(r#"https://abs\.twimg\.com/[A-Za-z0-9/_.~-]+\.js"#));
 static ASSET_REF: LazyLock<Regex> = LazyLock::new(|| re(r#"assets/[A-Za-z0-9_.-]+\.js"#));
+static CHUNK_NAME: LazyLock<Regex> =
+    LazyLock::new(|| re(r#"(\d+):"((?:bundle|loader|ondemand|shared)[^"]*)""#));
+static CHUNK_HASH: LazyLock<Regex> = LazyLock::new(|| re(r#"(\d+):"([0-9a-f]{16})""#));
 static NAME_LIST_ITEM: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"{Q}(\w+){Q}")));
 /// Lazily loaded chunks worth fetching (the rest are locales, settings, ads…).
 static RELEVANT_ASSET: LazyLock<Regex> = LazyLock::new(|| {
@@ -125,6 +134,37 @@ pub fn extract_script_urls(html: &str, page: &Url) -> Vec<Url> {
     let srcs = SCRIPT_SRC.captures_iter(html).filter_map(|c| page.join(&c[1]).ok());
     let abs = ABS_JS.find_iter(html).filter_map(|m| Url::parse(m.as_str()).ok());
     dedup(srcs.chain(abs))
+}
+
+/// Legacy webpack chunks listed in a page's inline chunk maps, most relevant first.
+///
+/// The base directory is taken from the page's `main.*.js` script when present.
+pub fn extract_webpack_chunks(html: &str, page: &Url) -> Vec<Url> {
+    let hashes: HashMap<&str, &str> = CHUNK_HASH
+        .captures_iter(html)
+        .filter_map(|c| Some((c.get(1)?.as_str(), c.get(2)?.as_str())))
+        .collect();
+    if hashes.is_empty() {
+        return Vec::new();
+    }
+    let base = extract_script_urls(html, page)
+        .into_iter()
+        .find(|u| u.path().rsplit('/').next().is_some_and(|f| f.starts_with("main.")))
+        .and_then(|main| main.join("./").ok())
+        .or_else(|| Url::parse(LEGACY_BASE).ok());
+    let Some(base) = base else { return Vec::new() };
+    let mut chunks: Vec<(bool, Url)> = CHUNK_NAME
+        .captures_iter(html)
+        .filter_map(|c| {
+            let (id, name) = (c.get(1)?.as_str(), c.get(2)?.as_str());
+            let hash = hashes.get(id)?;
+            let url = base.join(&format!("{name}.{hash}a.js")).ok()?;
+            Some((RELEVANT_ASSET.is_match(name), url))
+        })
+        .collect();
+    // Relevant chunks first; `sort_by_key` is stable, so map order is kept otherwise.
+    chunks.sort_by_key(|(relevant, _)| !relevant);
+    dedup(chunks.into_iter().map(|(_, u)| u))
 }
 
 /// Relevant lazily loaded chunks a script refers to as `assets/<name>.js`.
@@ -195,15 +235,22 @@ impl Discovery {
 
     /// Runs discovery. With a session, pages are fetched logged in, which is
     /// what exposes the logged-in client's bundles.
+    ///
+    /// Stops early once every name in `targets` was found (as-is or with a
+    /// `Query` suffix). An empty `targets` scans up to the script limit.
     pub async fn run(
         &self,
         session: Option<&Session>,
+        targets: &HashSet<String>,
     ) -> Result<(HashMap<String, OperationSpec>, Report), XError> {
         let mut report = Report::default();
         let mut scripts: Vec<Url> = Vec::new();
         for page in &self.pages {
             match self.fetch(page, session).await {
-                Ok(html) => scripts.extend(extract_script_urls(&html, page)),
+                Ok(html) => {
+                    scripts.extend(extract_script_urls(&html, page));
+                    scripts.extend(extract_webpack_chunks(&html, page));
+                }
                 Err(e) => {
                     tracing::warn!("discovery: {page} failed: {e}");
                     report.failed_pages.push(page.to_string());
@@ -217,7 +264,13 @@ impl Discovery {
         let mut seen: HashSet<String> = HashSet::new();
         let mut queue = dedup(scripts.into_iter());
         let mut found: HashMap<String, OperationSpec> = HashMap::new();
-        while !queue.is_empty() && seen.len() < MAX_SCRIPTS {
+        let done = |found: &HashMap<String, OperationSpec>| {
+            !targets.is_empty()
+                && targets
+                    .iter()
+                    .all(|t| found.contains_key(t) || found.contains_key(&format!("{t}Query")))
+        };
+        while !queue.is_empty() && seen.len() < MAX_SCRIPTS && !done(&found) {
             let batch: Vec<Url> = queue
                 .drain(..queue.len().min(CONCURRENCY))
                 .filter(|u| seen.insert(u.to_string()))
@@ -348,6 +401,30 @@ mod tests {
         let chunk = Url::parse("https://abs.twimg.com/x-web/x-web/assets/startup-Bh.js").unwrap();
         let urls = extract_asset_urls(r#"x("assets/home-C3.js")"#, &chunk);
         assert_eq!(urls[0].as_str(), "https://abs.twimg.com/x-web/x-web/assets/home-C3.js");
+    }
+
+    #[test]
+    fn webpack_chunks_from_inline_maps() {
+        let page = Url::parse("https://x.com/home").unwrap();
+        let html = r#"<link href="https://abs.twimg.com/responsive-web/client-web/main.a8ff.js">
+            <script>x={53148:"ondemand.Payments",69195:"bundle.HomeTimeline",54115:"bundle.SuperFollowsManage",1:"i18n/fr"}[e]+"."+{53148:"aaaaaaaaaaaaaaaa",69195:"0123456789abcdef",54115:"bbbbbbbbbbbbbbbb",1:"cccccccccccccccc"}[e]+"a.js"</script>"#;
+        let urls: Vec<String> =
+            extract_webpack_chunks(html, &page).iter().map(ToString::to_string).collect();
+        assert_eq!(
+            urls,
+            [
+                // Relevant first ("home"), then the rest in map order; locales skipped.
+                "https://abs.twimg.com/responsive-web/client-web/bundle.HomeTimeline.0123456789abcdefa.js",
+                "https://abs.twimg.com/responsive-web/client-web/ondemand.Payments.aaaaaaaaaaaaaaaaa.js",
+                "https://abs.twimg.com/responsive-web/client-web/bundle.SuperFollowsManage.bbbbbbbbbbbbbbbba.js",
+            ]
+        );
+    }
+
+    #[test]
+    fn webpack_chunks_need_hashes() {
+        let page = Url::parse("https://x.com/home").unwrap();
+        assert!(extract_webpack_chunks(r#"{1:"bundle.Home"}"#, &page).is_empty());
     }
 
     #[test]

@@ -75,7 +75,8 @@ async fn home_timeline_returns_instructions() {
 async fn discovery_logged_out_finds_operations() {
     assert_eq!(std::env::var("TWITTY_LIVE").as_deref(), Ok("1"), "set TWITTY_LIVE=1");
     let page = Url::parse("https://x.com/?lang=en").unwrap();
-    let (ops, report) = Discovery::new(vec![page]).unwrap().run(None).await.unwrap();
+    let (ops, report) =
+        Discovery::new(vec![page]).unwrap().run(None, &Default::default()).await.unwrap();
     println!("{report:?}");
     println!("found {} operations", ops.len());
     assert!(!ops.is_empty(), "discovery found nothing on the logged-out site");

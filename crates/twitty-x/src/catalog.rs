@@ -111,6 +111,11 @@ impl Catalog {
             .map(|d| d.cache_dir().join("query-ids.json"))
     }
 
+    /// Names of the operations in the embedded catalog (the ones Twitty uses).
+    pub fn embedded_names(&self) -> std::collections::HashSet<String> {
+        self.embedded.keys().cloned().collect()
+    }
+
     /// Forces `operation` to use `query_id` (keeps method/features from lower layers).
     pub fn set_override(&self, operation: &str, query_id: &str) {
         self.overrides

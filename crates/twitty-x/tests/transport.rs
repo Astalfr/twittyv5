@@ -76,8 +76,11 @@ async fn sends_auth_headers_and_graphql_params() {
     let q: std::collections::HashMap<_, _> = req.url.query_pairs().into_owned().collect();
     let vars: Value = serde_json::from_str(&q["variables"]).unwrap();
     assert_eq!(vars["count"], 20);
+    // Only the feature switches HomeTimeline declares are sent.
     let features: Value = serde_json::from_str(&q["features"]).unwrap();
-    assert!(features.as_object().unwrap().len() > 100);
+    let declared = Catalog::new(None).resolve("HomeTimeline").unwrap().0.feature_switches.unwrap();
+    assert_eq!(features.as_object().unwrap().len(), declared.len());
+    assert!(q.contains_key("fieldToggles") || declared.is_empty());
     assert!(req.headers["authorization"].to_str().unwrap().starts_with("Bearer AAAA"));
     let txid = req.headers["x-client-transaction-id"].to_str().unwrap();
     assert_eq!(txid.len(), 32);
@@ -321,7 +324,7 @@ impl wiremock::Match for Variables {
 #[tokio::test]
 async fn cursor_is_forwarded() {
     let server = MockServer::start().await;
-    Mock::given(path("/i/api/graphql/OQPHTgwczzp9RMAPt6BH9A/HomeLatestTimeline"))
+    Mock::given(path("/i/api/graphql/KQPfcqQJJqF6M0D77p3JKw/HomeLatestTimeline"))
         .and(Variables(json!({
             "count": 20,
             "cursor": "DAABCgAB",
@@ -353,4 +356,48 @@ async fn unknown_operation_is_an_error() {
     let server = MockServer::start().await;
     let err = client(&server).graphql("NoSuchOperation", json!({})).await.unwrap_err();
     assert_eq!(err, XError::UnknownOperation("NoSuchOperation".into()));
+}
+
+#[tokio::test]
+async fn discovery_follows_inline_webpack_chunk_map_and_stops_early() {
+    let server = MockServer::start().await;
+    let base = format!("{}/responsive-web/client-web", server.uri());
+    // One relevant chunk and 11 unrelated ones (more than one download batch).
+    let unrelated = 11;
+    let names: String =
+        (0..unrelated).map(|i| format!(r#",{}:"bundle.Unrelated{i}""#, i + 2)).collect();
+    let hashes: String =
+        (0..unrelated).map(|i| format!(r#",{}:"ffeeddccbbaa99{i:02}""#, i + 2)).collect();
+    Mock::given(path("/home"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+            r#"<script src="{base}/main.abc.js"></script>
+               <script>m={{1:"loader.UserHandler"{names}}}[e]+"."+{{1:"00112233445566aa"{hashes}}}[e]+"a.js"</script>"#
+        )))
+        .mount(&server)
+        .await;
+    Mock::given(path("/responsive-web/client-web/main.abc.js"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("no operations here"))
+        .mount(&server)
+        .await;
+    Mock::given(path("/responsive-web/client-web/loader.UserHandler.00112233445566aaa.js"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"e.exports={queryId:"KQPfcqQJJqF6M0D77p3JKw",operationName:"HomeLatestTimeline",operationType:"query",metadata:{featureSwitches:[],fieldToggles:[]}}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(wiremock::matchers::path_regex(r"bundle\.Unrelated"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(""))
+        .mount(&server)
+        .await;
+
+    let page = Url::parse(&format!("{}/home", server.uri())).unwrap();
+    let targets = ["HomeLatestTimeline".to_owned()].into_iter().collect();
+    let (ops, report) = Discovery::new(vec![page]).unwrap().run(None, &targets).await.unwrap();
+    assert_eq!(ops["HomeLatestTimeline"].query_id, "KQPfcqQJJqF6M0D77p3JKw");
+    // main.js + the relevant chunk come first; the first batch of 8 found the
+    // target, so the remaining unrelated chunks were never downloaded.
+    let fetched = report.scripts_by_family["responsive-web"];
+    assert_eq!(fetched, 8, "one batch");
+    assert!(fetched < 2 + unrelated);
 }
