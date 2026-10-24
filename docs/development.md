@@ -31,7 +31,9 @@
 | `check` | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked` |
 | `build` | `cargo build --release --locked -p twitty`, then uploads `target/release/twitty.exe` as the artifact `twitty-windows-x64-<sha>` (kept 30 days) |
 
-- The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` caches debug and release builds separately.
+- The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` caches debug and release builds separately. Only `main` saves caches, and it saves them even when a step fails or times out (`cache-on-failure`). The compile steps have their own `timeout-minutes`, below the job's, so the save step still runs. Pull requests restore `main`'s cache.
+- CI builds without debug info (`CARGO_PROFILE_DEV_DEBUG=0`) and turns off Defender real-time scanning first. Runs on `main` are never cancelled by a newer push (that would discard their cache); pull request runs are.
+- The first run after changing a `CARGO_*` variable in the workflow, `Cargo.lock` or the toolchain starts cold (new cache key).
 - `--locked` fails the build if `Cargo.lock` is out of date, so commit the lockfile with every dependency change.
 - GPUI tests use GPUI's test platform, so CI needs no real display.
 - Download the `.exe` from the run's **Artifacts** section on GitHub.

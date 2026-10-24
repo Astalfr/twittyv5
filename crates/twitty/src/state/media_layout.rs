@@ -5,6 +5,9 @@ use twitty_model::AspectRatio;
 /// Gap between tiles, in pixels.
 pub const GAP: f32 = 2.0;
 
+/// The tallest a grid gets, in pixels; taller media are cropped (cover fit).
+pub const MAX_HEIGHT: f32 = 300.0;
+
 /// A tile rectangle relative to the grid's top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tile {
@@ -66,7 +69,8 @@ impl Grid {
 ///
 /// A single item keeps its aspect ratio, clamped between 3:4 (portrait) and
 /// 2:1 (panorama). Several items use a fixed 16:9 box split like Twitter does.
-/// Items beyond four are not shown.
+/// The grid is never taller than [`MAX_HEIGHT`]. Items beyond four are not
+/// shown.
 pub fn layout(count: usize, first_aspect: Option<AspectRatio>, width: f32) -> Grid {
     let width = width.max(0.0);
     let half = ((width - GAP) / 2.0).max(0.0);
@@ -74,11 +78,11 @@ pub fn layout(count: usize, first_aspect: Option<AspectRatio>, width: f32) -> Gr
         0 => Grid { tiles: Vec::new(), height: 0.0 },
         1 => {
             let ratio = first_aspect.map_or(16.0 / 9.0, AspectRatio::as_f32).clamp(0.75, 2.0);
-            let h = width / ratio;
+            let h = (width / ratio).min(MAX_HEIGHT);
             Grid { tiles: vec![Tile { x: 0.0, y: 0.0, w: width, h }], height: h }
         }
         _ => {
-            let h = width * 9.0 / 16.0;
+            let h = (width * 9.0 / 16.0).min(MAX_HEIGHT);
             let half_h = ((h - GAP) / 2.0).max(0.0);
             let right = half + GAP;
             let tiles = match count {
@@ -172,8 +176,22 @@ mod tests {
 
     #[test]
     fn single_clamps_tall_and_wide() {
-        assert!(approx(layout(1, AspectRatio::new(1, 10), 300.0).height, 400.0));
+        assert!(approx(layout(1, AspectRatio::new(1, 10), 210.0).height, 280.0));
         assert!(approx(layout(1, AspectRatio::new(10, 1), 300.0).height, 150.0));
+    }
+
+    #[test]
+    fn grid_is_never_taller_than_max_height() {
+        // A 3:4 portrait in a 300px column would be 400px high.
+        let g = layout(1, AspectRatio::new(3, 4), 300.0);
+        assert!(approx(g.height, MAX_HEIGHT) && approx(g.tiles[0].h, MAX_HEIGHT));
+        assert!(approx(g.tiles[0].w, 300.0));
+        // Several items in a wide column: the 16:9 box is capped too.
+        for n in 2..=4 {
+            let g = layout(n, None, 800.0);
+            assert!(approx(g.height, MAX_HEIGHT), "n={n}");
+            assert!(g.tiles.iter().all(|t| t.y + t.h <= MAX_HEIGHT + 0.01), "n={n}");
+        }
     }
 
     #[test]
