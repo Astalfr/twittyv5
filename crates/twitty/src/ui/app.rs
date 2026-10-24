@@ -47,6 +47,9 @@ const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
 /// rail meet. At most the deck bar's padding, so a hovered tab stays inside it.
 const CHROME_RADIUS: f32 = 8.0;
 
+/// The signed-in account's avatar in the sidebar, in logical pixels.
+const ACCOUNT_AVATAR: f32 = 30.0;
+
 /// How often polling intervals are recomputed from the backend's limits.
 const BUDGET_REFRESH: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -1180,20 +1183,41 @@ impl TwittyApp {
 
     fn render_account_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.options.account.as_ref()?;
-        let button = Button::new("account").ghost().large().w(px(52.)).h(px(52.));
+        let button = Button::new("account")
+            .ghost()
+            .large()
+            .w(px(52.))
+            .h(px(52.))
+            .debug_selector(|| "account-button".into());
         Some(if self.options.session.is_some() {
             let tip = match &self.viewer {
                 Some(v) => format!("Signed in as @{}", v.handle),
                 None => "Account".to_owned(),
             };
-            button
-                .icon(Icon::new(IconName::CircleUser).size(px(26.)))
-                .tooltip(tip)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.account_panel = !this.account_panel;
-                    cx.notify();
-                }))
-                .into_any_element()
+            let face = self.viewer.as_ref().and_then(|v| v.avatar.as_ref());
+            match face {
+                Some(src) => button.child(
+                    img(crate::ui::remote_image::source(
+                        src.url.as_str(),
+                        ACCOUNT_AVATAR,
+                        ACCOUNT_AVATAR,
+                    ))
+                    .size(px(ACCOUNT_AVATAR))
+                    // The button's padding would squeeze it into an oval.
+                    .flex_none()
+                    .aspect_ratio(1.)
+                    .object_fit(ObjectFit::Cover)
+                    .rounded_full()
+                    .debug_selector(|| "account-avatar".into()),
+                ),
+                None => button.icon(Icon::new(IconName::CircleUser).size(px(26.))),
+            }
+            .tooltip(tip)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.account_panel = !this.account_panel;
+                cx.notify();
+            }))
+            .into_any_element()
         } else {
             button
                 .icon(Icon::new(IconName::LogIn).size(px(26.)))
@@ -1907,6 +1931,28 @@ mod tests {
         let after = column_entities(&app, cx);
         assert_eq!(after.len(), before.len());
         assert!(after.iter().all(|id| !before.contains(id)), "columns rebuilt on the new backend");
+    }
+
+    #[gpui_kit::test]
+    fn the_account_button_shows_the_viewers_avatar(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
+        let (app, cx) = start(cx, MockBackend::new(), Some(SessionSource::Keyring), &store);
+        assert!(app.read_with(cx, |app, _| app.viewer().is_some_and(|v| v.avatar.is_some())));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let face = cx.debug_bounds("account-avatar").expect("the avatar replaces the icon");
+        let side = px(ACCOUNT_AVATAR);
+        assert_eq!(face.size, gpui_kit::size(side, side), "round, not squeezed");
+        let button = cx.debug_bounds("account-button").expect("the button is rendered");
+        assert!(
+            (face.center().x - button.center().x).abs() < px(1.),
+            "centred: {face:?} in {button:?}"
+        );
+
+        app.update_in(cx, |app, window, cx| app.sign_out(window, cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("account-avatar").is_none(), "signed out: no avatar");
     }
 
     #[gpui_kit::test]
