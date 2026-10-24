@@ -13,11 +13,11 @@ use chrono::{DateTime, Duration, Utc};
 use url::Url;
 
 use crate::{
-    Backend, BackendError, Badges, BoxFuture, Draft, Embed, FeedItem, FeedPage, FeedSource,
-    FollowAction, FollowStatus, ImageRef, LinkCard, Media, Metrics, PageRequest, PageToken, Poll,
-    PollOption, Post, PostAction, PostId, PostOrGone, Profile, ProfileCounts, RichText, Span,
-    SpanKind, ThreadView, Translation, UnavailableReason, UserId, UserRef, UserTab, VerifiedKind,
-    ViewerPostState,
+    Backend, BackendError, Badges, BoxFuture, CommunityNote, Draft, Embed, FeedItem, FeedPage,
+    FeedSource, FollowAction, FollowStatus, ImageRef, LinkCard, Media, Metrics, PageRequest,
+    PageToken, Poll, PollOption, Post, PostAction, PostId, PostOrGone, Profile, ProfileCounts,
+    RichText, Span, SpanKind, ThreadView, Translation, UnavailableReason, UserId, UserRef, UserTab,
+    VerifiedKind, ViewerPostState,
 };
 use crate::{Notification, NotificationId, NotificationKind};
 
@@ -369,6 +369,7 @@ impl State {
                         viewer: ViewerPostState::default(),
                         lang: Some("en".into()),
                         translation: None,
+                        community_note: None,
                     })),
                 })
             }
@@ -377,6 +378,7 @@ impl State {
             }),
             _ => None,
         };
+        let community_note = (n % 10 == 8).then(|| community_note(n));
         Post {
             url: post_url(&author.handle, &id),
             id,
@@ -397,8 +399,21 @@ impl State {
             viewer: ViewerPostState::default(),
             lang,
             translation,
+            community_note,
         }
     }
+}
+
+/// The context readers might add to a mock post, with a link.
+fn community_note(n: usize) -> CommunityNote {
+    let text = "The benchmark in this post was run on a debug build; release builds are                 about ten times faster. example.com/bench";
+    let link = text.len() - "example.com/bench".len()..text.len();
+    let body = RichText::new(
+        text,
+        vec![Span { range: link, kind: SpanKind::Link { url: url("https://example.com/bench") } }],
+    )
+    .unwrap_or_else(|_| RichText::plain(text));
+    CommunityNote { body, url: url(&format!("https://x.com/i/birdwatch/n/{}", 1_000 + n)) }
 }
 
 impl Backend for MockBackend {
@@ -517,6 +532,7 @@ impl Backend for MockBackend {
                 viewer: ViewerPostState::default(),
                 lang: None,
                 translation: None,
+                community_note: None,
             })
         })
     }
@@ -661,6 +677,23 @@ mod tests {
         assert_eq!(page.items.len(), MockBackend::PAGE_SIZE);
         assert!(page.older.is_some());
         assert!(page.newer.is_some());
+    }
+
+    #[test]
+    fn some_posts_carry_a_community_note_with_its_link() {
+        let b = MockBackend::new();
+        let page = block_on(b.feed(&home(), PageRequest::First)).unwrap();
+        let notes: Vec<_> = page
+            .items
+            .iter()
+            .flat_map(FeedItem::posts)
+            .filter_map(|p| p.community_note.as_ref())
+            .collect();
+        assert!(!notes.is_empty());
+        let note = notes[0];
+        let link = &note.body.spans()[0];
+        assert_eq!(&note.body.text()[link.range.clone()], "example.com/bench");
+        assert_eq!(note.url.host_str(), Some("x.com"));
     }
 
     #[test]

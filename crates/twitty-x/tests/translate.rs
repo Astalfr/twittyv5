@@ -27,6 +27,7 @@ const FIXTURES: &[&str] = &[
     "usermedia-nasa-2",
     "list-space",
     "search-translated",
+    "tweetdetail-note",
 ];
 
 fn load(name: &str) -> Translated {
@@ -103,6 +104,18 @@ fn post_line(p: &Post, indent: &str) -> String {
         );
         for span in t.body.spans() {
             let _ = write!(s, " [{}]", short(&t.body.text()[span.range.clone()], 20));
+        }
+    }
+    if let Some(n) = &p.community_note {
+        let _ = write!(
+            s,
+            "
+{indent}  note: \"{}\" → {}",
+            short(n.body.text(), 50),
+            n.url
+        );
+        for span in n.body.spans() {
+            let _ = write!(s, " [{}]", short(&n.body.text()[span.range.clone()], 20));
         }
     }
     match &p.embed {
@@ -223,6 +236,10 @@ fn fixtures_cover_every_shape_we_translate() {
     assert!(has_post(&|p| p.reply_to.is_some()), "reply");
     assert!(has_post(&|p| p.body.text().chars().count() > 280), "long note post");
     assert!(has_post(&|p| p.translation.is_some()), "translated post");
+    assert!(
+        has_post(&|p| p.community_note.as_ref().is_some_and(|n| !n.body.spans().is_empty())),
+        "community note with a link"
+    );
     for kind in ["mention", "hashtag", "link"] {
         let found = has_post(&|p| {
             p.body.spans().iter().any(|s| {

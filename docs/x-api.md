@@ -242,6 +242,26 @@ Checked live on `HomeTimeline` and searches (Japanese posts, Japanese replies, E
 
 `destination_language` is `en`, which matches the `x-twitter-client-language: en` the transport sends (not tried with another value). Posts in the account's own languages aren't translated: on a French-speaking account, 28 of 28 French and every English post came back `is_available: false`, while Japanese, Korean and Portuguese posts were translated.
 
+### Community Notes (2026-10-24)
+
+A post with a note rated helpful carries `birdwatch_pivot` (with the features `responsive_web_birdwatch_consumption_enabled` and `responsive_web_birdwatch_pivots_enabled`, both on). Seen live on `SearchTimeline` and `TweetDetail` with the same shape:
+
+```
+birdwatch_pivot
+  .subtitle.text                      # the note, links already shortened ("x.ai/legal/privacy-…")
+  .subtitle.entities[]                # {fromIndex, toIndex, ref: {type: "TimelineUrl", url (t.co), expandedUrl}}
+  .destinationUrl                     # the note's page, https://twitter.com/i/birdwatch/n/<note id>
+  .callToAction{prompt,title,destinationUrl}   # "Do you find this helpful?" / "Rate it": same page
+  .title / .shorttitle                # "Readers added context they thought people might want to know" / "Readers added context"
+  .footer{text,entities}              # "Context is written by people who use X…": ignored
+  .note{rest_id,language,is_community_note_translatable}
+  .iconType / .footerIconType / .visualStyle
+```
+
+`translate::tweet` turns it into `Post::community_note` (text and `destinationUrl`, falling back to `callToAction.destinationUrl`); a pivot without text or a valid link is dropped with a warning, and the post stays. Only `TimelineUrl` entities become links; their covered text is shown as is. The `fromIndex`/`toIndex` offsets are taken as **code points**: the one live note had only BMP characters, so this is inferred from the same rich-text format in notification `rich_message`s, where only code points give whole names after emoji. A wrong guess only drops or shifts a link span; the text is never lost.
+
+`has_birdwatch_notes` on the tweet is not used: it is `true` on the noted post in `TweetDetail`, absent in `SearchTimeline`, and may also cover notes still being rated, which X doesn't show. `UserMedia` and `Likes` are requested with `withBirdwatchNotes: false` (as the web client does), so posts in those columns may come without their note; opening the post (`TweetDetail`, `withBirdwatchNotes: true`) shows it.
+
 ## Dev CLI
 
 The session comes from `--session <file>` (`{"auth_token":"…","ct0":"…"}`; `session*.json` at the repo root is gitignored) or the `TWITTY_AUTH_TOKEN` / `TWITTY_CT0` env vars. Values are never printed.

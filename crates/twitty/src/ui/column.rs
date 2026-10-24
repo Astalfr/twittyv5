@@ -306,6 +306,7 @@ impl ColumnView {
             column_width: self.settings.width.px(),
             hub: self.hub.clone(),
             scope: ("column", self.id.0 as usize).into(),
+            focus: None,
         };
         let row = match self.model.items().get(ix) {
             Some(item) if self.active && self.model.selected() == Some(ix) => div()

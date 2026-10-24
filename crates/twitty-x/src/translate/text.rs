@@ -9,7 +9,7 @@ use serde_json::Value;
 use twitty_model::{RichText, Span, SpanKind, UserId, UserRef};
 use url::Url;
 
-use crate::wire::{array_at, str_at};
+use crate::wire::{array_at, at, str_at};
 
 /// An entity as X describes it, before translation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +69,32 @@ pub(crate) fn entities(set: &Value) -> Vec<RawEntity> {
     });
     push("media", &|_| Some(RawKind::Media));
     out
+}
+
+/// Reads the entities of X's "rich message" texts (Community Notes, …):
+/// `{fromIndex, toIndex, ref: {type, url, expandedUrl}}`, with code-point
+/// offsets into `raw`. Only links are kept; their covered text is already the
+/// display form, so it stays as is.
+pub(crate) fn rich_message_entities(raw: &str, ents: &[Value]) -> Vec<RawEntity> {
+    let chars: Vec<char> = raw.chars().collect();
+    let index = |e: &Value, k: &str| usize::try_from(at(e, &[k])?.as_u64()?).ok();
+    ents.iter()
+        .filter_map(|e| {
+            let (start, end) = (index(e, "fromIndex")?, index(e, "toIndex")?);
+            let display: String = chars.get(start..end).filter(|c| !c.is_empty())?.iter().collect();
+            if str_at(e, &["ref", "type"]) != Some("TimelineUrl") {
+                tracing::debug!(?e, "rich message entity that isn't a link dropped");
+                return None;
+            }
+            let expanded =
+                str_at(e, &["ref", "expandedUrl"]).or_else(|| str_at(e, &["ref", "url"]))?;
+            Some(RawEntity {
+                start,
+                end,
+                kind: RawKind::Url { display, expanded: expanded.to_owned() },
+            })
+        })
+        .collect()
 }
 
 /// Builds rich text from raw text, entities and an optional display range.
@@ -235,6 +261,61 @@ mod tests {
         let rt = rich_text(raw, ents, None);
         assert_eq!(rt.text(), "uort", "first url shown as its display; overlapping one dropped");
         assert!(rt.spans().is_empty(), "unparsable URL gives no link span");
+    }
+
+    fn link_ref(from: usize, to: usize, expanded: &str) -> Value {
+        json!({"fromIndex": from, "toIndex": to, "ref": {
+            "type": "TimelineUrl", "url": "https://t.co/x", "expandedUrl": expanded, "urlType": "ExternalUrl"
+        }})
+    }
+
+    #[test]
+    fn rich_message_links_keep_their_shown_text() {
+        // Code points, after an astral emoji; the shown text is already shortened.
+        let raw = "🦀 See example.com/a-lo… and t.co";
+        let ents = vec![
+            link_ref(6, 23, "https://example.com/a-long-path"),
+            json!({"fromIndex": 28, "toIndex": 32, "ref": {"type": "TimelineUrl", "url": "https://t.co/y"}}),
+        ];
+        let rt = rich_text(raw, rich_message_entities(raw, &ents), None);
+        assert_eq!(rt.text(), raw);
+        let s = spans(&rt);
+        assert_eq!(s[0].0, "example.com/a-lo…");
+        assert!(
+            matches!(s[0].1, SpanKind::Link { url } if url.as_str() == "https://example.com/a-long-path")
+        );
+        assert!(
+            matches!(s[1].1, SpanKind::Link { url } if url.as_str() == "https://t.co/y"),
+            "without expandedUrl, the url is used"
+        );
+    }
+
+    #[test]
+    fn rich_message_entities_that_arent_links_or_are_broken_are_dropped() {
+        let raw = "hello world";
+        let ents = vec![
+            json!({"fromIndex": 0, "toIndex": 5, "ref": {"type": "TimelineRichTextUser"}}),
+            link_ref(6, 99, "https://a.io"),
+            link_ref(8, 6, "https://a.io"),
+            json!({"fromIndex": "0", "toIndex": 5, "ref": {"type": "TimelineUrl", "url": "https://a.io"}}),
+            json!({"fromIndex": 0, "toIndex": 5, "ref": {"type": "TimelineUrl"}}),
+        ];
+        assert!(rich_message_entities(raw, &ents).is_empty());
+    }
+
+    proptest! {
+        /// Whatever offsets a rich message carries, translation never panics and spans stay valid.
+        #[test]
+        fn rich_message_never_panics_and_spans_are_valid(
+            raw in "\\PC{0,30}",
+            ents in proptest::collection::vec((0usize..40, 0usize..40), 0..6),
+        ) {
+            let ents: Vec<Value> = ents.into_iter().map(|(a, b)| link_ref(a, b, "https://d.io/")).collect();
+            let rt = rich_text(&raw, rich_message_entities(&raw, &ents), None);
+            for s in rt.spans() {
+                prop_assert!(rt.text().get(s.range.clone()).is_some());
+            }
+        }
     }
 
     proptest! {

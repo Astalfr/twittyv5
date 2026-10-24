@@ -24,13 +24,14 @@ use gpui_kit::{
     px, rems,
 };
 use twitty_model::{
-    Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostId, PostOrGone, Profile,
-    RichText, Span, SpanKind, UnavailableReason, VerifiedKind,
+    CommunityNote, Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostId,
+    PostOrGone, Profile, RichText, Span, SpanKind, UnavailableReason, VerifiedKind,
 };
 
 use crate::{
     format::{compact_count, exact_count, exact_time, relative_time},
     state::{
+        community_note::{self, NoteDisplay},
         interactions::Toggle,
         links, media_layout, motion,
         toasts::Notice,
@@ -67,6 +68,9 @@ pub struct RowCtx {
     /// state kept per row (a playing GIF) isn't shared with the same post
     /// shown in another list.
     pub scope: ElementId,
+    /// The post a thread panel is about: it shows its Community Note in
+    /// full. `None` outside the panel.
+    pub focus: Option<PostId>,
 }
 
 /// Renders one feed row.
@@ -392,6 +396,7 @@ fn post_row(
     let key = rcx.ix * 16 + sub;
 
     let link = links::vx_link(post);
+    let note = community_note::display(post, rcx.focus.as_ref());
 
     // A long name or handle truncates; the time never does, and sits at the
     // far right.
@@ -426,6 +431,7 @@ fn post_row(
                 .on_click(open_profile(&post.author, &rcx.hub))
                 .child(format!("@{}", post.author.handle)),
         )
+        .when(note == NoteDisplay::Marker, |h| h.child(note_marker(("note-marker", key), &theme)))
         .child({
             let link = link.clone();
             let exact = exact_time(post.created_at, &chrono::Local);
@@ -478,6 +484,9 @@ fn post_row(
     }
     if let Some(embed) = &post.embed {
         content = content.child(render_embed(("embed", key), embed, width, &rcx.hub, window, cx));
+    }
+    if let NoteDisplay::Full(note) = note {
+        content = content.child(note_box(("note", key), note, &rcx.hub, &theme, window, cx));
     }
     content = content.child(action_bar(key, post, eff, &pops, rcx, &theme));
 
@@ -584,6 +593,66 @@ fn translation_note(
                     hub.update(cx, |hub, cx| hub.toggle_original(&post, cx));
                 })
                 .child(note.action),
+        )
+}
+
+/// The small icon in a header saying the post has a Community Note.
+fn note_marker(
+    id: (&'static str, usize),
+    theme: &gpui_kit::component::Theme,
+) -> impl IntoElement + use<> {
+    div()
+        .id(id)
+        .debug_selector(move || format!("{}-{}", id.0, id.1))
+        .flex_none()
+        .child(Icon::new(IconName::UsersRound).size(px(14.)).text_color(theme.link))
+        .tooltip(|window, cx| Tooltip::new(community_note::MARKER).build(window, cx))
+}
+
+/// A Community Note in full, under the post a thread panel is about.
+fn note_box(
+    id: (&'static str, usize),
+    note: &CommunityNote,
+    hub: &Entity<InteractionsHub>,
+    theme: &gpui_kit::component::Theme,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl IntoElement {
+    let url = note.url.to_string();
+    v_flex()
+        .id(id)
+        .debug_selector(move || format!("{}-{}", id.0, id.1))
+        .mt_2()
+        .w_full()
+        .gap_2()
+        .p_3()
+        .rounded(px(16.))
+        .border_1()
+        .border_color(theme.border)
+        .text_color(theme.foreground)
+        // Reading or selecting the note must not reopen the post.
+        .on_click(|_, _, cx| cx.stop_propagation())
+        .child(
+            h_flex()
+                .gap_2()
+                .font_weight(FontWeight::BOLD)
+                .child(Icon::new(IconName::UsersRound).size(px(16.)).flex_none())
+                .child(community_note::TITLE),
+        )
+        .child(rich_text(("note-text", id.1), &note.body, hub, theme.link, window, cx))
+        .child(
+            div()
+                .id(("note-rate", id.1))
+                .debug_selector(move || format!("note-rate-{}", id.1))
+                .text_sm()
+                .text_color(theme.link)
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    cx.open_url(&url);
+                })
+                .child(community_note::RATE),
         )
 }
 
@@ -912,7 +981,10 @@ fn quote_card(
                             "@{} · {}",
                             q.author.handle,
                             relative_time(q.created_at, Utc::now())
-                        ))),
+                        )))
+                        .when(q.community_note.is_some(), |h| {
+                            h.child(note_marker(("quote-note-marker", id.1), &theme))
+                        }),
                 )
                 .children(shown.note.map(|note| {
                     translation_note(("quote-translation", id.1), &q.id, note, hub, &theme)
@@ -1266,8 +1338,13 @@ mod tests {
             window: &mut Window,
             cx: &mut gpui_kit::Context<Self>,
         ) -> impl IntoElement {
-            let rcx =
-                RowCtx { ix: 0, column_width: 310., hub: self.hub.clone(), scope: "test".into() };
+            let rcx = RowCtx {
+                ix: 0,
+                column_width: 310.,
+                hub: self.hub.clone(),
+                scope: "test".into(),
+                focus: None,
+            };
             div().w(px(310.)).child(render_item(&self.item, &rcx, window, cx))
         }
     }
@@ -1730,6 +1807,83 @@ mod tests {
         assert!(note.right() <= card.right(), "{note:?} overflows {card:?}");
         let body = cx.debug_bounds("quote-body-0").expect("the quote's text is rendered");
         assert!(note.bottom() <= body.top(), "the note sits above the text: {note:?} {body:?}");
+    }
+
+    /// The mock post with a Community Note.
+    fn noted_post() -> Post {
+        mock_items(twitty_model::FeedSource::Bookmarks)
+            .iter()
+            .flat_map(|i| i.posts())
+            .find(|p| p.community_note.is_some())
+            .cloned()
+            .expect("the mock has a noted post")
+    }
+
+    fn one_post(post: Post, cx: &mut gpui_kit::TestAppContext) -> &mut gpui_kit::VisualTestContext {
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+        cx
+    }
+
+    #[gpui_kit::test]
+    fn in_a_column_a_noted_post_only_shows_a_marker_by_its_handle(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        cx.update(gpui_kit::init);
+        let cx = one_post(noted_post(), cx);
+        let marker = cx.debug_bounds("note-marker-0").expect("the marker is rendered");
+        let handle = cx.debug_bounds("post-handle-0").expect("handle");
+        let time = cx.debug_bounds("post-time-0").expect("time");
+        assert!(marker.left() >= handle.right() && marker.right() <= time.left(), "{marker:?}");
+        assert!(marker.top() < time.bottom() && marker.bottom() > time.top(), "on the header line");
+        assert!(cx.debug_bounds("note-0").is_none(), "the note itself is for the thread panel");
+    }
+
+    #[gpui_kit::test]
+    fn a_post_without_note_has_no_marker(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let mut post = noted_post();
+        post.community_note = None;
+        let cx = one_post(post, cx);
+        assert!(cx.debug_bounds("post-time-0").is_some());
+        assert!(cx.debug_bounds("note-marker-0").is_none());
+    }
+
+    #[gpui_kit::test]
+    fn a_noted_quote_shows_the_marker_in_its_card(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, _) = mock_post();
+        post.community_note = None;
+        post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(noted_post())) });
+        let cx = one_post(post, cx);
+        let card = cx.debug_bounds("quote-0").expect("quote card");
+        let marker = cx.debug_bounds("quote-note-marker-0").expect("the quote's marker");
+        assert!(card.contains(&marker.center()));
+        assert!(cx.debug_bounds("note-marker-0").is_none(), "the quoting post has no note");
+    }
+
+    #[gpui_kit::test]
+    fn clicking_a_note_marker_opens_the_noted_post(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let post = noted_post();
+        let id = post.id.clone();
+        let seen = navigations(cx, FeedItem::Post(post), "note-marker-0");
+        assert_eq!(seen, vec![Navigate::Thread(id)]);
+    }
+
+    #[gpui_kit::test]
+    fn clicking_a_quotes_note_marker_opens_the_quoted_post(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, _) = mock_post();
+        post.community_note = None;
+        let quoted = noted_post();
+        let id = quoted.id.clone();
+        post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted)) });
+        let seen = navigations(cx, FeedItem::Post(post), "quote-note-marker-0");
+        assert_eq!(seen, vec![Navigate::Thread(id)]);
     }
 
     fn mock_items(source: twitty_model::FeedSource) -> Vec<FeedItem> {

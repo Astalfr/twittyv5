@@ -24,6 +24,10 @@ pub struct Post {
     /// provider sent one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translation: Option<Translation>,
+    /// Context readers added to the post (X's Community Notes), when one is
+    /// shown publicly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub community_note: Option<CommunityNote>,
     /// Canonical web link to the post.
     pub url: Url,
 }
@@ -36,6 +40,15 @@ pub struct Translation {
     pub from: Option<SmolStr>,
     /// Language of the translation, as a BCP 47 code.
     pub to: Option<SmolStr>,
+}
+
+/// Context added to a post by readers, shown under it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommunityNote {
+    /// The note's text, with its links.
+    pub body: RichText,
+    /// The note's own web page, where it can be rated.
+    pub url: Url,
 }
 
 /// What the post replies to.

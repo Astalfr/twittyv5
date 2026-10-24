@@ -126,6 +126,7 @@ impl Render for ThreadPanel {
                             column_width: PANEL_WIDTH,
                             hub: hub.clone(),
                             scope: "thread".into(),
+                            focus: Some(thread::focus_id(view).clone()),
                         };
                         render_item(item, &rcx, window, cx)
                     }))
@@ -214,6 +215,53 @@ mod tests {
             ThreadState::Loaded(view) => assert_eq!(view.focus.id, post.id),
             other => panic!("expected a loaded thread, got {other:?}"),
         });
+    }
+
+    #[gpui_kit::test]
+    async fn the_focused_post_shows_its_community_note_in_full(cx: &mut TestAppContext) {
+        use crate::ui::hub::Navigate;
+        use std::{cell::RefCell, rc::Rc};
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let backend = MockBackend::new();
+        let page = backend
+            .feed(&FeedSource::Home { mode: HomeMode::Following }, PageRequest::First)
+            .await
+            .unwrap();
+        let post = page
+            .items
+            .iter()
+            .flat_map(FeedItem::posts)
+            .find(|p| p.community_note.is_some())
+            .unwrap()
+            .clone();
+        let shared: Arc<dyn Backend> = Arc::new(backend.clone());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&seen);
+        cx.update(|cx| {
+            cx.subscribe(&hub, move |_, e: &Navigate, _| sink.borrow_mut().push(e.clone())).detach()
+        });
+        let (_panel, cx) = cx.add_window_view(|_, cx| {
+            ThreadPanel::new(post.id.clone(), Arc::clone(&shared), hub, cx)
+        });
+        cx.run_until_parked();
+
+        let note = cx.debug_bounds("note-0").expect("the focused post's note is shown");
+        assert!(cx.debug_bounds("note-text-text-0").is_some(), "with its text");
+        assert!(cx.debug_bounds("note-marker-0").is_none(), "no marker next to the note");
+        let rate = cx.debug_bounds("note-rate-0").expect("the link to rate it");
+        assert!(note.contains(&rate.center()));
+
+        cx.simulate_click(rate.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        let url = post.community_note.map(|n| n.url.to_string());
+        assert_eq!(cx.opened_url(), url);
+        cx.simulate_click(note.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(*seen.borrow(), Vec::<Navigate>::new(), "the note doesn't reopen the post");
     }
 
     #[gpui_kit::test]

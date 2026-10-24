@@ -314,6 +314,7 @@ impl ProfilePanel {
                         column_width: PANEL_WIDTH,
                         hub: self.hub.clone(),
                         scope: "profile".into(),
+                        focus: None,
                     };
                     render_item(item, &rcx, window, cx)
                 }

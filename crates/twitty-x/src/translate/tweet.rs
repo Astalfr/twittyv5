@@ -5,8 +5,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use twitty_model::{
-    Embed, FeedItem, Metrics, Post, PostId, PostOrGone, Profile, ReplyRef, Translation,
-    UnavailableReason, UserId, ViewerPostState,
+    CommunityNote, Embed, FeedItem, Metrics, Post, PostId, PostOrGone, Profile, ReplyRef,
+    Translation, UnavailableReason, UserId, ViewerPostState,
 };
 use url::Url;
 
@@ -185,6 +185,7 @@ pub(crate) fn post(tweet: &Value, ctx: &mut Ctx, depth: u8) -> Result<Post, Stri
         },
         lang: str_at(legacy, &["lang"]).filter(|l| *l != "und" && *l != "zxx").map(Into::into),
         translation: translation(tweet),
+        community_note: community_note(tweet, ctx),
         url,
     })
 }
@@ -214,6 +215,27 @@ fn translation(tweet: &Value) -> Option<Translation> {
     })
 }
 
+/// The Community Note X shows under a post, from `birdwatch_pivot`. X only
+/// sends the pivot for a note rated helpful, in timelines as well as in
+/// `TweetDetail`; `has_birdwatch_notes` alone (notes still being rated) shows
+/// nothing. The text's entities use code-point `fromIndex`/`toIndex`.
+fn community_note(tweet: &Value, ctx: &mut Ctx) -> Option<CommunityNote> {
+    let pivot = at(tweet, &["birdwatch_pivot"])?;
+    let Some(raw) = str_at(pivot, &["subtitle", "text"]).filter(|t| !t.trim().is_empty()) else {
+        ctx.warn("community note without text".to_owned());
+        return None;
+    };
+    let Some(url) = str_at(pivot, &["destinationUrl"])
+        .or_else(|| str_at(pivot, &["callToAction", "destinationUrl"]))
+        .and_then(|u| Url::parse(u).ok())
+    else {
+        ctx.warn("community note without a valid link".to_owned());
+        return None;
+    };
+    let ents = text::rich_message_entities(raw, array_at(pivot, &["subtitle", "entities"]));
+    Some(CommunityNote { body: text::rich_text(raw, ents, None), url })
+}
+
 fn quoted(result: &Value, ctx: &mut Ctx) -> PostOrGone {
     match unwrap(result) {
         Unwrapped::Tweet(t) => match post(t, ctx, 1) {
@@ -240,7 +262,7 @@ pub(crate) fn parse_date(s: &str) -> Option<DateTime<Utc>> {
 mod tests {
     use super::*;
     use serde_json::{Value, json};
-    use twitty_model::Media;
+    use twitty_model::{Media, SpanKind};
 
     fn user(id: &str, handle: &str) -> Value {
         json!({"result": {"__typename": "User", "rest_id": id, "core": {"name": handle.to_uppercase(), "screen_name": handle}}})
@@ -443,6 +465,76 @@ mod tests {
         let Some(Embed::Quote { quoted }) = p.embed else { panic!("quote") };
         let PostOrGone::Post(q) = *quoted else { panic!("quoted post") };
         assert_eq!(q.translation.map(|t| t.body.text().to_owned()).as_deref(), Some("Japanese"));
+    }
+
+    fn pivot(text: &str) -> Value {
+        json!({
+            "destinationUrl": "https://twitter.com/i/birdwatch/n/9",
+            "callToAction": {"destinationUrl": "https://twitter.com/i/birdwatch/n/9", "title": "Rate it"},
+            "footer": {"text": "Context is written by people who use X.", "entities": []},
+            "note": {"rest_id": "9", "language": "en"},
+            "shorttitle": "Readers added context",
+            "title": "Readers added context they thought people might want to know",
+            "subtitle": {"text": text, "entities": [{
+                "fromIndex": 12, "toIndex": 26,
+                "ref": {"type": "TimelineUrl", "url": "https://t.co/a", "expandedUrl": "https://example.com/report"}
+            }]}
+        })
+    }
+
+    #[test]
+    fn community_note_with_its_link() {
+        let mut t = tweet("80", "a claim");
+        t["birdwatch_pivot"] = pivot("Not true 🦀: example.com/r…");
+        let mut ctx = Ctx::default();
+        let FeedItem::Post(p) = item(&t, "tweet-80", &mut ctx) else { panic!() };
+        let note = p.community_note.expect("note");
+        assert_eq!(note.body.text(), "Not true 🦀: example.com/r…");
+        assert_eq!(note.url.as_str(), "https://twitter.com/i/birdwatch/n/9");
+        let link = &note.body.spans()[0];
+        assert_eq!(&note.body.text()[link.range.clone()], "example.com/r…");
+        assert!(
+            matches!(&link.kind, SpanKind::Link { url } if url.as_str() == "https://example.com/report")
+        );
+        assert!(ctx.warnings.is_empty());
+    }
+
+    #[test]
+    fn no_pivot_no_note_even_when_x_says_there_are_notes() {
+        let mut t = tweet("81", "a claim");
+        t["has_birdwatch_notes"] = json!(true);
+        let FeedItem::Post(p) = item(&t, "tweet-81", &mut Ctx::default()) else { panic!() };
+        assert_eq!(p.community_note, None);
+    }
+
+    #[test]
+    fn a_broken_note_is_dropped_with_a_warning_but_the_post_stays() {
+        let mut no_text = pivot("x");
+        no_text["subtitle"] = json!({"entities": []});
+        let mut bad_url = pivot("Not true 🦀: example.com/r…");
+        bad_url["destinationUrl"] = json!("not a url");
+        bad_url["callToAction"] = json!({});
+        for broken in [no_text, bad_url, json!("garbage")] {
+            let mut t = tweet("82", "a claim");
+            t["birdwatch_pivot"] = broken.clone();
+            let mut ctx = Ctx::default();
+            let FeedItem::Post(p) = item(&t, "tweet-82", &mut ctx) else { panic!("{broken}") };
+            assert_eq!(p.community_note, None, "{broken}");
+            assert_eq!(p.body.text(), "a claim");
+            assert_eq!(ctx.warnings.len(), 1, "{broken}");
+        }
+    }
+
+    #[test]
+    fn the_note_link_falls_back_to_the_call_to_action() {
+        let mut t = tweet("83", "a claim");
+        t["birdwatch_pivot"] = pivot("Not true 🦀: example.com/r…");
+        t["birdwatch_pivot"]["destinationUrl"] = Value::Null;
+        let FeedItem::Post(p) = item(&t, "tweet-83", &mut Ctx::default()) else { panic!() };
+        assert_eq!(
+            p.community_note.map(|n| n.url.to_string()).as_deref(),
+            Some("https://twitter.com/i/birdwatch/n/9")
+        );
     }
 
     #[test]

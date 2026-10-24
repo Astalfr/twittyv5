@@ -29,8 +29,8 @@ pub use ids::{ListId, NotificationId, PageToken, PostId, UserId};
 pub use media::{AspectRatio, ImageRef, Media, VideoVariant};
 pub use notification::{Notification, NotificationKind};
 pub use post::{
-    Embed, LinkCard, Metrics, Poll, PollOption, Post, PostOrGone, ReplyRef, Translation,
-    UnavailableReason, ViewerPostState,
+    CommunityNote, Embed, LinkCard, Metrics, Poll, PollOption, Post, PostOrGone, ReplyRef,
+    Translation, UnavailableReason, ViewerPostState,
 };
 pub use profile::{Badges, Profile, ProfileCounts, VerifiedKind, ViewerRelation};
 pub use rich_text::{RichText, RichTextError, Segment, Span, SpanKind, UserRef};

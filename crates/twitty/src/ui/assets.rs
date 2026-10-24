@@ -40,6 +40,7 @@ gpui_kit::assets::icon_assets!(
         CircleUser,
         LogIn,
         LogOut,
+        UsersRound,
     ]
 );
 
@@ -114,6 +115,7 @@ mod tests {
             IconName::CircleUser,
             IconName::LogIn,
             IconName::LogOut,
+            IconName::UsersRound,
             // The title bar's window buttons.
             IconName::WindowMinimize,
             IconName::WindowMaximize,

@@ -17,8 +17,9 @@ So Twitty has an **anti-corruption layer**:
 | `PostId`, `UserId`, `ListId` | Opaque string newtypes. Never parsed outside the backend. |
 | `PageToken` | Opaque paging cursor. Only the backend that produced it understands it. |
 | `Profile` | User: handle, display name, avatar, banner, bio (`RichText`), badges, counts, relation to the viewer |
-| `Post` | Author (`Arc<Profile>`), time, body (`RichText`), `Vec<Media>`, `Option<Embed>`, reply info, metrics, viewer state, language, optional `Translation`, canonical URL |
+| `Post` | Author (`Arc<Profile>`), time, body (`RichText`), `Vec<Media>`, `Option<Embed>`, reply info, metrics, viewer state, language, optional `Translation`, optional `CommunityNote`, canonical URL |
 | `Translation` | A machine translation of a post's body: `body` (`RichText`), `from` and `to` (BCP 47 codes, optional) |
+| `CommunityNote` | Context readers added to a post: `body` (`RichText`, its links as spans) and `url`, the note's own page |
 | `RichText` | `text: String` + `spans: Vec<Span>`. Spans are **byte ranges into `text`**, sorted and non-overlapping. |
 | `SpanKind` | `Mention`, `Hashtag`, `Cashtag`, `Link { display, url }` |
 | `Media` | `Image`, `Video`, `Gif`, each with an `ImageRef` that carries size hints (so the list can reserve height). A `Video` has its playable files as `VideoVariant`s (URL, bitrate, size), best first; `Media::stream` is the one to play by default |
@@ -40,6 +41,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `set_followin
 2. **Retweets are unwrapped**: the retweet becomes `FeedItem::Repost { by, post }`, where `post` is the original post.
 3. **Long posts**: prefer `note_tweet` text and entities over the truncated `full_text`.
 3b. **Translations**: Grok's `grok_translated_post_with_availability` becomes `Post::translation` (its own text and entities, same offset rules) when `is_available` and the text isn't blank; see [x-api.md](x-api.md#grok-translations-2026-10-24).
+3c. **Community Notes**: `birdwatch_pivot` becomes `Post::community_note` (the note's text with its links, and its page); a pivot without text or link is dropped with a warning, the post stays. See [x-api.md](x-api.md#community-notes-2026-10-24).
 4. **Entities**: X gives offsets in **Unicode code points** of the raw, HTML-escaped text (checked against 453 live entities on 2026-10-24: 98 only match as code points, none only as UTF-16). They are converted to byte ranges in the decoded string. Inverted, out-of-range or overlapping entities are dropped with a warning; the text itself is never lost.
 5. **Text clean-up**: decode HTML entities (`&amp;`, `&lt;`, …). Show `t.co` links as their `display_url`, with a `Link` span to the expanded URL. Drop the trailing media `t.co` link, and the leading `@mentions` of replies (both are outside `display_text_range`; reply info is shown separately).
 6. **Media**: images and posters use `media_url_https?name=medium`. A video keeps every MP4 variant (HLS playlists are left out), highest bitrate first, with the size X puts in the path (`/vid/avc1/1280x720/…`) when there is one; a GIF's stream is its highest-bitrate MP4. Sizes come from `original_info`.
