@@ -31,10 +31,7 @@ impl XBackend {
         source: &FeedSource,
         page: PageRequest,
     ) -> Result<FeedPage, BackendError> {
-        let (operation, variables) =
-            requests::feed(source, &page).map_err(|requests::NotMapped(what)| {
-                BackendError::Upstream(format!("{what} can't be loaded from X yet"))
-            })?;
+        let (operation, variables) = requests::feed(source, &page);
         let body = self.client.graphql(operation, variables).await?;
         Ok(translate::feed_page(&body).page)
     }

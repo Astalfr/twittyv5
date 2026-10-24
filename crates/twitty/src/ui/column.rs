@@ -9,13 +9,14 @@ use gpui_kit::{
     component::skeleton::Skeleton, component::spinner::Spinner, component::*, div, list,
     prelude::*, px,
 };
-use twitty_model::{Backend, BackendError, FeedSource, HomeMode};
+use twitty_model::{Backend, BackendError, FeedSource};
 
 use crate::{
     runtime::Runtime,
     state::{
         column::{ColumnModel, ListChange, LoadKind, Status},
         deck::{ColumnId, ColumnWidth},
+        sources::{self, Tab},
     },
     ui::{
         hub::InteractionsHub,
@@ -192,8 +193,8 @@ impl ColumnView {
         cx.notify();
     }
 
-    fn switch_home(&mut self, mode: HomeMode, cx: &mut Context<Self>) {
-        let source = FeedSource::Home { mode };
+    /// Switches the column to another variant of its source (a header tab).
+    pub fn switch_source(&mut self, source: FeedSource, cx: &mut Context<Self>) {
         if self.model.source() == &source {
             return;
         }
@@ -249,6 +250,7 @@ impl ColumnView {
         let theme = cx.theme().clone();
         let source = self.model.source();
         let icon = source_icon(source);
+        let tabs = sources::tabs(source);
         let id = self.id;
         let header_button = |name: &'static str, icon: IconName, tip: &'static str| {
             Button::new(name).ghost().small().icon(Icon::new(icon)).tooltip(tip)
@@ -292,20 +294,21 @@ impl ColumnView {
                         cx.listener(move |_, _, _, cx| cx.emit(ColumnEvent::Remove(id))),
                     )),
             )
-            .when_some(home_mode(source), |d, mode| d.child(self.render_home_tabs(mode, cx)))
+            .when(!tabs.is_empty(), |d| d.child(self.render_tabs(tabs, cx)))
     }
 
-    fn render_home_tabs(&self, mode: HomeMode, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_tabs(&self, tabs: Vec<Tab>, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let tab = |label: &'static str, this_mode: HomeMode| {
-            let active = mode == this_mode;
+        let current = self.model.source().clone();
+        let tab = |Tab { label, source }: Tab| {
+            let active = source == current;
             v_flex()
                 .id(label)
                 .flex_1()
                 .items_center()
                 .cursor_pointer()
                 .hover(|s| s.bg(theme.list_hover))
-                .on_click(cx.listener(move |this, _, _, cx| this.switch_home(this_mode, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| this.switch_source(source.clone(), cx)))
                 .child(
                     div()
                         .py_3()
@@ -321,9 +324,7 @@ impl ColumnView {
                         .when(active, |d| d.bg(theme.primary)),
                 )
         };
-        h_flex()
-            .child(tab("For you", HomeMode::ForYou))
-            .child(tab("Following", HomeMode::Following))
+        h_flex().children(tabs.into_iter().map(tab))
     }
 
     fn render_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -374,13 +375,6 @@ impl ColumnView {
                 )
             })
             .into_any_element()
-    }
-}
-
-fn home_mode(source: &FeedSource) -> Option<HomeMode> {
-    match source {
-        FeedSource::Home { mode } => Some(*mode),
-        _ => None,
     }
 }
 
@@ -435,7 +429,7 @@ impl Render for ColumnView {
 mod tests {
     use super::*;
     use gpui_kit::{ScrollDelta, ScrollWheelEvent, TestAppContext, point};
-    use twitty_model::mock::MockBackend;
+    use twitty_model::{HomeMode, mock::MockBackend};
 
     fn setup(cx: &mut TestAppContext) -> (MockBackend, Entity<ColumnView>) {
         cx.update(|cx| {
@@ -531,7 +525,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn switching_home_mode_reloads_and_emits(cx: &mut TestAppContext) {
+    fn switching_tabs_reloads_and_emits(cx: &mut TestAppContext) {
         let (_, column) = setup(cx);
         cx.run_until_parked();
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -542,7 +536,7 @@ mod tests {
             })
             .detach();
         });
-        column.update(cx, |c, cx| c.switch_home(HomeMode::ForYou, cx));
+        column.update(cx, |c, cx| c.switch_source(FeedSource::Home { mode: HomeMode::ForYou }, cx));
         cx.run_until_parked();
         column.read_with(cx, |c, _| {
             assert_eq!(c.model().source(), &FeedSource::Home { mode: HomeMode::ForYou });

@@ -22,6 +22,10 @@ const FIXTURES: &[&str] = &[
     "search-rust",
     "tweetdetail",
     "notifications",
+    "userreplies-nasa",
+    "usermedia-nasa",
+    "usermedia-nasa-2",
+    "list-space",
 ];
 
 fn load(name: &str) -> Translated {
@@ -211,6 +215,18 @@ fn fixtures_cover_every_shape_we_translate() {
         assert!(found, "{kind} span");
     }
     assert!(pages.iter().all(|p| p.items.is_empty() || p.older.is_some()), "bottom cursors");
+}
+
+#[test]
+fn media_grid_pages_carry_posts() {
+    // Page 1 is a grid module; page 2 only adds to it (`TimelineAddToModule`).
+    for name in ["usermedia-nasa", "usermedia-nasa-2"] {
+        let page = load(name).page;
+        let posts: Vec<_> = page.items.iter().flat_map(FeedItem::posts).collect();
+        assert!(posts.len() >= 5, "{name}: {}", posts.len());
+        assert!(posts.iter().all(|p| !p.media.is_empty()), "{name}: every grid post has media");
+        assert!(page.older.is_some(), "{name}");
+    }
 }
 
 #[test]

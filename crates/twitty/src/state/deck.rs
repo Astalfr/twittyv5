@@ -185,6 +185,46 @@ impl DeckFile {
         }
     }
 
+    /// Index of the active deck.
+    pub fn active_index(&self) -> usize {
+        self.active.min(self.decks.len().saturating_sub(1))
+    }
+
+    /// Adds an empty deck named "Deck N" and makes it active. Returns its index.
+    pub fn add_deck(&mut self) -> usize {
+        // The lowest free number; "Main" counts as deck 1.
+        let n = (2..)
+            .find(|n| !self.decks.iter().any(|d| d.name == format!("Deck {n}")))
+            .unwrap_or(self.decks.len() + 1);
+        self.decks.push(Deck { name: format!("Deck {n}"), columns: Vec::new() });
+        self.active = self.decks.len() - 1;
+        self.active
+    }
+
+    /// Switches to deck `index`. Returns whether it exists.
+    pub fn set_active(&mut self, index: usize) -> bool {
+        let exists = index < self.decks.len();
+        if exists {
+            self.active = index;
+        }
+        exists
+    }
+
+    /// Removes deck `index` (never the last one). The active deck stays the
+    /// same deck when possible, else its left neighbour becomes active.
+    pub fn remove_deck(&mut self, index: usize) -> bool {
+        if self.decks.len() <= 1 || index >= self.decks.len() {
+            return false;
+        }
+        let active = self.active_index();
+        self.decks.remove(index);
+        if index < active || (index == active && active > 0) {
+            self.active = active - 1;
+        }
+        self.active = self.active_index();
+        true
+    }
+
     /// Mutable access to one column's settings.
     pub fn column_mut(&mut self, id: ColumnId) -> Option<&mut ColumnConfig> {
         self.active_mut().columns.iter_mut().find(|c| c.id == id)
@@ -212,6 +252,41 @@ pub fn default_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn decks_can_be_added_switched_and_removed() {
+        let mut file = DeckFile::default();
+        let main_columns = file.active().columns.len();
+        assert_eq!(file.add_deck(), 1);
+        assert_eq!(file.active().name, "Deck 2");
+        assert!(file.active().columns.is_empty());
+        let id = file.add_column(FeedSource::Bookmarks);
+        assert_eq!(file.decks[1].columns[0].id, id, "columns go to the active deck");
+        assert!(file.set_active(0));
+        assert_eq!(file.active().columns.len(), main_columns);
+        assert!(!file.set_active(5));
+
+        // Removing a deck left of the active one keeps the same deck active.
+        file.add_deck();
+        file.set_active(2);
+        assert!(file.remove_deck(0));
+        assert_eq!(file.active().name, "Deck 3");
+        // Removing the active deck activates its left neighbour.
+        assert!(file.remove_deck(1));
+        assert_eq!(file.active().name, "Deck 2");
+        assert!(!file.remove_deck(0), "the last deck stays");
+    }
+
+    #[test]
+    fn deck_names_stay_unique() {
+        let mut file = DeckFile::default();
+        file.add_deck();
+        file.add_deck();
+        file.remove_deck(1);
+        file.add_deck();
+        let names: Vec<_> = file.decks.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["Main", "Deck 3", "Deck 2"]);
+    }
 
     #[test]
     fn default_deck_has_columns_and_round_trips() {

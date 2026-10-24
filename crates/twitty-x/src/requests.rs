@@ -1,7 +1,7 @@
 //! Which GraphQL operation and variables serve each `FeedSource`.
 //!
-//! Only variable sets verified live are mapped (see the table in
-//! `docs/x-api.md`); other sources return [`NotMapped`] instead of guessing.
+//! Every variable set here was verified live (see the table in `docs/x-api.md`);
+//! a new source must be captured before it is mapped.
 
 use serde_json::{Value, json};
 use twitty_model::{FeedSource, HomeMode, NotificationFilter, PageRequest, SearchSort, UserTab};
@@ -11,15 +11,8 @@ use crate::client::home_variables;
 /// Rows asked for per page.
 pub(crate) const PAGE_SIZE: u32 = 20;
 
-/// A source Twitty can't load from X yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NotMapped(pub &'static str);
-
 /// The operation and variables for one page of `source`.
-pub(crate) fn feed(
-    source: &FeedSource,
-    page: &PageRequest,
-) -> Result<(&'static str, Value), NotMapped> {
+pub(crate) fn feed(source: &FeedSource, page: &PageRequest) -> (&'static str, Value) {
     let cursor = match page {
         PageRequest::First => None,
         PageRequest::Newer(t) | PageRequest::Older(t) => Some(t.as_str()),
@@ -29,7 +22,7 @@ pub(crate) fn feed(
             let latest = *mode == HomeMode::Following;
             let op = if latest { "HomeLatestTimeline" } else { "HomeTimeline" };
             // `home_variables` already handles the cursor.
-            return Ok((op, home_variables(latest, PAGE_SIZE, cursor)));
+            return (op, home_variables(latest, PAGE_SIZE, cursor));
         }
         FeedSource::Notifications { filter } => {
             let timeline_type = match filter {
@@ -65,10 +58,31 @@ pub(crate) fn feed(
                 "withVoice": true,
             }),
         ),
-        FeedSource::User { tab: UserTab::Replies, .. } => return Err(NotMapped("user replies")),
-        FeedSource::User { tab: UserTab::Media, .. } => return Err(NotMapped("user media")),
-        FeedSource::User { tab: UserTab::Likes, .. } => return Err(NotMapped("user likes")),
-        FeedSource::List { .. } => return Err(NotMapped("lists")),
+        FeedSource::User { id, tab: UserTab::Replies, .. } => (
+            "UserTweetsAndReplies",
+            json!({
+                "userId": id.as_str(),
+                "count": PAGE_SIZE,
+                "includePromotedContent": true,
+                "withCommunity": true,
+                "withVoice": true,
+            }),
+        ),
+        // X only serves likes of the signed-in account; others' come back empty.
+        FeedSource::User { id, tab: tab @ (UserTab::Media | UserTab::Likes), .. } => (
+            if *tab == UserTab::Media { "UserMedia" } else { "Likes" },
+            json!({
+                "userId": id.as_str(),
+                "count": PAGE_SIZE,
+                "includePromotedContent": false,
+                "withClientEventToken": false,
+                "withBirdwatchNotes": false,
+                "withVoice": true,
+            }),
+        ),
+        FeedSource::List { id, .. } => {
+            ("ListLatestTweetsTimeline", json!({"listId": id.as_str(), "count": PAGE_SIZE}))
+        }
         FeedSource::Bookmarks => {
             ("Bookmarks", json!({"count": PAGE_SIZE, "includePromotedContent": true}))
         }
@@ -77,7 +91,7 @@ pub(crate) fn feed(
     if let (Some(c), Some(obj)) = (cursor, vars.as_object_mut()) {
         obj.insert("cursor".to_owned(), json!(c));
     }
-    Ok((operation, vars))
+    (operation, vars)
 }
 
 /// Variables of `TweetDetail` for the conversation around `focal`.
@@ -106,7 +120,7 @@ mod tests {
     use twitty_model::{ListId, PageToken, PostId, UserId};
 
     fn first(source: FeedSource) -> (&'static str, Value) {
-        feed(&source, &PageRequest::First).unwrap()
+        feed(&source, &PageRequest::First)
     }
 
     #[test]
@@ -126,20 +140,22 @@ mod tests {
             FeedSource::User { id: UserId::new("7"), handle: "x".into(), tab: UserTab::Posts },
             FeedSource::Bookmarks,
             FeedSource::Thread { root: PostId::new("9") },
+            FeedSource::List { id: ListId::new("5"), name: None },
+            FeedSource::User { id: UserId::new("7"), handle: "x".into(), tab: UserTab::Media },
         ];
         for source in &sources {
             for page in [
                 PageRequest::Older(PageToken::new("BOTTOM")),
                 PageRequest::Newer(PageToken::new("TOP")),
             ] {
-                let (op, vars) = feed(source, &page).unwrap();
+                let (op, vars) = feed(source, &page);
                 let expected = match &page {
                     PageRequest::Older(_) => "BOTTOM",
                     _ => "TOP",
                 };
                 assert_eq!(vars["cursor"], expected, "{op}");
             }
-            let (op, vars) = feed(source, &PageRequest::First).unwrap();
+            let (op, vars) = feed(source, &PageRequest::First);
             assert!(vars.get("cursor").is_none(), "{op}");
         }
     }
@@ -170,16 +186,18 @@ mod tests {
     }
 
     #[test]
-    fn unverified_sources_are_not_guessed() {
-        let user = |tab| FeedSource::User { id: UserId::new("1"), handle: "a".into(), tab };
-        for source in [
-            user(UserTab::Replies),
-            user(UserTab::Media),
-            user(UserTab::Likes),
-            FeedSource::List { id: ListId::new("5"), name: None },
-        ] {
-            assert!(feed(&source, &PageRequest::First).is_err(), "{source:?}");
-        }
+    fn user_tabs_and_lists_use_their_operations() {
+        let user = |tab| FeedSource::User { id: UserId::new("11348282"), handle: "a".into(), tab };
+        let (op, vars) = first(user(UserTab::Replies));
+        assert_eq!(op, "UserTweetsAndReplies");
+        assert_eq!(vars["withCommunity"], true);
+        let (op, vars) = first(user(UserTab::Media));
+        assert_eq!(op, "UserMedia");
+        assert_eq!(vars["userId"], "11348282");
+        assert_eq!(first(user(UserTab::Likes)).0, "Likes");
+        let (op, vars) = first(FeedSource::List { id: ListId::new("5"), name: None });
+        assert_eq!(op, "ListLatestTweetsTimeline");
+        assert_eq!(vars, json!({"listId": "5", "count": 20}));
     }
 
     #[test]

@@ -35,7 +35,10 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 
 | Element | Spec |
 |---|---|
-| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: logo, Home, Search, Notifications, Lists, Add column, Deck switcher. Bottom: Compose (accent), account avatar menu. |
+| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: logo, **+ Add column**. Bottom: account button, theme switch, Compose (accent). |
+| Deck bar | 36px strip above the columns: one tab per deck (active one underlined, with × when more than one deck exists) and **+** for a new empty deck ("Deck N"). Switching rebuilds the columns of that deck; the hub (likes etc.) is kept. |
+| Add column | Overlay dialog: a button per kind (Home, Notifications, Search, User, List, Post, Bookmarks). Kinds without input are added at once; others take a query, `@handle`/profile link, list link/id or post link/id (parsed in `state::add_column`). Handles are resolved with `Backend::profile` ("Looking up…"), unknown ones show an error. |
+| Column tabs | Under the header, from `state::sources::tabs`: Home For you/Following · Notifications All/Verified/Mentions · Search Top/Latest/Media · User Posts/Replies/Media/Likes. A tab switches the column's source and is saved in the deck. |
 | Deck | One horizontal scroll area. Columns are separated by 1px `border`. Columns can be reordered by dragging the header. |
 | Scrollbars | Always visible (`Theme::set_scrollbar_mode(Always)` in `ui/theme.rs`). Each column has a vertical bar driven by its `ListState`. The deck has a horizontal bar in a 12px strip under the columns, driven by its `ScrollHandle`. |
 | Column widths | Narrow 310px · Medium 350px (default) · Wide 400px |

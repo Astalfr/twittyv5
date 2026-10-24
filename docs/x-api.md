@@ -4,7 +4,9 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 > Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
 
-**Status (M5, done):** `XBackend` implements `twitty-model`'s `Backend` and the app uses it when it finds a session. Reads (`viewer`, `feed`, `thread`, `profile`) are wired; writes (`act`, `publish`) return an error until M8. Verified live on 2026-10-24: Home, Notifications and Search columns load with images.
+**M7:** every `FeedSource` is mapped to a live-verified operation (user replies, media and likes, and lists added on 2026-10-24). Media grids page through `TimelineAddToModule`.
+
+**M5:** `XBackend` implements `twitty-model`'s `Backend` and the app uses it when it finds a session. Reads (`viewer`, `feed`, `thread`, `profile`) are wired; writes (`act`, `publish`) return an error until M8. Verified live on 2026-10-24: Home, Notifications and Search columns load with images.
 
 **M4:** X responses are translated into `twitty-model` by `translate::feed_page` and checked against 9 anonymised live fixtures.
 
@@ -78,9 +80,12 @@ A session file is `{"auth_token": "…", "ct0": "…"}`. Unusable sources are lo
 | `Notifications { filter }` | `NotificationsTimeline` | `timeline_type`: `All`, `Verified`, `Mentions` |
 | `Search { query, sort }` | `SearchTimeline` (POST) | `product`: `Top`, `Latest`, `Media` |
 | `User { tab: Posts }` | `UserTweets` | |
+| `User { tab: Replies }` | `UserTweetsAndReplies` | |
+| `User { tab: Media }` | `UserMedia` | page 1 is a `VerticalGrid` module; later pages come as `TimelineAddToModule` |
+| `User { tab: Likes }` | `Likes` | X only shows the signed-in account's likes; other accounts come back empty |
+| `List { id }` | `ListLatestTweetsTimeline` | |
 | `Bookmarks` | `Bookmarks` | |
 | `Thread { root }` | `TweetDetail` | |
-| `User { Replies / Media / Likes }`, `List` | not mapped yet | the column shows "… can't be loaded from X yet" (M7) |
 
 `PageRequest::Older` sends the bottom cursor and `Newer` the top cursor, both as `cursor`. A page with no rows ends the feed even if X sends a cursor, so scrolling can't loop on empty pages.
 
@@ -161,6 +166,7 @@ data.<root>                                  # e.g. home.home_timeline_urt, sear
      TimelineAddEntries   { entries[] }
      TimelineReplaceEntry { entry }          # usually refreshes cursors
      TimelinePinEntry     { entry }
+     TimelineAddToModule  { moduleEntryId, moduleItems[] }   # later pages of a module (media grid)
      TimelineClearCache / TimelineTerminateTimeline / TimelineShowAlert ...
 entry.content.__typename / entryType
      TimelineTimelineItem    -> itemContent.tweet_results.result
@@ -203,6 +209,10 @@ Variables that worked live (2026-10-24):
 | `TweetDetail` | `{"focalTweetId":"…","with_rux_injections":false,"rankingMode":"Relevance","includePromotedContent":true,"withCommunity":true,"withQuickPromoteEligibilityTweetFields":true,"withBirdwatchNotes":true,"withVoice":true}` |
 | `Bookmarks` | `{"count":20,"includePromotedContent":true}` |
 | `NotificationsTimeline` | `{"timeline_type":"All","count":20}` |
+| `UserTweetsAndReplies` | `{"userId":"…","count":20,"includePromotedContent":true,"withCommunity":true,"withVoice":true}` |
+| `UserMedia`, `Likes` | `{"userId":"…","count":20,"includePromotedContent":false,"withClientEventToken":false,"withBirdwatchNotes":false,"withVoice":true}` |
+| `ListLatestTweetsTimeline` | `{"listId":"…","count":20}` |
+| `SearchTimeline` with `"product":"Lists"` | finds public lists (`TimelineTwitterList` items; used to find a list id for the fixture) |
 
 `capture` writes the raw response (to the gitignored `dumps/` by default) and prints the instruction types, entry count and rate-limit budget.
 

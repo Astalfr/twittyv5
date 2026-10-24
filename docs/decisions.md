@@ -4,6 +4,14 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: No fixture from the user's own likes (M7)
+- **Decision**: The `Likes` request was verified live on the signed-in account, but only public data (NASA's replies and media, a public list found through list search) became fixtures. `Likes` uses the same timeline shape, covered by those.
+- **Why**: Even anonymised, a likes capture reveals what the account owner liked.
+
+### 2026-10-24: One "Add column" dialog instead of per-type rail buttons (M7)
+- **Decision**: The rail has a single **+**; the dialog parses links and handles (`state::add_column`), resolving handles to user ids before the column is created.
+- **Why**: User, List and Post columns need input, and `FeedSource::User` needs the id (X's user timelines take `userId`, not the handle).
+
 ### 2026-10-24: Sign-out only for sessions the app stored (M6)
 - **Decision**: "Sign out" deletes the keyring entry. Sessions from env vars or session files show their source instead of a sign-out button.
 - **Why**: The app can't remove those sources, so a sign-out would silently undo itself on the next launch.

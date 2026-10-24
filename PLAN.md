@@ -2,7 +2,7 @@
 
 A native desktop client for X (Twitter), written in Rust with **GPUI** (via **GPUI Kit**). It talks to X's internal web GraphQL API (`https://x.com/i/api/graphql/<queryId>/<Operation>`) and looks like the new **X Pro / TweetDeck**: a multi-column deck.
 
-> Status: **M0–M6 done**. Sign-in dialog with keyring storage; real X data through `XBackend`; decks and settings versioned in `%APPDATA%\Twitty`. Next: M7 (all column types).
+> Status: **M0–M7 done**. Every column type loads from X; "Add column" dialog, per-column tabs, several decks. Next: M8 (like/repost/bookmark/reply).
 >
 > Living documentation is in [docs/](docs/README.md) and contributor/agent rules are in [CLAUDE.md](CLAUDE.md). Every milestone below is done only when it meets the definition of done in [docs/testing.md](docs/testing.md).
 

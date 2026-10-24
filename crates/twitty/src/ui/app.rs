@@ -7,10 +7,7 @@ use gpui_kit::{
     Styled, Subscription, Task, Window, assets::IconName, component::button::*,
     component::scroll::ScrollableElement, component::*, div, prelude::*, px,
 };
-use twitty_model::{
-    Backend, BackendError, FeedSource, HomeMode, NotificationFilter, Profile, SearchSort,
-    mock::MockBackend,
-};
+use twitty_model::{Backend, BackendError, FeedSource, Profile, mock::MockBackend};
 
 use crate::{
     account::{AccountServices, SessionSource},
@@ -20,6 +17,7 @@ use crate::{
         settings::Settings,
     },
     ui::{
+        add_column::{AddColumnEvent, AddColumnView},
         column::{ColumnEvent, ColumnView},
         hub::{ActionFailed, InteractionsHub},
         login::{LoginEvent, LoginView},
@@ -61,9 +59,13 @@ pub struct TwittyApp {
     /// The signed-in account, once the session check answered.
     viewer: Option<Profile>,
     login: Option<Entity<LoginView>>,
+    add_column: Option<Entity<AddColumnView>>,
     account_panel: bool,
     session_check: Option<Task<()>>,
     _login_sub: Option<Subscription>,
+    _add_sub: Option<Subscription>,
+    _hub_sub: Option<Subscription>,
+    /// Column event subscriptions; replaced with the columns.
     _subs: Vec<Subscription>,
 }
 
@@ -97,11 +99,15 @@ impl TwittyApp {
             deck_scroll: ScrollHandle::new(),
             viewer: None,
             login: None,
+            add_column: None,
             account_panel: false,
             session_check: None,
             _login_sub: None,
+            _add_sub: None,
+            _hub_sub: None,
             _subs: Vec::new(),
         };
+        this.build_hub(cx);
         this.build_columns(cx);
         if this.options.session.is_some() {
             this.check_session(window, cx);
@@ -126,14 +132,19 @@ impl TwittyApp {
         self.login.as_ref()
     }
 
-    /// (Re)creates the hub and every column on the current backend. Old views
-    /// are dropped, which cancels their loads and polling.
-    fn build_columns(&mut self, cx: &mut Context<Self>) {
-        self._subs.clear();
+    /// (Re)creates the hub on the current backend, dropping the old account's
+    /// like/repost/bookmark overrides.
+    fn build_hub(&mut self, cx: &mut Context<Self>) {
         self.hub = cx.new(|_| InteractionsHub::new(Arc::clone(&self.backend)));
-        self._subs.push(cx.subscribe(&self.hub, |_, _, e: &ActionFailed, _| {
+        self._hub_sub = Some(cx.subscribe(&self.hub, |_, _, e: &ActionFailed, _| {
             tracing::warn!("action failed: {}", e.0);
         }));
+    }
+
+    /// (Re)creates every column of the active deck. Old views are dropped,
+    /// which cancels their loads and polling.
+    fn build_columns(&mut self, cx: &mut Context<Self>) {
+        self._subs.clear();
         self.columns.clear();
         let configs = self.deck.active().columns.clone();
         for config in configs {
@@ -202,8 +213,59 @@ impl TwittyApp {
     fn close_overlays(&mut self, cx: &mut Context<Self>) {
         self.login = None;
         self._login_sub = None;
+        self.add_column = None;
+        self._add_sub = None;
         self.account_panel = false;
         cx.notify();
+    }
+
+    pub fn add_column_dialog(&self) -> Option<&Entity<AddColumnView>> {
+        self.add_column.as_ref()
+    }
+
+    /// Shows the "Add column" dialog.
+    pub fn open_add_column(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let backend = Arc::clone(&self.backend);
+        let view = cx.new(|cx| AddColumnView::new(backend, window, cx));
+        self._add_sub = Some(cx.subscribe(&view, |this, _, e: &AddColumnEvent, cx| {
+            if let AddColumnEvent::Add(source) = e {
+                this.add_column(source.clone(), cx);
+            }
+            this.close_overlays(cx);
+        }));
+        self.add_column = Some(view);
+        self.account_panel = false;
+        cx.notify();
+    }
+
+    /// Switches to deck `index`.
+    pub fn switch_deck(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index == self.deck.active_index() || !self.deck.set_active(index) {
+            return;
+        }
+        self.deck_scroll.set_offset(gpui_kit::point(px(0.), px(0.)));
+        self.build_columns(cx);
+        self.persist(cx);
+    }
+
+    /// Adds an empty deck and switches to it.
+    pub fn add_deck(&mut self, cx: &mut Context<Self>) {
+        self.deck.add_deck();
+        self.deck_scroll.set_offset(gpui_kit::point(px(0.), px(0.)));
+        self.build_columns(cx);
+        self.persist(cx);
+    }
+
+    /// Removes deck `index` (never the last one).
+    pub fn remove_deck(&mut self, index: usize, cx: &mut Context<Self>) {
+        let active = self.deck.active_index();
+        if self.deck.remove_deck(index) {
+            if index == active || self.deck.active_index() != active {
+                self.build_columns(cx);
+            }
+            self.persist(cx);
+            cx.notify();
+        }
     }
 
     /// Switches to a session that signed in through the dialog.
@@ -219,6 +281,7 @@ impl TwittyApp {
         self.session_check = None;
         self.backend = backend;
         self.close_overlays(cx);
+        self.build_hub(cx);
         self.build_columns(cx);
     }
 
@@ -238,6 +301,7 @@ impl TwittyApp {
         self.session_check = None;
         self.backend = Arc::new(MockBackend::new());
         self.close_overlays(cx);
+        self.build_hub(cx);
         self.build_columns(cx);
     }
 
@@ -332,6 +396,59 @@ impl TwittyApp {
             .detach();
         }
         cx.notify();
+    }
+
+    fn render_deck_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let active = self.deck.active_index();
+        let removable = self.deck.decks.len() > 1;
+        let tabs = self.deck.decks.iter().enumerate().map(|(ix, deck)| {
+            let is_active = ix == active;
+            h_flex()
+                .id(("deck-tab", ix))
+                .h_full()
+                .px_3()
+                .gap_1()
+                .items_center()
+                .cursor_pointer()
+                .border_b_2()
+                .border_color(if is_active { theme.primary } else { theme.transparent })
+                .text_color(if is_active { theme.foreground } else { theme.muted_foreground })
+                .font_weight(if is_active { FontWeight::BOLD } else { FontWeight::MEDIUM })
+                .hover(|s| s.bg(theme.list_hover))
+                .on_click(cx.listener(move |this, _, _, cx| this.switch_deck(ix, cx)))
+                .child(deck.name.clone())
+                .when(is_active && removable, |d| {
+                    d.child(
+                        Button::new(("deck-remove", ix))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::X)
+                            .tooltip("Remove deck")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.remove_deck(ix, cx);
+                            })),
+                    )
+                })
+        });
+        h_flex()
+            .flex_none()
+            .h(px(36.))
+            .px_2()
+            .gap_1()
+            .border_b_1()
+            .border_color(theme.border)
+            .text_sm()
+            .children(tabs)
+            .child(
+                Button::new("deck-add")
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Plus)
+                    .tooltip("New deck")
+                    .on_click(cx.listener(|this, _, _, cx| this.add_deck(cx))),
+            )
     }
 
     fn render_account_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -437,31 +554,9 @@ impl TwittyApp {
                     .font_weight(FontWeight::BLACK)
                     .child("𝕏"),
             )
-            .child(rail_button("add-home", IconName::House, "Add Home column").on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.add_column(FeedSource::Home { mode: HomeMode::Following }, cx)
-                }),
-            ))
-            .child(rail_button("add-search", IconName::Search, "Add Search column").on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.add_column(
-                        FeedSource::Search { query: "rust".into(), sort: SearchSort::Latest },
-                        cx,
-                    )
-                }),
-            ))
-            .child(rail_button("add-notifs", IconName::Bell, "Add Notifications column").on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.add_column(
-                        FeedSource::Notifications { filter: NotificationFilter::All },
-                        cx,
-                    )
-                }),
-            ))
             .child(
-                rail_button("add-bookmarks", IconName::Bookmark, "Add Bookmarks column").on_click(
-                    cx.listener(|this, _, _, cx| this.add_column(FeedSource::Bookmarks, cx)),
-                ),
+                rail_button("add-column", IconName::Plus, "Add column")
+                    .on_click(cx.listener(|this, _, window, cx| this.open_add_column(window, cx))),
             )
             .child(div().flex_1())
             .children(self.render_account_button(cx))
@@ -519,10 +614,14 @@ impl Render for TwittyApp {
                 .horizontal_scrollbar(&self.deck_scroll)
                 .into_any_element()
         };
-        let overlay = match (&self.login, self.account_panel) {
-            (Some(login), _) => Some(login.clone().into_any_element()),
-            (None, true) => Some(self.render_account_panel(cx)),
-            (None, false) => None,
+        let overlay = if let Some(login) = &self.login {
+            Some(login.clone().into_any_element())
+        } else if let Some(add) = &self.add_column {
+            Some(add.clone().into_any_element())
+        } else if self.account_panel {
+            Some(self.render_account_panel(cx))
+        } else {
+            None
         };
         let demo = self.options.session.is_none();
         let can_sign_in = self.options.account.is_some();
@@ -554,7 +653,16 @@ impl Render for TwittyApp {
                         }),
                 )
             })
-            .child(h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(body))
+            .child(
+                h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(self.render_deck_bar(cx))
+                        .child(div().flex_1().min_h_0().flex().child(body)),
+                ),
+            )
             .when_some(overlay, |d, overlay| {
                 d.child(
                     div()
@@ -733,5 +841,43 @@ mod tests {
         let (app, cx) = start(cx, MockBackend::new(), Some(SessionSource::Keyring), &store);
         assert!(app.read_with(cx, |app, _| app.viewer().is_some()));
         assert!(app.read_with(cx, |app, _| app.login().is_none()));
+    }
+
+    #[gpui_kit::test]
+    fn add_column_dialog_appends_to_the_active_deck(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let before = app.read_with(cx, |app, _| app.deck().active().columns.len());
+        app.update_in(cx, |app, window, cx| app.open_add_column(window, cx));
+        let dialog = app.read_with(cx, |app, _| app.add_column_dialog().cloned()).unwrap();
+        dialog.update_in(cx, |d, window, cx| {
+            d.choose(crate::state::add_column::ColumnKind::Bookmarks, window, cx)
+        });
+        cx.run_until_parked();
+        app.read_with(cx, |app, _| {
+            assert!(app.add_column_dialog().is_none(), "dialog closed");
+            let columns = &app.deck().active().columns;
+            assert_eq!(columns.len(), before + 1);
+            assert_eq!(columns.last().map(|c| &c.source), Some(&FeedSource::Bookmarks));
+            assert_eq!(app.columns().count(), before + 1);
+        });
+    }
+
+    #[gpui_kit::test]
+    fn decks_switch_their_columns(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let main_columns = column_entities(&app, cx);
+        app.update(cx, |app, cx| app.add_deck(cx));
+        assert_eq!(app.read_with(cx, |app, _| app.columns().count()), 0, "new deck is empty");
+        app.update(cx, |app, cx| app.add_column(FeedSource::Bookmarks, cx));
+        app.update(cx, |app, cx| app.switch_deck(0, cx));
+        let back = column_entities(&app, cx);
+        assert_eq!(back.len(), main_columns.len());
+        app.update(cx, |app, cx| app.remove_deck(1, cx));
+        app.read_with(cx, |app, _| {
+            assert_eq!(app.deck().decks.len(), 1);
+            assert_eq!(app.columns().count(), main_columns.len());
+        });
     }
 }

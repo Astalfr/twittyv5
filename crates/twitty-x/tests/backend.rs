@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 use serde_json::{Value, json};
 use twitty_model::{
-    Backend, BackendError, FeedItem, FeedSource, HomeMode, NotificationFilter, PageRequest,
+    Backend, BackendError, FeedItem, FeedSource, HomeMode, ListId, NotificationFilter, PageRequest,
     PageToken, PostAction, PostId, SearchSort, UserId, UserTab,
 };
 use twitty_x::{
@@ -112,6 +112,20 @@ async fn each_source_calls_its_operation() {
             "TweetDetail",
             "tweetdetail",
         ),
+        (
+            FeedSource::User {
+                id: UserId::new("11348282"),
+                handle: "NASA".into(),
+                tab: UserTab::Replies,
+            },
+            "UserTweetsAndReplies",
+            "userreplies-nasa",
+        ),
+        (
+            FeedSource::List { id: ListId::new("1613023332353318913"), name: None },
+            "ListLatestTweetsTimeline",
+            "list-space",
+        ),
     ];
     for (source, operation, name) in cases {
         let server = MockServer::start().await;
@@ -163,12 +177,20 @@ async fn unauthorized_maps_to_backend_error() {
 }
 
 #[tokio::test]
-async fn unmapped_sources_fail_without_a_request() {
+async fn media_column_pages_through_the_grid() {
+    let source = FeedSource::User {
+        id: UserId::new("11348282"),
+        handle: "NASA".into(),
+        tab: UserTab::Media,
+    };
     let server = MockServer::start().await;
-    let source = FeedSource::User { id: UserId::new("1"), handle: "a".into(), tab: UserTab::Likes };
-    let err = backend(&server).feed(&source, PageRequest::First).await.unwrap_err();
-    assert!(matches!(err, BackendError::Upstream(_)));
-    assert!(server.received_requests().await.unwrap().is_empty());
+    serve(&server, "UserMedia", fixture("usermedia-nasa")).await;
+    let first = backend(&server).feed(&source, PageRequest::First).await.unwrap();
+    let server = MockServer::start().await;
+    serve(&server, "UserMedia", fixture("usermedia-nasa-2")).await;
+    let older = first.older.clone().unwrap();
+    let second = backend(&server).feed(&source, PageRequest::Older(older)).await.unwrap();
+    assert!(!first.items.is_empty() && !second.items.is_empty(), "page 2 comes as AddToModule");
 }
 
 #[tokio::test]

@@ -121,8 +121,9 @@ fn entry(e: &Value) -> Option<Entry<'_>> {
 /// All entries of a timeline response, in display order (pinned entries first).
 ///
 /// Instructions handled: `TimelinePinEntry`, `TimelineAddEntries`,
-/// `TimelineReplaceEntry` (cursor refreshes). Others (cache clearing, covers,
-/// unread markers…) carry nothing to display.
+/// `TimelineReplaceEntry` (cursor refreshes) and `TimelineAddToModule` (later
+/// pages of a module, e.g. a profile's media grid). Others (cache clearing,
+/// covers, unread markers…) carry nothing to display.
 pub(crate) fn timeline(root: &Value) -> Vec<Entry<'_>> {
     let Some(instructions) = find_instructions(root) else { return Vec::new() };
     let mut pinned = Vec::new();
@@ -134,6 +135,11 @@ pub(crate) fn timeline(root: &Value) -> Vec<Entry<'_>> {
                 rest.extend(array_at(ins, &["entries"]).iter().filter_map(entry))
             }
             Some("TimelineReplaceEntry") => rest.extend(at(ins, &["entry"]).and_then(entry)),
+            Some("TimelineAddToModule") => rest.push(Entry::Module {
+                id: str_at(ins, &["moduleEntryId"]).unwrap_or_default(),
+                display_type: "",
+                items: array_at(ins, &["moduleItems"]),
+            }),
             _ => {}
         }
     }
@@ -179,6 +185,24 @@ mod tests {
         assert_eq!(display_type, "VerticalConversation");
         assert_eq!(module_items(items).count(), 1);
         assert!(matches!(entries[4], Entry::Other { id: "weird" }));
+    }
+
+    #[test]
+    fn add_to_module_pages_are_module_entries() {
+        let v = json!({"instructions": [
+            {"type": "TimelineAddToModule", "moduleEntryId": "profile-grid-0", "moduleItems": [
+                {"entryId": "profile-grid-0-tweet-1", "item": {"itemContent": {"__typename": "TimelineTweet"}}},
+                {"entryId": "profile-grid-0-tweet-2", "item": {"itemContent": {"__typename": "TimelineTweet"}}}
+            ]},
+            {"type": "TimelineAddEntries", "entries": [
+                {"entryId": "cursor-bottom-2", "content": {"entryType": "TimelineTimelineCursor", "cursorType": "Bottom", "value": "B2"}}
+            ]}
+        ]});
+        let entries = timeline(&v);
+        let Entry::Module { id, items, .. } = entries[0] else { panic!("module") };
+        assert_eq!(id, "profile-grid-0");
+        assert_eq!(module_items(items).count(), 2);
+        assert!(matches!(entries[1], Entry::Cursor { kind: CursorKind::Bottom, value: "B2" }));
     }
 
     #[test]

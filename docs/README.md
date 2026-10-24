@@ -2,7 +2,7 @@
 
 These docs explain **how Twitty works**. They change with the code: any change to architecture, data flow, protocol handling, persisted formats or testing updates the matching page in the same commit.
 
-> Project status: **M0–M6 done**. Sign in from the app by pasting two cookies; the session is kept in Windows Credential Manager and the app shows your real X timelines. Without a session it runs on demo data. Next: M7 (all column types).
+> Project status: **M0–M7 done**. Sign in by pasting two cookies (kept in Windows Credential Manager); every column type loads from X (Home, Notifications, Search, User posts/replies/media/likes, Lists, Bookmarks, a post's conversation); columns are added from a dialog and arranged in several decks. Without a session it runs on demo data. Next: M8 (interactions).
 
 | Page | What it covers |
 |---|---|
