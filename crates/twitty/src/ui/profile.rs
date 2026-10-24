@@ -30,6 +30,13 @@ use crate::{
 const PREFETCH_ROWS: usize = 5;
 /// Space between gallery tiles.
 const TILE_GAP: f32 = 2.0;
+/// The banner spans the panel (inside its 1px left border), at X's 3:1.
+const BANNER_W: f32 = PANEL_WIDTH - 1.0;
+const BANNER_H: f32 = BANNER_W / 3.0;
+/// Diameter of the profile's avatar.
+const AVATAR: f32 = 72.0;
+/// Width of the ring that sets the avatar off the banner.
+const AVATAR_RING: f32 = 4.0;
 /// Side of a square gallery tile (the panel has a 1px left border).
 const TILE: f32 = (PANEL_WIDTH - 1.0 - TILE_GAP * (profile::GALLERY_COLUMNS as f32 - 1.0))
     / profile::GALLERY_COLUMNS as f32;
@@ -277,43 +284,69 @@ impl ProfilePanel {
                 )
                 .child(label)
         };
-        v_flex()
-            .w_full()
-            .px_4()
-            .pt_4()
-            .pb_3()
-            .gap_3()
-            .child(avatar(p, 72.0))
-            .child(
-                v_flex()
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::EXTRA_BOLD)
-                                    .child(p.display_name.clone()),
-                            )
-                            .children(p.badges.verified.map(|v| verified_badge(v, &theme))),
-                    )
-                    .child(
-                        div().text_color(theme.muted_foreground).child(format!("@{}", p.handle)),
-                    ),
-            )
-            .when(!p.bio.is_empty(), |d| {
-                d.child(rich_text(("bio", 0), &p.bio, &self.hub, theme.link, window, cx))
+        // X's banners are 3:1. The avatar overlaps the banner's bottom edge,
+        // ringed in the background colour.
+        let banner = p.banner.as_ref().map(|b| {
+            img(remote_image::source(b.url.as_str(), BANNER_W, BANNER_H))
+                .debug_selector(|| "profile-banner".into())
+                .w(px(BANNER_W))
+                .h(px(BANNER_H))
+                .aspect_ratio(BANNER_W / BANNER_H)
+                .object_fit(ObjectFit::Cover)
+                .bg(theme.muted)
+        });
+        let face = div()
+            .debug_selector(|| "profile-avatar".into())
+            .flex_none()
+            .rounded_full()
+            .when(banner.is_some(), |d| {
+                d.border(px(AVATAR_RING))
+                    .border_color(theme.background)
+                    .bg(theme.background)
+                    .mt(px(-(AVATAR / 2. + AVATAR_RING)))
             })
-            .child(
-                h_flex()
-                    .debug_selector(|| "profile-counts".into())
-                    .gap_4()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(count(p.counts.posts, "Tweets"))
-                    .child(count(p.counts.following, "Following"))
-                    .child(count(p.counts.followers, "Followers")),
-            )
+            .child(avatar(p, AVATAR));
+        v_flex().w_full().children(banner).child(
+            v_flex()
+                .w_full()
+                .px_4()
+                .when(p.banner.is_none(), |d| d.pt_4())
+                .pb_3()
+                .gap_3()
+                .child(h_flex().child(face))
+                .child(
+                    v_flex()
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xl()
+                                        .font_weight(FontWeight::EXTRA_BOLD)
+                                        .child(p.display_name.clone()),
+                                )
+                                .children(p.badges.verified.map(|v| verified_badge(v, &theme))),
+                        )
+                        .child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child(format!("@{}", p.handle)),
+                        ),
+                )
+                .when(!p.bio.is_empty(), |d| {
+                    d.child(rich_text(("bio", 0), &p.bio, &self.hub, theme.link, window, cx))
+                })
+                .child(
+                    h_flex()
+                        .debug_selector(|| "profile-counts".into())
+                        .gap_4()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(count(p.counts.posts, "Tweets"))
+                        .child(count(p.counts.following, "Following"))
+                        .child(count(p.counts.followers, "Followers")),
+                ),
+        )
     }
 
     fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -478,5 +511,58 @@ impl Render for ProfilePanel {
                     .child(list(self.list.clone(), cx.processor(Self::render_row)).size_full())
                     .vertical_scrollbar(&self.list),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::TestAppContext;
+    use twitty_model::{ImageRef, UserId, mock::MockBackend};
+
+    /// Draws the panel for `profile`, unknown to the mock so the refresh
+    /// keeps it as given.
+    fn header(profile: Profile, cx: &mut TestAppContext) -> &mut gpui_kit::VisualTestContext {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&backend)));
+        let (_panel, cx) =
+            cx.add_window_view(|_, cx| ProfilePanel::new(Arc::new(profile), backend, hub, cx));
+        cx.run_until_parked();
+        cx
+    }
+
+    fn someone() -> Profile {
+        Profile::new(UserId::new("1"), "nobody_in_the_mock", "Someone")
+    }
+
+    #[gpui_kit::test]
+    fn the_banner_spans_the_header_under_the_avatar(cx: &mut TestAppContext) {
+        let mut profile = someone();
+        let banner: ImageRef = serde_json::from_value(serde_json::json!({
+            "url": "https://pbs.twimg.com/profile_banners/1/2",
+            "size": null,
+        }))
+        .unwrap();
+        profile.banner = Some(banner);
+        let cx = header(profile, cx);
+
+        let banner = cx.debug_bounds("profile-banner").expect("the banner is drawn");
+        assert!((banner.size.width - px(BANNER_W)).abs() < px(0.5), "{banner:?}");
+        assert!((banner.size.height - px(BANNER_H)).abs() < px(0.5), "3:1: {banner:?}");
+        let face = cx.debug_bounds("profile-avatar").expect("the avatar is drawn");
+        assert!(face.top() < banner.bottom() && face.bottom() > banner.bottom(), "{face:?}");
+    }
+
+    #[gpui_kit::test]
+    fn without_a_banner_the_avatar_leads(cx: &mut TestAppContext) {
+        let cx = header(someone(), cx);
+        assert!(cx.debug_bounds("profile-banner").is_none());
+        let face = cx.debug_bounds("profile-avatar").expect("the avatar is drawn");
+        let counts = cx.debug_bounds("profile-counts").expect("the counts are drawn");
+        assert!(face.top() > px(53.) && face.bottom() < counts.top(), "{face:?}");
     }
 }

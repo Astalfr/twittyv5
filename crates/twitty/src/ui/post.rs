@@ -32,6 +32,7 @@ use crate::{
     format::{compact_count, exact_count, exact_time, relative_time},
     state::{interactions::Toggle, links, media_layout, motion},
     ui::{
+        assets::{BOOKMARK_FILL, HEART_FILL},
         gif::inline_gif,
         hub::{InteractionsHub, Navigate},
         remote_image,
@@ -68,21 +69,19 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
     let row = div().w_full().border_b_1().border_color(theme.border);
     match item {
         FeedItem::Post(post) => {
-            row.child(post_row(post, None, false, rcx, 0, window, cx)).into_any_element()
+            row.child(post_row(post, None, Chain::Alone, rcx, 0, window, cx)).into_any_element()
         }
         FeedItem::Repost { by, post } => {
-            row.child(post_row(post, Some(by), false, rcx, 0, window, cx)).into_any_element()
+            row.child(post_row(post, Some(by), Chain::Alone, rcx, 0, window, cx)).into_any_element()
         }
-        FeedItem::Thread(posts) => {
-            let last = posts.len().saturating_sub(1);
-            row.children(
+        FeedItem::Thread(posts) => row
+            .children(
                 posts
                     .iter()
                     .enumerate()
-                    .map(|(k, p)| post_row(p, None, k < last, rcx, k, window, cx)),
+                    .map(|(k, p)| post_row(p, None, Chain::at(k, posts.len()), rcx, k, window, cx)),
             )
-            .into_any_element()
-        }
+            .into_any_element(),
         FeedItem::Notification(n) => row
             .child(
                 h_flex()
@@ -102,17 +101,37 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
                             .gap_2()
                             .flex_1()
                             .min_w_0()
-                            .child(h_flex().gap_1().children(
-                                n.actors.iter().take(6).enumerate().map(|(k, a)| {
-                                    let key = rcx.ix * 8 + k;
-                                    div()
-                                        .id(("notif-actor", key))
-                                        .debug_selector(move || format!("notif-actor-{key}"))
-                                        .cursor_pointer()
-                                        .on_click(open_profile(a, &rcx.hub))
-                                        .child(avatar(a, 32.0))
-                                }),
-                            ))
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .gap_1()
+                                    .children(n.actors.iter().take(6).enumerate().map(|(k, a)| {
+                                        let key = rcx.ix * 8 + k;
+                                        div()
+                                            .id(("notif-actor", key))
+                                            .debug_selector(move || format!("notif-actor-{key}"))
+                                            .cursor_pointer()
+                                            .on_click(open_profile(a, &rcx.hub))
+                                            .child(avatar(a, 32.0))
+                                    }))
+                                    .child({
+                                        let ix = rcx.ix;
+                                        let exact = exact_time(n.created_at, &chrono::Local);
+                                        div()
+                                            .id(("notif-time", ix))
+                                            .debug_selector(move || format!("notif-time-{ix}"))
+                                            .flex_none()
+                                            .ml_auto()
+                                            .pl_1()
+                                            .text_sm()
+                                            .text_color(theme.muted_foreground)
+                                            .whitespace_nowrap()
+                                            .tooltip(move |window, cx| {
+                                                Tooltip::new(exact.clone()).build(window, cx)
+                                            })
+                                            .child(relative_time(n.created_at, Utc::now()))
+                                    }),
+                            )
                             .child(rich_text(
                                 ("notif", rcx.ix),
                                 &n.text,
@@ -286,10 +305,49 @@ fn profile_hover(
     })
 }
 
+/// Where a post sits in a chain of connected posts (a thread), which decides
+/// the line drawn through its avatar column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Chain {
+    Alone,
+    First,
+    Middle,
+    Last,
+}
+
+impl Chain {
+    /// The position of post `k` of `len`.
+    pub(crate) fn at(k: usize, len: usize) -> Self {
+        match (k, len) {
+            (_, 0 | 1) => Chain::Alone,
+            (0, _) => Chain::First,
+            (k, len) if k + 1 >= len => Chain::Last,
+            _ => Chain::Middle,
+        }
+    }
+
+    /// Whether a post above leads into this one.
+    fn joined_above(self) -> bool {
+        matches!(self, Chain::Middle | Chain::Last)
+    }
+
+    /// Whether this post leads into one below.
+    fn joined_below(self) -> bool {
+        matches!(self, Chain::First | Chain::Middle)
+    }
+}
+
+/// Padding above a post's avatar and content.
+const ROW_TOP: f32 = 12.0;
+/// Space between the thread line and the avatar it leads into or out of.
+const LINE_GAP: f32 = 4.0;
+/// Width of the thread line.
+const LINE_W: f32 = 2.0;
+
 fn post_row(
     post: &Post,
     reposted_by: Option<&Arc<Profile>>,
-    connector: bool,
+    chain: Chain,
     rcx: &RowCtx,
     sub: usize,
     window: &mut Window,
@@ -364,8 +422,7 @@ fn post_row(
     let mut content = v_flex().flex_1().min_w_0().gap_1().child(header);
 
     if let Some(reply) = &post.reply_to
-        && !connector
-        && sub == 0
+        && chain == Chain::Alone
         && let Some(handle) = &reply.handle
     {
         content = content.child(
@@ -391,24 +448,39 @@ fn post_row(
     }
     content = content.child(action_bar(key, post, eff, &pops, rcx, &theme));
 
+    // The row stretches the avatar column to its full height, so a thread's
+    // line runs from the row's top edge into the avatar and from the avatar
+    // to the row's bottom edge, meeting the next post's line without a break.
+    let top = if reposted_by.is_some() { 0.0 } else { ROW_TOP };
+    let line = || div().flex_none().w(px(LINE_W)).bg(theme.border);
     let avatar_col = v_flex()
         .items_center()
         .flex_none()
         .w(px(AVATAR))
-        .h_full()
+        .child(div().flex_none().h(px(top)).when(chain.joined_above(), |d| {
+            d.child(
+                line().debug_selector(move || format!("line-above-{key}")).h(px(top - LINE_GAP)),
+            )
+        }))
         .child(profile_hover(key, &post.author, &rcx.hub))
-        .when(connector, |col| {
-            col.child(div().mt_1().w(px(2.)).flex_1().min_h(px(12.)).bg(theme.border))
+        .when(chain.joined_below(), |col| {
+            col.child(
+                line()
+                    .debug_selector(move || format!("line-below-{key}"))
+                    .mt(px(LINE_GAP))
+                    .flex_1(),
+            )
         });
+    content = content.pt(px(top)).pb_2();
 
     let hub = rcx.hub.clone();
     let id = post.id.clone();
     v_flex()
         .id(("post", key))
+        .debug_selector(move || format!("post-row-{key}"))
         .w_full()
         .px(px(PAD_X))
-        .pt_3()
-        .when(!connector, |d| d.pb_2())
+        .when(reposted_by.is_some(), |d| d.pt(px(ROW_TOP)))
         .cursor_pointer()
         .hover(|s| s.bg(theme.list_hover))
         .on_click(move |_, _, cx| {
@@ -434,7 +506,7 @@ fn post_row(
                     ),
             )
         })
-        .child(h_flex().items_start().gap(px(GAP)).child(avatar_col).child(content))
+        .child(h_flex().items_stretch().gap(px(GAP)).child(avatar_col).child(content))
         .context_menu(move |menu, _, _| {
             let link = link.clone();
             menu.item(PopupMenuItem::new("Copy tweet link").on_click(move |_, _, cx| {
@@ -904,9 +976,9 @@ enum Click {
 
 /// An action's icon, popping (growing and settling back) right after the
 /// viewer turned it on. The fixed-size slot keeps the bar's layout still.
-fn action_icon(icon: IconName, popping: bool) -> impl IntoElement {
+fn action_icon(path: SharedString, popping: bool) -> impl IntoElement {
     const SIZE: f32 = 17.;
-    let icon = Icon::new(icon).size(px(SIZE));
+    let icon = Icon::empty().path(path).size(px(SIZE));
     div().flex_none().size(px(SIZE)).flex().items_center().justify_center().child(if popping {
         icon.with_animation("pop", Animation::new(motion::POP), |icon, t| {
             icon.size(px(SIZE * motion::pop_scale(t)))
@@ -915,6 +987,17 @@ fn action_icon(icon: IconName, popping: bool) -> impl IntoElement {
     } else {
         icon.into_any_element()
     })
+}
+
+/// The icon an action shows: like and bookmark fill in when on. Lucide's
+/// repost arrows are bare strokes with nothing to fill, so only its colour
+/// changes.
+fn action_icon_path(icon: IconName, on: Click, active: bool) -> SharedString {
+    match on {
+        Click::Toggle(Toggle::Like) if active => HEART_FILL.into(),
+        Click::Toggle(Toggle::Bookmark) if active => BOOKMARK_FILL.into(),
+        _ => icon.path(),
+    }
 }
 
 /// Like and repost hover in the colour they turn when on; the rest in blue.
@@ -968,7 +1051,10 @@ fn action_bar(
                     Click::Nothing => {}
                 }
             })
-            .child(action_icon(icon, matches!(on, Click::Toggle(t) if pops.contains(&t))))
+            .child(action_icon(
+                action_icon_path(icon, on, active.is_some()),
+                matches!(on, Click::Toggle(t) if pops.contains(&t)),
+            ))
             .when_some(count, |d, (n, (one, many))| {
                 let full: SharedString = exact_count(n, one, many).into();
                 d.tooltip(move |window, cx| {
@@ -1623,5 +1709,89 @@ mod tests {
             assert_eq!(hover_color(Click::Toggle(Toggle::Bookmark), theme), theme.primary);
             assert_eq!(hover_color(Click::Reply, theme), theme.primary);
         });
+    }
+
+    #[test]
+    fn liked_and_bookmarked_icons_fill_in() {
+        let like = Click::Toggle(Toggle::Like);
+        let bookmark = Click::Toggle(Toggle::Bookmark);
+        let repost = Click::Toggle(Toggle::Repost);
+        assert_eq!(action_icon_path(IconName::Heart, like, true).as_ref(), HEART_FILL);
+        assert_eq!(action_icon_path(IconName::Heart, like, false), IconName::Heart.path());
+        assert_eq!(action_icon_path(IconName::Bookmark, bookmark, true).as_ref(), BOOKMARK_FILL);
+        assert_eq!(
+            action_icon_path(IconName::Bookmark, bookmark, false),
+            IconName::Bookmark.path()
+        );
+        assert_eq!(action_icon_path(IconName::Repeat2, repost, true), IconName::Repeat2.path());
+    }
+
+    #[test]
+    fn chain_positions() {
+        assert_eq!(Chain::at(0, 1), Chain::Alone);
+        assert_eq!([0, 1].map(|k| Chain::at(k, 2)), [Chain::First, Chain::Last]);
+        assert_eq!([0, 1, 2].map(|k| Chain::at(k, 3)), [Chain::First, Chain::Middle, Chain::Last]);
+        assert!(!Chain::Alone.joined_above() && !Chain::Alone.joined_below());
+        assert!(Chain::Middle.joined_above() && Chain::Middle.joined_below());
+    }
+
+    #[gpui_kit::test]
+    fn a_threads_line_runs_unbroken_from_post_to_post(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, backend) = mock_post();
+        let mut reply = post.clone();
+        reply.id = twitty_model::PostId::new("reply");
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let item = FeedItem::Thread(vec![post, reply]);
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item, hub });
+        cx.run_until_parked();
+
+        let drawn = [
+            "post-row-0",
+            "post-row-1",
+            "line-below-0",
+            "line-above-1",
+            "post-avatar-0",
+            "post-avatar-1",
+            "action-like-0",
+            "action-like-1",
+        ]
+        .map(|name| cx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn")));
+        let [first, second, below, above, avatar_0, avatar_1, like_0, like_1] = drawn;
+        let near = |a: Pixels, b: Pixels| (a - b).abs() < px(0.5);
+        assert!(near(first.bottom(), second.top()), "the posts touch");
+        assert!(near(below.top(), avatar_0.bottom() + px(LINE_GAP)), "starts under the avatar");
+        assert!(near(below.bottom(), first.bottom()), "runs to the post's edge: {below:?}");
+        assert!(near(above.top(), second.top()), "picks up at the next post's edge");
+        assert!(near(above.bottom(), avatar_1.top() - px(LINE_GAP)), "and stops at its avatar");
+        assert!(near(below.center().x, above.center().x), "one straight line");
+        assert!(cx.debug_bounds("line-above-0").is_none(), "nothing above the first post");
+        assert!(cx.debug_bounds("line-below-1").is_none(), "nor below the last");
+
+        // Every post keeps room under its actions, so the hover tint never
+        // ends flush with them.
+        for (row, like) in [(first, like_0), (second, like_1)] {
+            assert!(row.bottom() - like.bottom() >= px(8.), "room under {like:?} in {row:?}");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_notification_shows_its_time_at_the_far_right(cx: &mut gpui_kit::TestAppContext) {
+        use twitty_model::{FeedSource, NotificationFilter};
+        cx.update(gpui_kit::init);
+        let item = mock_items(FeedSource::Notifications { filter: NotificationFilter::All })
+            .into_iter()
+            .find(|i| matches!(i, FeedItem::Notification(_)))
+            .expect("the mock has a notification");
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item, hub });
+        cx.run_until_parked();
+
+        let time = cx.debug_bounds("notif-time-0").expect("the time is rendered");
+        let edge = px(310. - PAD_X);
+        assert!((time.right() - edge).abs() < px(1.), "the time ends at {edge:?}: {time:?}");
+        assert!(time.size.width > px(0.), "and says something");
     }
 }

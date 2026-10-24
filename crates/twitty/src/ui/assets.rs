@@ -52,6 +52,17 @@ pub const LOGO: &str = "brand/twitty.png";
 /// `remote_image::asset`, which resamples it to the device size first.
 pub const LOGO_SIZE: f32 = 18.;
 
+/// Filled Lucide heart, for a post the viewer liked.
+pub const HEART_FILL: &str = "twitty/icons/heart-fill.svg";
+/// Filled Lucide bookmark, for a post the viewer bookmarked.
+pub const BOOKMARK_FILL: &str = "twitty/icons/bookmark-fill.svg";
+
+/// Twitty's own SVG icons: Lucide ships no filled variants.
+const OWN_ICONS: [(&str, &[u8]); 2] = [
+    (HEART_FILL, include_bytes!("../../resources/icons/heart-fill.svg")),
+    (BOOKMARK_FILL, include_bytes!("../../resources/icons/bookmark-fill.svg")),
+];
+
 /// The app's asset source.
 #[derive(Debug, Clone, Copy)]
 pub struct Assets;
@@ -60,6 +71,9 @@ impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path == LOGO {
             return Ok(Some(Cow::Borrowed(include_bytes!("../../resources/twitty-logo.png"))));
+        }
+        if let Some((_, bytes)) = OWN_ICONS.iter().find(|(p, _)| *p == path) {
+            return Ok(Some(Cow::Borrowed(bytes)));
         }
         if let Some(bytes) = TwittyIcons.load(path)? {
             return Ok(Some(bytes));
@@ -73,6 +87,9 @@ impl AssetSource for Assets {
         if LOGO.starts_with(path) {
             paths.push(LOGO.into());
         }
+        paths.extend(
+            OWN_ICONS.iter().filter(|(p, _)| p.starts_with(path)).map(|(p, _)| (*p).into()),
+        );
         paths.sort();
         paths.dedup();
         Ok(paths)
@@ -105,6 +122,16 @@ mod tests {
         ] {
             let path = name.path();
             assert!(Assets.load(&path).unwrap().is_some(), "missing icon {path}");
+        }
+    }
+
+    #[test]
+    fn the_filled_icons_are_svgs_that_fill() {
+        for path in [HEART_FILL, BOOKMARK_FILL] {
+            let bytes = Assets.load(path).unwrap().unwrap_or_else(|| panic!("missing {path}"));
+            let svg = std::str::from_utf8(&bytes).unwrap();
+            assert!(svg.starts_with("<svg") && svg.contains(r#"fill="currentColor""#), "{path}");
+            assert!(Assets.list("twitty/").unwrap().iter().any(|p| p.as_ref() == path));
         }
     }
 

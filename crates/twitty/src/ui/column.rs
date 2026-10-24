@@ -407,7 +407,6 @@ impl ColumnView {
             .border_color(theme.border)
             .child(
                 h_flex()
-                    .when(self.active, |d| d.bg(theme.list_hover))
                     .h(px(53.))
                     .px_4()
                     .gap_2()
