@@ -102,6 +102,31 @@ pub fn layout(count: usize, first_aspect: Option<AspectRatio>, width: f32) -> Gr
     }
 }
 
+/// Fixed sizes of the image viewer's chrome, in pixels.
+pub mod viewer {
+    /// Padding around the whole viewer.
+    pub const PADDING: f32 = 24.0;
+    /// Gap between the header, the image row and the footer, and between the
+    /// image and the ‹ › buttons.
+    pub const GAP: f32 = 12.0;
+    /// Height of the `n / count · @handle` header.
+    pub const HEADER: f32 = 32.0;
+    /// Height of the footer (alt text, clamped to two lines, and Play).
+    pub const FOOTER: f32 = 48.0;
+    /// Width of each ‹ › button.
+    pub const NAV: f32 = 44.0;
+}
+
+/// The largest box the image viewer may draw an image in, for a window of
+/// `width` × `height`. It leaves room for the chrome so the image is never
+/// pushed off screen, whatever the alt text or the image size.
+pub fn viewer_box(width: f32, height: f32, has_nav: bool) -> (f32, f32) {
+    let nav = if has_nav { 2.0 * (viewer::NAV + viewer::GAP) } else { 0.0 };
+    let w = width - 2.0 * viewer::PADDING - nav;
+    let h = height - 2.0 * viewer::PADDING - viewer::HEADER - viewer::FOOTER - 2.0 * viewer::GAP;
+    (w.max(0.0), h.max(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,6 +219,26 @@ mod tests {
             assert_eq!(count(|c| c.top_right), 1, "n={n}");
             assert_eq!(count(|c| c.bottom_left), 1, "n={n}");
             assert_eq!(count(|c| c.bottom_right), 1, "n={n}");
+        }
+    }
+    #[test]
+    fn viewer_box_leaves_room_for_the_chrome() {
+        let (w, h) = viewer_box(1280.0, 800.0, false);
+        assert!(approx(w, 1280.0 - 48.0));
+        assert!(approx(h, 800.0 - 48.0 - 32.0 - 48.0 - 24.0));
+        let (w_nav, h_nav) = viewer_box(1280.0, 800.0, true);
+        assert!(approx(w_nav, w - 2.0 * (44.0 + 12.0)));
+        assert!(approx(h_nav, h));
+    }
+
+    #[test]
+    fn viewer_box_fits_in_the_window_and_never_goes_negative() {
+        for (ww, wh) in [(0.0, 0.0), (50.0, 50.0), (640.0, 360.0), (3840.0, 2160.0)] {
+            for nav in [false, true] {
+                let (w, h) = viewer_box(ww, wh, nav);
+                assert!(w >= 0.0 && h >= 0.0, "{ww}x{wh}");
+                assert!(w <= ww && h <= wh, "{ww}x{wh}");
+            }
         }
     }
 }

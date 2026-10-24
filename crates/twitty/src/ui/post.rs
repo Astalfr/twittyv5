@@ -5,14 +5,14 @@ use std::sync::Arc;
 use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
-    AnyElement, App, Entity, FontWeight, HighlightStyle, Hsla, InteractiveText, IntoElement,
-    ObjectFit, ParentElement, SharedString, StatefulInteractiveElement, Styled, StyledImage,
-    StyledText, Window, component::avatar::Avatar, component::button::*,
-    component::hover_card::HoverCard, component::*, div, img, prelude::*, px,
+    AnyElement, App, ElementId, Entity, FontWeight, HighlightStyle, Hsla, InteractiveText,
+    IntoElement, ObjectFit, ParentElement, SharedString, StatefulInteractiveElement, Styled,
+    StyledImage, StyledText, UnderlineStyle, Window, component::avatar::Avatar,
+    component::button::*, component::hover_card::HoverCard, component::*, div, img, prelude::*, px,
 };
 use twitty_model::{
     Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostOrGone, Profile, RichText,
-    SpanKind, UnavailableReason, VerifiedKind,
+    Span, SpanKind, UnavailableReason, VerifiedKind,
 };
 
 use crate::{
@@ -86,7 +86,7 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
                                     .gap_1()
                                     .children(n.actors.iter().take(6).map(|a| avatar(a, 32.0))),
                             )
-                            .child(rich_text(("notif", rcx.ix), &n.text, theme.link, cx))
+                            .child(rich_text(("notif", rcx.ix), &n.text, theme.link, window, cx))
                             .children(n.target.as_ref().filter(|p| !p.body.is_empty()).map(|p| {
                                 div()
                                     .text_color(theme.muted_foreground)
@@ -244,7 +244,7 @@ fn post_row(
     }
 
     if !post.body.is_empty() {
-        content = content.child(rich_text(("body", key), &post.body, theme.link, cx));
+        content = content.child(rich_text(("body", key), &post.body, theme.link, window, cx));
     }
     if !post.media.is_empty() {
         content =
@@ -304,27 +304,75 @@ fn verified_badge(kind: VerifiedKind, theme: &gpui_kit::component::Theme) -> imp
     Icon::new(IconName::BadgeCheck).size(px(16.)).text_color(color).flex_none()
 }
 
-/// Text with clickable mentions, hashtags and links.
+/// Text with clickable mentions, hashtags and links. The hovered one is
+/// underlined.
 fn rich_text(
     id: (&'static str, usize),
     text: &RichText,
     link: Hsla,
-    _cx: &mut App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
+    // The span under the mouse; the text notifies the view when it changes.
+    let hovered = window.use_keyed_state(
+        ElementId::named_usize(format!("{}-hover", id.0), id.1),
+        cx,
+        |_, _| None::<usize>,
+    );
+    let hovered_span = *hovered.read(cx);
     let spans = text.spans().to_vec();
-    let highlights = spans
-        .iter()
-        .map(|s| (s.range.clone(), HighlightStyle { color: Some(link), ..Default::default() }));
+    let highlights = spans.iter().enumerate().map(|(ix, s)| {
+        let underline = (hovered_span == Some(ix)).then_some(UnderlineStyle {
+            thickness: px(1.),
+            color: Some(link),
+            wavy: false,
+        });
+        (s.range.clone(), HighlightStyle { color: Some(link), underline, ..Default::default() })
+    });
     let styled =
         StyledText::new(SharedString::from(text.text().to_owned())).with_highlights(highlights);
     let ranges = spans.iter().map(|s| s.range.clone()).collect();
-    div().w_full().child(InteractiveText::new(id, styled).on_click(ranges, move |ix, _, cx| {
-        if let Some(span) = spans.get(ix) {
-            // A link click must not also open the post's thread.
-            cx.stop_propagation();
-            cx.open_url(&span_url(&span.kind));
-        }
-    }))
+    let hover_spans = spans.clone();
+    let on_text = hovered.clone();
+    let text = InteractiveText::new(id, styled)
+        .on_click(ranges, move |ix, _, cx| {
+            if let Some(span) = spans.get(ix) {
+                // A link click must not also open the post's thread.
+                cx.stop_propagation();
+                cx.open_url(&span_url(&span.kind));
+            }
+        })
+        .on_hover(move |byte, _, _, cx| {
+            let span = byte.and_then(|b| span_at(&hover_spans, b));
+            on_text.update(cx, |h, cx| {
+                if *h != span {
+                    *h = span;
+                    cx.notify();
+                }
+            });
+        });
+    // The text only reports moves while the mouse is over it, so leaving it
+    // straight from a link would keep the underline.
+    div()
+        .id(ElementId::named_usize(format!("{}-text", id.0), id.1))
+        .w_full()
+        .on_hover(move |inside, _, cx| {
+            if !inside {
+                hovered.update(cx, |h, cx| {
+                    if h.take().is_some() {
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .child(text)
+}
+
+/// The index of the span covering byte `ix`, if any. `spans` must be sorted
+/// and non-overlapping, as [`RichText`] guarantees.
+pub fn span_at(spans: &[Span], ix: usize) -> Option<usize> {
+    let i = spans.partition_point(|s| s.range.end <= ix);
+    spans.get(i).filter(|s| s.range.contains(&ix)).map(|_| i)
 }
 
 /// Where a click on a span leads (until in-app navigation exists).
@@ -711,6 +759,33 @@ mod tests {
             span_url(&SpanKind::Cashtag { symbol: "TSLA".into() }),
             "https://x.com/search?q=%24TSLA"
         );
+    }
+
+    fn link(range: std::ops::Range<usize>) -> Span {
+        Span { range, kind: SpanKind::Hashtag { tag: "t".into() } }
+    }
+
+    #[test]
+    fn span_at_finds_the_covering_span() {
+        let spans = [link(0..3), link(5..8)];
+        let hits: Vec<_> = (0..10).map(|ix| span_at(&spans, ix)).collect();
+        let (a, b) = (Some(0), Some(1));
+        assert_eq!(hits, [a, a, a, None, None, b, b, b, None, None]);
+        assert_eq!(span_at(&[], 0), None);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn span_at_never_panics_and_is_consistent(
+            cuts in proptest::collection::btree_set(0usize..200, 0..20),
+            ix in 0usize..250,
+        ) {
+            // Consecutive pairs of sorted cut points make sorted, disjoint spans.
+            let cuts: Vec<usize> = cuts.into_iter().collect();
+            let spans: Vec<Span> = cuts.as_chunks::<2>().0.iter().map(|[a, b]| link(*a..*b)).collect();
+            let expected = spans.iter().position(|s| s.range.contains(&ix));
+            proptest::prop_assert_eq!(span_at(&spans, ix), expected);
+        }
     }
 
     #[test]

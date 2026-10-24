@@ -16,6 +16,7 @@ use crate::{
     state::{
         deck::{ColumnConfig, ColumnId, DeckFile},
         interactions::Toggle,
+        media_layout::{self, viewer},
         poll,
         settings::Settings,
     },
@@ -30,6 +31,10 @@ use crate::{
         thread::{CloseThread, ThreadPanel},
     },
 };
+
+/// Opacity of the theme's overlay colour behind the image viewer: darker than
+/// behind dialogs, so the image stands out.
+const MEDIA_BACKDROP_ALPHA: f32 = 0.7;
 
 /// Height of the strip under the deck reserved for its horizontal scrollbar.
 const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
@@ -294,10 +299,26 @@ impl TwittyApp {
         cx.notify();
     }
 
+    /// A press outside the thread panel closes it, unless it landed in an
+    /// overlay (image viewer, dialog) that may have been opened from the panel.
+    /// The press is consumed: whatever was under it (a post, an image, a link)
+    /// doesn't get a click.
+    fn thread_clicked_outside(&mut self, cx: &mut Context<Self>) {
+        if self.thread.is_some() && self.media.is_none() && !self.has_dialog() {
+            self.thread = None;
+            self._thread_sub = None;
+            // Called in the capture phase, so nothing else sees the mouse down
+            // and the following mouse up can't complete a click.
+            cx.stop_propagation();
+            cx.notify();
+        }
+    }
+
     fn render_media_viewer(
         &self,
         post: &twitty_model::Post,
         index: usize,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme().clone();
@@ -311,15 +332,28 @@ impl TwittyApp {
             Button::new(id)
                 .ghost()
                 .large()
+                .w(px(viewer::NAV))
                 .icon(Icon::new(icon).size(px(28.)))
-                .on_click(cx.listener(move |this, _, _, cx| this.step_left_right(delta, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Not a click on the backdrop.
+                    cx.stop_propagation();
+                    this.step_left_right(delta, cx)
+                }))
         };
+        let viewport = window.viewport_size();
+        let (box_w, box_h) =
+            media_layout::viewer_box(viewport.width.into(), viewport.height.into(), count > 1);
         v_flex()
+            .id("media-viewer")
             .size_full()
-            .p_6()
-            .gap_3()
+            .p(px(viewer::PADDING))
+            // Buttons and the image stop their clicks; anything else is backdrop.
+            .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx)))
+            .gap(px(viewer::GAP))
             .child(
                 h_flex()
+                    .flex_none()
+                    .h(px(viewer::HEADER))
                     .justify_between()
                     .items_center()
                     .text_color(theme.muted_foreground)
@@ -336,32 +370,56 @@ impl TwittyApp {
                 h_flex()
                     .flex_1()
                     .min_h_0()
-                    .gap_2()
+                    .gap(px(viewer::GAP))
                     .items_center()
+                    .justify_center()
                     .when(count > 1, |d| d.child(nav("media-prev", IconName::ChevronLeft, -1)))
                     .child(
-                        div().flex_1().h_full().min_w_0().child(
-                            img(media.preview().url.as_str().to_owned())
-                                .size_full()
-                                .object_fit(ObjectFit::Contain),
-                        ),
+                        // An explicit box from the window size, so the image can't
+                        // push past the screen edge. The image itself has no size:
+                        // GPUI then uses the bitmap's own size, capped by the box,
+                        // so it is shrunk to fit but never blown up (pixelated).
+                        h_flex()
+                            .flex_none()
+                            .w(px(box_w))
+                            .h(px(box_h))
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                img(media.preview().url.as_str().to_owned())
+                                    .id("media-image")
+                                    .on_click(|_, _, cx| cx.stop_propagation())
+                                    .max_w(px(box_w))
+                                    .max_h(px(box_h))
+                                    .object_fit(ObjectFit::Contain),
+                            ),
                     )
                     .when(count > 1, |d| d.child(nav("media-next", IconName::ChevronRight, 1))),
             )
             .child(
                 h_flex()
+                    .flex_none()
+                    .h(px(viewer::FOOTER))
+                    .overflow_hidden()
                     .justify_center()
                     .gap_3()
                     .text_sm()
                     .text_color(theme.muted_foreground)
-                    .children(media.alt().map(|alt| div().max_w(px(640.)).child(alt.to_owned())))
+                    .children(
+                        media
+                            .alt()
+                            .map(|alt| div().max_w(px(640.)).line_clamp(2).child(alt.to_owned())),
+                    )
                     .when(playable, |d| {
                         d.child(
                             Button::new("media-play")
                                 .primary()
                                 .icon(IconName::Play)
                                 .label("Play on x.com")
-                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    cx.open_url(&url);
+                                }),
                         )
                     }),
             )
@@ -1067,7 +1125,7 @@ impl Render for TwittyApp {
                 .into_any_element()
         };
         let overlay = if let Some((post, index)) = &self.media {
-            Some(self.render_media_viewer(post, *index, cx))
+            Some(self.render_media_viewer(post, *index, window, cx))
         } else if let Some(login) = &self.login {
             Some(login.clone().into_any_element())
         } else if let Some(add) = &self.add_column {
@@ -1166,7 +1224,11 @@ impl Render for TwittyApp {
                             .child(self.render_deck_bar(cx))
                             .child(div().flex_1().min_h_0().flex().child(body)),
                     )
-                    .children(self.thread.clone()),
+                    .children(self.thread.clone().map(|panel| {
+                        div().flex_none().h_full().child(panel).on_mouse_down_out(
+                            cx.listener(|this, _, _, cx| this.thread_clicked_outside(cx)),
+                        )
+                    })),
             )
             .when_some(overlay, |d, overlay| {
                 d.child(
@@ -1178,7 +1240,11 @@ impl Render for TwittyApp {
                         .left_0()
                         .size_full()
                         .occlude()
-                        .bg(theme.overlay)
+                        .bg(if self.media.is_some() {
+                            theme.overlay.alpha(MEDIA_BACKDROP_ALPHA)
+                        } else {
+                            theme.overlay
+                        })
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1193,7 +1259,8 @@ mod tests {
     use super::*;
     use crate::account::{ConnectError, CredentialStore, Credentials, MemoryStore};
     use gpui_kit::{
-        Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point,
+        Modifiers, Pixels, Point, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext,
+        point,
     };
 
     #[gpui_kit::test]
@@ -1624,6 +1691,130 @@ mod tests {
         assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "columns don't move");
         cx.simulate_keystrokes("escape");
         assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()));
+    }
+
+    /// Opens the thread panel on `root` and draws a frame so it has a hitbox.
+    fn open_panel(app: &Entity<TwittyApp>, root: &str, cx: &mut VisualTestContext) {
+        let id = twitty_model::PostId::new(root);
+        app.update(cx, |app, cx| app.open_thread(id, cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    fn panel_root(app: &Entity<TwittyApp>, cx: &mut VisualTestContext) -> Option<String> {
+        let panel = app.read_with(cx, |app, _| app.thread_panel().cloned())?;
+        Some(panel.read_with(cx, |p, _| p.root().to_string()))
+    }
+
+    /// Somewhere left of the panel, past the rail.
+    const OUTSIDE: Point<Pixels> = point(px(300.), px(300.));
+
+    #[gpui_kit::test]
+    fn clicking_outside_the_thread_panel_closes_it(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        // An empty deck, so the click lands on nothing but the background.
+        app.update(cx, |app, cx| app.add_deck(cx));
+        open_panel(&app, "1", cx);
+        let viewport = cx.update(|window, _| window.viewport_size());
+        assert!(viewport.width > OUTSIDE.x + px(crate::ui::thread::PANEL_WIDTH));
+
+        let inside = point(viewport.width - px(100.), px(300.));
+        cx.simulate_click(inside, Modifiers::default());
+        cx.run_until_parked();
+        assert!(panel_root(&app, cx).is_some(), "a click inside keeps it open");
+
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(panel_root(&app, cx), None);
+    }
+
+    #[gpui_kit::test]
+    fn clicks_in_an_overlay_do_not_close_the_thread_panel(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let post = column.read_with(cx, |c, _| {
+            c.model().items().iter().flat_map(|i| i.posts()).find(|p| !p.media.is_empty()).cloned()
+        });
+        let post = Arc::new(post.expect("the mock has a post with media"));
+        app.update(cx, |app, cx| app.add_deck(cx));
+        open_panel(&app, "1", cx);
+        // e.g. an image opened from a post in the panel.
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_some()));
+
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        assert!(panel_root(&app, cx).is_some());
+    }
+
+    #[gpui_kit::test]
+    fn the_click_that_closes_the_thread_panel_does_nothing_else(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        // Find a media tile in the first column: a click there opens the viewer.
+        let tile = (100..1000)
+            .step_by(10)
+            .map(|y| point(px(250.), px(y as f32)))
+            .find(|&at| {
+                cx.simulate_click(at, Modifiers::default());
+                cx.run_until_parked();
+                let hit = app.read_with(cx, |app, _| app.media_viewer().is_some());
+                app.update(cx, |app, cx| {
+                    app.dismiss(cx);
+                    app.dismiss(cx);
+                });
+                cx.run_until_parked();
+                hit
+            })
+            .expect("the first column shows an image");
+
+        open_panel(&app, "elsewhere", cx);
+        cx.simulate_click(tile, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(panel_root(&app, cx), None, "the panel closed");
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()), "no image opened");
+
+        // Over the first post's text: it doesn't open its thread either.
+        open_panel(&app, "elsewhere", cx);
+        cx.simulate_click(point(px(250.), px(200.)), Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(panel_root(&app, cx), None);
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_media_backdrop_closes_the_viewer_but_buttons_do_not(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let post = column.read_with(cx, |c, _| {
+            c.model().items().iter().flat_map(|i| i.posts()).find(|p| p.media.len() >= 2).cloned()
+        });
+        let post = Arc::new(post.expect("the mock has a multi-image post"));
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let index = |cx: &mut VisualTestContext| {
+            app.read_with(cx, |app, _| app.media_viewer().map(|(_, ix)| ix))
+        };
+
+        // The › button, centred vertically at the right edge.
+        let next =
+            point(viewport.width - px(viewer::PADDING + viewer::NAV / 2.), viewport.height / 2.);
+        cx.simulate_click(next, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(index(cx), Some(1), "the button steps and keeps the viewer open");
+
+        // The padding around everything is backdrop.
+        cx.simulate_click(
+            point(px(viewer::PADDING / 2.), px(viewer::PADDING / 2.)),
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        assert_eq!(index(cx), None);
     }
 
     #[gpui_kit::test]

@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Width of the panel.
-pub const PANEL_WIDTH: f32 = 440.0;
+pub const PANEL_WIDTH: f32 = 600.0;
 
 /// Emitted when the user closes the panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
