@@ -686,6 +686,15 @@ fn action_icon(icon: IconName, popping: bool) -> impl IntoElement {
     })
 }
 
+/// Like and repost hover in the colour they turn when on; the rest in blue.
+fn hover_color(on: Click, theme: &gpui_kit::component::Theme) -> Hsla {
+    match on {
+        Click::Toggle(Toggle::Like) => theme.red,
+        Click::Toggle(Toggle::Repost) => theme.green,
+        _ => theme.primary,
+    }
+}
+
 fn action_bar(
     key: usize,
     post: &Post,
@@ -711,7 +720,7 @@ fn action_bar(
             .text_sm()
             .text_color(color)
             .when(on != Click::Nothing, |d| {
-                d.cursor_pointer().hover(|s| s.text_color(theme.primary))
+                d.cursor_pointer().hover(|s| s.text_color(hover_color(on, theme)))
             })
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -820,5 +829,17 @@ mod tests {
     fn unavailable_texts_are_human() {
         assert!(unavailable_text(&UnavailableReason::Deleted).contains("deleted"));
         assert_eq!(unavailable_text(&UnavailableReason::Other(Some("x".into()))), "x");
+    }
+
+    #[gpui_kit::test]
+    fn like_and_repost_hover_in_their_own_colour(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            let theme = cx.theme();
+            assert_eq!(hover_color(Click::Toggle(Toggle::Like), theme), theme.red);
+            assert_eq!(hover_color(Click::Toggle(Toggle::Repost), theme), theme.green);
+            assert_eq!(hover_color(Click::Toggle(Toggle::Bookmark), theme), theme.primary);
+            assert_eq!(hover_color(Click::Reply, theme), theme.primary);
+        });
     }
 }
