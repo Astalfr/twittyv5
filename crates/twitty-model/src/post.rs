@@ -20,8 +20,22 @@ pub struct Post {
     pub metrics: Metrics,
     pub viewer: ViewerPostState,
     pub lang: Option<SmolStr>,
+    /// The body machine-translated into the viewer's language, when the
+    /// provider sent one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<Translation>,
     /// Canonical web link to the post.
     pub url: Url,
+}
+
+/// A machine translation of a post's body.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Translation {
+    pub body: RichText,
+    /// Language of the original body, as a BCP 47 code (`ja`, `pt-BR`…).
+    pub from: Option<SmolStr>,
+    /// Language of the translation, as a BCP 47 code.
+    pub to: Option<SmolStr>,
 }
 
 /// What the post replies to.

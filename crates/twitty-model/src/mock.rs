@@ -16,7 +16,7 @@ use crate::{
     Backend, BackendError, Badges, BoxFuture, Draft, Embed, FeedItem, FeedPage, FeedSource,
     FollowAction, FollowStatus, ImageRef, LinkCard, Media, Metrics, PageRequest, PageToken, Poll,
     PollOption, Post, PostAction, PostId, PostOrGone, Profile, ProfileCounts, RichText, Span,
-    SpanKind, ThreadView, UnavailableReason, UserId, UserRef, UserTab, VerifiedKind,
+    SpanKind, ThreadView, Translation, UnavailableReason, UserId, UserRef, UserTab, VerifiedKind,
     ViewerPostState,
 };
 use crate::{Notification, NotificationId, NotificationKind};
@@ -306,7 +306,21 @@ impl State {
         let id = self.next_post_id();
         let n = self.next_id as usize;
         let author = self.author(n);
-        let body = sample_body(n, &self.authors);
+        let (body, lang, translation) = if n % 10 == 5 {
+            // A post in another language, with the translation a provider sends.
+            let translated = Translation {
+                body: RichText::plain(
+                    "Native rendering makes scrolling smooth, even with thousands of posts.",
+                ),
+                from: Some("fr".into()),
+                to: Some("en".into()),
+            };
+            let original =
+                "Le rendu natif rend le défilement fluide, même avec des milliers de posts.";
+            (RichText::plain(original), Some("fr".into()), Some(translated))
+        } else {
+            (sample_body(n, &self.authors), Some("en".into()), None)
+        };
         let media = match n % 9 {
             1 => vec![photo(n, 0, 1200, 800)],
             3 => vec![photo(n, 0, 800, 800), photo(n, 1, 800, 800)],
@@ -354,6 +368,7 @@ impl State {
                         metrics: Metrics::default(),
                         viewer: ViewerPostState::default(),
                         lang: Some("en".into()),
+                        translation: None,
                     })),
                 })
             }
@@ -380,7 +395,8 @@ impl State {
                 views: (!n.is_multiple_of(4)).then_some((n * 1234 % 900_000) as u64),
             },
             viewer: ViewerPostState::default(),
-            lang: Some("en".into()),
+            lang,
+            translation,
         }
     }
 }
@@ -500,6 +516,7 @@ impl Backend for MockBackend {
                 metrics: Metrics::default(),
                 viewer: ViewerPostState::default(),
                 lang: None,
+                translation: None,
             })
         })
     }

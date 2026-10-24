@@ -5,8 +5,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use twitty_model::{
-    Embed, FeedItem, Metrics, Post, PostId, PostOrGone, Profile, ReplyRef, UnavailableReason,
-    UserId, ViewerPostState,
+    Embed, FeedItem, Metrics, Post, PostId, PostOrGone, Profile, ReplyRef, Translation,
+    UnavailableReason, UserId, ViewerPostState,
 };
 use url::Url;
 
@@ -184,7 +184,33 @@ pub(crate) fn post(tweet: &Value, ctx: &mut Ctx, depth: u8) -> Result<Post, Stri
             bookmarked: bool_at(legacy, &["bookmarked"]).unwrap_or(false),
         },
         lang: str_at(legacy, &["lang"]).filter(|l| *l != "und" && *l != "zxx").map(Into::into),
+        translation: translation(tweet),
         url,
+    })
+}
+
+/// Grok's automatic translation, sent when the
+/// `responsive_web_grok_show_grok_translated_post` feature is on. It covers
+/// the display text only (no reply mentions, no media link), with entity
+/// offsets in code points like `legacy`, and for long posts the whole note.
+/// `preview_translation` is a truncated copy and is ignored.
+fn translation(tweet: &Value) -> Option<Translation> {
+    let grok = at(tweet, &["grok_translated_post_with_availability"])?;
+    if bool_at(grok, &["is_available"]) != Some(true) {
+        return None;
+    }
+    let data = at(grok, &["data"])?;
+    let text = str_at(data, &["translation"]).filter(|t| !t.trim().is_empty())?;
+    let from = str_at(data, &["source_language"]).filter(|l| !l.is_empty());
+    let to = str_at(data, &["destination_language"]).filter(|l| !l.is_empty());
+    if from.is_some() && from == to {
+        return None;
+    }
+    let ents = at(data, &["entities"]).map(text::entities).unwrap_or_default();
+    Some(Translation {
+        body: text::rich_text(text, ents, None),
+        from: from.map(Into::into),
+        to: to.map(Into::into),
     })
 }
 
@@ -336,6 +362,87 @@ mod tests {
         assert_eq!(p.body.text(), "yes");
         assert_eq!(p.reply_to.unwrap().handle.as_deref(), Some("bob"));
         assert!(matches!(p.media.as_slice(), [Media::Image { .. }]));
+    }
+
+    fn grok(text: &str, entities: Value) -> Value {
+        json!({"is_available": true, "data": {
+            "associated_data": {},
+            "source_language": "ja",
+            "destination_language": "en",
+            "entities": entities,
+            "translation": text,
+            "preview_translation": "truncated"
+        }})
+    }
+
+    #[test]
+    fn grok_translation_with_entities() {
+        let mut t = tweet("70", "🦋こんにちは #挨拶 https://t.co/p");
+        // Code-point offsets, after an astral emoji.
+        t["grok_translated_post_with_availability"] = grok(
+            "🦋Hello #Greeting https://t.co/a",
+            json!({"hashtags": [{"text": "Greeting", "indices": [7, 16]}],
+                   "urls": [{"url": "https://t.co/a", "display_url": "example.com/a",
+                             "expanded_url": "https://example.com/a", "indices": [17, 31]}]}),
+        );
+        let FeedItem::Post(p) = item(&t, "tweet-70", &mut Ctx::default()) else { panic!() };
+        let tr = p.translation.expect("translation");
+        assert_eq!(tr.body.text(), "🦋Hello #Greeting example.com/a");
+        assert_eq!(tr.from.as_deref(), Some("ja"));
+        assert_eq!(tr.to.as_deref(), Some("en"));
+        let spans: Vec<&str> =
+            tr.body.spans().iter().map(|s| &tr.body.text()[s.range.clone()]).collect();
+        assert_eq!(spans, ["#Greeting", "example.com/a"]);
+        // The original stays the body.
+        assert!(p.body.text().starts_with("🦋こんにちは"));
+    }
+
+    #[test]
+    fn grok_translation_absent_unavailable_or_broken_is_none() {
+        let cases = [
+            json!({"is_available": false}),
+            json!({"is_available": true}),
+            json!({"is_available": true, "data": {"translation": "  "}}),
+            json!({"is_available": true, "data": {"translation": 5}}),
+            json!({"is_available": "yes", "data": {"translation": "hi"}}),
+            json!("garbage"),
+            json!({"is_available": true, "data": {"translation": "same", "source_language": "en", "destination_language": "en"}}),
+        ];
+        for case in cases {
+            let mut t = tweet("71", "hello");
+            t["grok_translated_post_with_availability"] = case.clone();
+            let FeedItem::Post(p) = item(&t, "tweet-71", &mut Ctx::default()) else {
+                panic!("{case}")
+            };
+            assert_eq!(p.translation, None, "{case}");
+        }
+        let FeedItem::Post(p) = item(&tweet("72", "hello"), "tweet-72", &mut Ctx::default()) else {
+            panic!()
+        };
+        assert_eq!(p.translation, None);
+    }
+
+    #[test]
+    fn grok_translation_out_of_range_entities_keep_the_text() {
+        let mut t = tweet("73", "x");
+        t["grok_translated_post_with_availability"] =
+            grok("Hi", json!({"hashtags": [{"text": "far", "indices": [10, 14]}]}));
+        let FeedItem::Post(p) = item(&t, "tweet-73", &mut Ctx::default()) else { panic!() };
+        let tr = p.translation.expect("translation");
+        assert_eq!(tr.body.text(), "Hi");
+        assert!(tr.body.spans().is_empty());
+    }
+
+    #[test]
+    fn a_quoted_post_keeps_its_translation() {
+        let mut t = tweet("74", "look");
+        let mut q = tweet("75", "日本語");
+        q["grok_translated_post_with_availability"] = grok("Japanese", json!({}));
+        t["quoted_status_result"] = json!({"result": q});
+        let FeedItem::Post(p) = item(&t, "tweet-74", &mut Ctx::default()) else { panic!() };
+        let Some(Embed::Quote { quoted }) = p.embed else { panic!("quote") };
+        let PostOrGone::Post(q) = *quoted else { panic!("quoted post") };
+        assert_eq!(q.translation.map(|t| t.body.text().to_owned()).as_deref(), Some("Japanese"));
     }
 
     #[test]

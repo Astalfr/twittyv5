@@ -71,7 +71,7 @@
   "responsive_web_grok_media_attribution_imagine_force_show": false,
   "responsive_web_grok_media_attribution_route_to_imagine_composer": false,
   "responsive_web_grok_share_attachment_enabled": true,
-  "responsive_web_grok_show_grok_translated_post": false,
+  "responsive_web_grok_show_grok_translated_post": true,
   "responsive_web_grok_tweet_media_detail_edit_image_button_enabled": false,
   "responsive_web_grok_tweet_media_edit_image_button_enabled": false,
   "responsive_web_hevc_upload_preview_enabled": false,

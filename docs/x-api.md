@@ -225,6 +225,23 @@ Observed live on 2026-10-24 (input for M4):
 - Tweets still have `legacy` (`full_text`, `entities`, `extended_entities`, counts, `favorited`, `retweeted`, `bookmarked`, `created_at`, `quoted_status_id_str`), plus `views`, `quoted_status_result`, `edit_control`, `grok_*`.
 - `HomeLatestTimeline` on the test account returned no posts: a `TimelineShowCover` (email review prompt) and an entry `flip-prompt-message-grok-bot-inline`. Covers and prompts must be skipped.
 
+### Grok translations (2026-10-24)
+
+X machine-translates posts with Grok. The translation is only sent when the feature switch `responsive_web_grok_show_grok_translated_post` is `true` (it is in `data/default_features.json`; every operation that returns posts declares it, only `Viewer` and `UserByScreenName` don't). Each tweet then carries:
+
+```
+grok_translated_post_with_availability
+  .is_available                       # false for posts already in the destination language
+  .data.translation                   # display text only: no reply @mentions, no trailing media t.co
+  .data.entities{hashtags,urls,user_mentions,symbols}   # code-point offsets into `translation`
+  .data.source_language / destination_language          # "ja" / "en"
+  .data.preview_translation           # truncated copy, long posts only: ignored
+```
+
+Checked live on `HomeTimeline` and searches (Japanese posts, Japanese replies, English, French): 28 of 28 entities match as code points, including after emoji; a long `note_tweet` gets its whole text translated; replies translate without their leading mentions. `translate::tweet` turns it into `Post::translation`, and anything unexpected (no data, blank text, same source and destination) is just no translation, never an error.
+
+`destination_language` is `en`, which matches the `x-twitter-client-language: en` the transport sends (not tried with another value). Posts in the account's own languages aren't translated: on a French-speaking account, 28 of 28 French and every English post came back `is_available: false`, while Japanese, Korean and Portuguese posts were translated.
+
 ## Dev CLI
 
 The session comes from `--session <file>` (`{"auth_token":"…","ct0":"…"}`; `session*.json` at the repo root is gitignored) or the `TWITTY_AUTH_TOKEN` / `TWITTY_CT0` env vars. Values are never printed.

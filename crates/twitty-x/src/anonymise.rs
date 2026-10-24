@@ -33,6 +33,9 @@ const TEXT_KEYS: &[&str] = &[
     "vanity",
     "alt_text",
     "ext_alt_text",
+    // Grok's translation of a post (`grok_translated_post_with_availability`).
+    "translation",
+    "preview_translation",
 ];
 
 /// Keys whose values are opaque tokens (cursors, base64 ids…): fully scrambled.
@@ -408,6 +411,19 @@ mod tests {
         ] {
             assert!(!out.contains(leaked), "{leaked} survived");
         }
+    }
+
+    #[test]
+    fn one_word_translations_are_scrambled() {
+        // Short ASCII words would otherwise pass as structural values.
+        let mut v = json!({"data": {"translation": "Reze", "preview_translation": "Reze",
+            "source_language": "ja", "destination_language": "en"}});
+        Anonymiser::with_key(42).anonymise(&mut v);
+        assert_ne!(v["data"]["translation"], "Reze");
+        assert_ne!(v["data"]["preview_translation"], "Reze");
+        assert_eq!(v["data"]["translation"].as_str().map(|s| s.chars().count()), Some(4));
+        assert_eq!(v["data"]["source_language"], "ja");
+        assert_eq!(v["data"]["destination_language"], "en");
     }
 
     #[test]

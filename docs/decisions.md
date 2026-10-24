@@ -4,6 +4,11 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Grok translations are shown by default
+- **Decision**: Turn on `responsive_web_grok_show_grok_translated_post` and show a post's translation instead of its text when X sends one, with "Translated from <language> · Show original" above it. The switch is per post, shared by every column, and not saved.
+- **Why**: That's what x.com does, and a translation can't be mistaken for the author's words because the note is always there. Keeping the choice for the session only avoids a persisted set of post ids.
+- **Consequences**: Translations are into English (`destination_language` `en`, like our `x-twitter-client-language`); X leaves posts in the account's own languages untranslated. Translating into another language would mean sending another client language, which hasn't been tried and would also change the English tombstone texts `translate::tweet` matches. The note is in English like the rest of the UI. Notification rows still show the original text of their target.
+
 ### 2026-10-24: Follow goes through v1.1 REST, and some 403s aren't a lost session
 - **Decision**: `Backend::set_following` POSTs a form to `1.1/friendships/create.json` / `destroy.json`. The transport gained a form body next to JSON. A 403 carrying 158/160/161/162 becomes `XError::Api`, not `Unauthorized`.
 - **Why**: X's web client follows over REST; there is no GraphQL follow mutation in its bundles. Those 403s mean X refused the follow (blocked, limit, already requested); treating them as an expired session would open the sign-in dialog.

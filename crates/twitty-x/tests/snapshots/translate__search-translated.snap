@@ -1,0 +1,49 @@
+---
+source: crates/twitty-x/tests/translate.rs
+expression: summary(&load(name).page)
+---
+newer cursor: true
+older cursor: true
+post 5202574468932517865 @gtsvkxe_np 2026-10-24T12:37:31Z "#いうи × лжنиいمه⏎مいжنиهうمううن⏎⏎／⏎лنهжиم！？⏎иمنهいうهうжж⏎…" [hashtag #いうи] [link wfsrpwqj.jp/umdcwzrt…] {image 1600x1600} {image 1600x1600} ♥2935 ⟳2385 💬24 ❝63 🔖285 👁91923
+  translated ja→en: "#Rqy Gjfnva × Y.Qc Qwjfnc⏎Nmbflkavzabea Chgyphqfxn…" [#Rqy] [wfsrpwqj.jp/umdcwzrt…]
+  quote:
+    post 7530342505634835591 @gtsvkxe_np 2026-10-24T12:34:29Z "／⏎⏎☆هあжあ☆⏎⏎＼⏎⏎いうи × лжنиいمه⏎лمいいه！⏎⏎هうあいنижлن⏎うああи…" [link wfsrpwqj.jp/umdcwzrt…] {image 1200x1200} ♥1244 ⟳501 💬5 ❝73 🔖243 👁217113
+      translated ja→en: "／⏎⏎☆Hbzyknutsat Etlfivj☆⏎⏎＼⏎⏎Rqy Gjfnva × Y.SMACI.…" [wfsrpwqj.jp/umdcwzrt…]
+post 5740144804578269537 @dyx_mkshcug 2026-10-24T11:40:25Z "Ikrилл！！！！⏎هうあنهمうمあ！！！！！🎉🎊✨️✨️⏎⏎あنлمжنممهиあいنهنиい…" [hashtag #Acsyvn] [hashtag #Muyллم3445] [hashtag #Gcn15hlweauqpip] {video 1278x720 13s mp4 ×3} ♥9424 ⟳1371 💬19 ❝14 🔖1082 👁79864
+  translated ja→en: "Dyx-prow!!!!  ⏎Utsib ghapxkyy!!!!!!🎉🎊✨️✨️  ⏎⏎G bwl…" [#Acsyvn] [#Muyллم3445] [#Gcn15hlweauqpip]
+post 9538805715369439587 @fzg_674 2026-10-24T09:00:06Z "いい" {image 1200x1700} ♥53125 ⟳5950 💬28 ❝156 🔖2675 👁687434
+  translated ja→en: "Sqqd"
+post 3956118076271377201 @qqhwcrdurlrrfsa 2026-10-23T03:05:19Z "【あл38い・жжあهあنжлあうう】⏎жжлいهあиهあنうжAP⏎「Yqpie Ogrvwbh」…" [mention @qqhwcrdurlrrfsa] {image 1200x1600} ♥10327 ⟳11313 💬1214 ❝10677 🔖1365 👁982538
+  translated ja→en: "【Uilcxua 33ht - Bnulleu Nlmupto Pomgdidh Bco】⏎Mhka…" [@qqhwcrdurlrrfsa]
+post 1389557298129840028 @lthw9265 2026-10-24T08:55:00Z "жهжمنиمいиいن" {image 2730x4096} {image 2730x4096} {image 2730x4096} {image 2730x4096} ♥10176 ⟳954 💬50 ❝90 🔖727 👁933880
+  translated ja→en: "Gcpvbr ht jjmhra hr nw pzkfkdrc tmvayqh."
+post 4018348186041786591 @qpxszalkunn 2026-10-24T12:25:30Z "مл◾️л…。" {image 1992x2502} ♥13535 ⟳1458 💬3 ❝16 🔖1394 👁67602
+  translated ja→en: "Kkhx iqd◾️iqd... ."
+post 1971693802332162562 @zoctwgbi_npvuj 2026-10-24T15:00:09Z "жあииههжижи🦋" {image 3530x4000} ♥9903 ⟳1892 💬656 ❝438 🔖210 👁96988
+  translated ja→en: "G’uq gjmkmsv dm ghapxkyy🦋"
+post 5672511595191822238 @iabxtzwez 2026-10-24T15:34:53Z "「жиж1همいهい？」⏎⏎#Twqمうう3212" [hashtag #Twqمうう3212] {image 1105x1563} {image 545x1563} {image 552x1563} {image 1102x1563} ♥4100 ⟳888 💬30 ❝24 🔖271 👁22604
+  translated ja→en: ""Bsjs nxv aji u aed bco?"⏎⏎#Twqمうう3212" [#Twqمうう3212]
+post 9382731902930622444 @Igqcfaeuoat 2026-10-24T13:15:00Z "#منهうمうنいمم ⏎🍰مあиمう" [hashtag #منهうمうنいمم] {image 1334x1334} ♥8829 ⟳1792 💬1 ❝38 🔖526 👁84664
+  translated ja→en: "#Fqdctpst Tvx Iri ⏎🍰Ohpklo" [#Fqdctpst]
+post 2218905670336825838 @Votzeyj 2026-10-23T14:05:00Z "منهиうهう" {image 1584x1980} ♥40728 ⟳4399 💬6 ❝35 🔖3724 👁539191
+  translated ja→en: "Afgx pzpv slu"
+post 6998094362216526651 @Y_7649_I 2026-10-24T13:18:35Z "هлжлあいああمهいهい" {image 1500x2048} ♥13043 ⟳703 💬7 ❝13 🔖827 👁230932
+  translated ja→en: "G'f bzvacr ugimtp xpgono ht pzpv zbun."
+post 8541730347724929526 @NTCXTSX_BV 2026-10-24T09:00:04Z "【مهいллいлあممう🎁】⏎⏎жهいлنمممあжあهمлمم⏎2مいمうжлうم！⏎⏎【نいمあ…" {image 1440x1440} ♥12085 ⟳14495 💬134 ❝72 🔖386 👁307756
+  translated ja→en: "【Nvta Zbwqtlgc🎁】⏎⏎Ycsbpq kdzt Gfwxzwvnz'c Ntcxtsx …"
+post 8330505536057930197 @hrau_xlq 2026-10-19T03:04:57Z "いهنمうжمлжжうنいжنういжمжあ！⏎#منهうمうنいمم" [hashtag #منهうمうنいمم] {image 1937x2583} ♥67799 ⟳8694 💬99 ❝586 🔖2953 👁1437815
+  translated ja→en: "Qcekp-prow bpyf fflk akks yvwl hr tdxnizgp!  ⏎#منه…" [#منهうمうنいمم]
+post 6446055002092910894 @jncml_uxepcp 2026-10-24T10:37:53Z "همい" {image 1536x2048} ♥23856 ⟳2044 💬5 ❝31 🔖518 👁312099
+  translated ja→en: "Wrf"
+post 6946549777521974117 @ma_jgag_ 2026-10-24T06:26:41Z "←いあういنああ       ⏎あممうهиنمهمжمжлنл→" {image 1608x931} ♥47079 ⟳2285 💬93 ❝622 🔖3953 👁590072
+  translated ja→en: "←Iri zpkly G acxf  ⏎Iri zpkly ulramqko vsntna trws…"
+post 1274326495496454535 @slgdulajxtiax 2026-10-24T08:57:53Z "あいいжあهنうжنういиنن⏎⏎#KLPU #Dmqpjew" [hashtag #KLPU] [hashtag #Dmqpjew] {image 1258x1556} {image 1258x1556} ♥19104 ⟳2394 💬13 ❝92 🔖1153 👁621530
+  translated ja→en: "G'rb ecqm nxv sblmmaz⏎⏎#KLPU #Dmqpjew" [#KLPU] [#Dmqpjew]
+post 7047033538175797279 @jpgv_itdwj 2026-10-24T16:00:01Z "い◌ ن ж .⏎　　　　　　FDжهи⏎　　『مжههжنижم！』⏎　　илいمжمうGCжあж…" [link loboc.be/kxw5XbBnKu1] [link jhzpkmzbij.owj.to/e6…] [hashtag #илあлうه] [hashtag #иنлиمい] {video 1920x1080 90s mp4 ×4} ♥10067 ⟳2485 💬45 ❝397 🔖2110 👁182439
+  translated ja→en: "ch ◌ ن ж .⏎　　　　　　RF Hzgdn⏎　　"Bbiu ieo Crdoqml Vptx…" [loboc.be/kxw5XbBnKu1] [jhzpkmzbij.owj.to/e6…] [#SegzrCdpuVudTym] [#CqiRjvWoo]
+post 8610099557295595436 @foywtu_zpgt 2026-10-23T10:39:47Z "жжああうлあمうنли、いمжهжمあنうمиمиهههنمлم。う・いあنいлいжあهمうж。い…" [link todvqetfbx.tjhf-uhd.…] {image 1129x1581} {image 1157x1352} ♥27045 ⟳8013 💬66 ❝1177 🔖4821 👁2746491
+  translated ja→en: "Dv-wfkpbzb: Fegsmpy ywpha bpyf nj oajlusjfb stmnm,…" [todvqetfbx.tjhf-uhd.…]
+post 1585673539640158010 @gflqjhck_q 2026-10-24T10:10:44Z "жいжنлهил ⏎#نممあ #иうنあжمه #жهنあ" [hashtag #نممあ] [hashtag #иうنあжمه] [hashtag #жهنあ] {image 1940x1082} ♥16767 ⟳870 💬10 ❝17 🔖802 👁119635
+  translated ja→en: "نLq ieo Iqbprbrfgkul' Yopifم ⏎#Ckzy Dvbo Cio #Ckzy…" [#Ckzy] [#Ckzy] [#Sftg]
+post 3330259306080933659 @fslizl_iljku 2026-10-24T09:48:39Z "лهいい" {image 1513x1248} ♥65591 ⟳10182 💬28 ❝59 🔖2827 👁954572
+  translated ja→en: "muozbxqun"

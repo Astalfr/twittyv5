@@ -26,6 +26,7 @@ const FIXTURES: &[&str] = &[
     "usermedia-nasa",
     "usermedia-nasa-2",
     "list-space",
+    "search-translated",
 ];
 
 fn load(name: &str) -> Translated {
@@ -90,6 +91,19 @@ fn post_line(p: &Post, indent: &str) -> String {
         write!(s, " ♥{} ⟳{} 💬{} ❝{} 🔖{}", m.likes, m.reposts, m.replies, m.quotes, m.bookmarks);
     if let Some(v) = m.views {
         let _ = write!(s, " 👁{v}");
+    }
+    if let Some(t) = &p.translation {
+        let _ = write!(
+            s,
+            "
+{indent}  translated {}→{}: \"{}\"",
+            t.from.as_deref().unwrap_or("?"),
+            t.to.as_deref().unwrap_or("?"),
+            short(t.body.text(), 50)
+        );
+        for span in t.body.spans() {
+            let _ = write!(s, " [{}]", short(&t.body.text()[span.range.clone()], 20));
+        }
     }
     match &p.embed {
         Some(Embed::Quote { quoted }) => match quoted.as_ref() {
@@ -208,6 +222,7 @@ fn fixtures_cover_every_shape_we_translate() {
     assert!(has_post(&|p| p.media.len() >= 2), "multi-image");
     assert!(has_post(&|p| p.reply_to.is_some()), "reply");
     assert!(has_post(&|p| p.body.text().chars().count() > 280), "long note post");
+    assert!(has_post(&|p| p.translation.is_some()), "translated post");
     for kind in ["mention", "hashtag", "link"] {
         let found = has_post(&|p| {
             p.body.spans().iter().any(|s| {

@@ -18,7 +18,7 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 | Layer | Where | Tool | What it proves |
 |---|---|---|---|
 | Model unit tests | `twitty-model/src/**` `#[cfg(test)]` | std, `proptest` | `RichText` invariants, ID newtypes, serde round-trips |
-| Translation snapshots | `twitty-x/tests/translate.rs` + `tests/fixtures/*.json` | `insta` (text summaries) | 13 anonymised live responses translate with **zero** `Unsupported` rows and zero warnings · compact per-row summaries are snapshotted · fixtures together must cover reposts, threads, notifications, quotes, link cards, video, GIF, multi-image, replies, long posts and mention/hashtag/link spans · promoted posts skipped · authors shared per page · media grid pages (incl. `TimelineAddToModule`) carry posts with media |
+| Translation snapshots | `twitty-x/tests/translate.rs` + `tests/fixtures/*.json` | `insta` (text summaries) | 14 anonymised live responses translate with **zero** `Unsupported` rows and zero warnings · compact per-row summaries are snapshotted · fixtures together must cover reposts, threads, notifications, quotes, link cards, video, GIF, multi-image, replies, long posts, Grok translations and mention/hashtag/link spans · promoted posts skipped · authors shared per page · media grid pages (incl. `TimelineAddToModule`) carry posts with media |
 | Wire robustness | `twitty-x/tests/wire_robustness.rs` | `proptest`, mutated fixtures | Missing or renamed fields and unknown typenames never panic, and become `Unsupported` |
 | Entity offsets | `twitty-x/src/translate/text.rs` tests | `proptest` | Code-point → byte conversion with emoji and CJK, display ranges, media-link removal, HTML decoding. A property test feeds random entities and ranges: never panics, spans always valid. |
 | Backend | `twitty-x/tests/backend.rs` | `wiremock`, committed fixtures as bodies | Each `FeedSource` calls its operation and translates with 0 `Unsupported` · older/newer cursors sent · search over POST with `product` · 401 → `Unauthorized` · a media column pages through the grid · each action posts its mutation with the right id field · "already done" (139/327) is success · other X errors are reported · publish sends the draft (reply id) and returns the created post, duplicates are errors · rate budget uses X's reported limit · health counts rows, unreadable rows (with the reason), errors, and responses without a timeline · thread split around the focal post, missing focal → `NotFound` · `Viewer`/`UserByScreenName` → `Profile` · writes refused without a request |
@@ -36,11 +36,11 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 
 ## Current coverage (M10)
 
-462 tests (+3 opt-in live tests):
-- 133 in `twitty-x`: 91 unit tests (incl. health counters), 16 transport and 20 backend mock-server tests, and 6 fixture translation tests over 13 fixtures.
+527 tests (+3 opt-in live tests):
+- 153 in `twitty-x`: 104 unit tests (incl. health counters and Grok translations), 19 transport and 23 backend mock-server tests, and 7 fixture translation tests over 14 fixtures.
 - 24 in `twitty-media`: the row copier (crop, bottom-up rows, short buffers), exact-seek helpers, COM start-up, and 14 decoder tests over the synthetic `bars.mp4` and `tone.mp4` (skipped where Media Foundation is missing, as on CI).
-- 25 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging and notifications.
-- 280 in `twitty`: state (paging, hold-off, end-of-feed, selection, polling, animation timing, diagnostics, settings, login form, decks, tabs, add-column parsing, compose length, thread rows), credentials, logging, formatting, runtime, themes, icons, GPUI view tests, and session discovery/rotation in `main.rs`. No test touches the real Credential Manager or writes to X.
+- 27 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging and notifications.
+- 323 in `twitty`: state (translated posts, paging, hold-off, end-of-feed, selection, polling, animation timing, diagnostics, settings, login form, decks, tabs, add-column parsing, compose length, thread rows), credentials, logging, formatting, runtime, themes, icons, GPUI view tests, and session discovery/rotation in `main.rs`. No test touches the real Credential Manager or writes to X.
 
 ## Manual check
 
@@ -48,7 +48,7 @@ With a session (see "Signing in" in [x-api.md](x-api.md)), `cargo run -p twitty`
 
 ## Fixtures
 
-- These live in `crates/twitty-x/tests/fixtures/<name>.json` and **must be anonymised** with `twitty-x-cli anonymise` (see [x-api.md](x-api.md#capturing-a-fixture)). Current set: `home`, `home--latest`, `usertweets-elonmusk`, `usertweets-nasa`, `search-quotes`, `search-videos`, `search-rust`, `tweetdetail`, `notifications`, `userreplies-nasa`, `usermedia-nasa`, `usermedia-nasa-2`, `list-space`.
+- These live in `crates/twitty-x/tests/fixtures/<name>.json` and **must be anonymised** with `twitty-x-cli anonymise` (see [x-api.md](x-api.md#capturing-a-fixture)). Current set: `home`, `home--latest`, `usertweets-elonmusk`, `usertweets-nasa`, `search-quotes`, `search-videos`, `search-rust`, `tweetdetail`, `notifications`, `userreplies-nasa`, `usermedia-nasa`, `usermedia-nasa-2`, `list-space`, `search-translated` (Japanese search with Grok translations).
 - Minimum cases, kept up to date:
   - plain post, reply, self-thread module, retweet, quote
   - quote of a deleted post, long `note_tweet`

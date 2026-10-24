@@ -24,13 +24,18 @@ use gpui_kit::{
     px, rems,
 };
 use twitty_model::{
-    Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostOrGone, Profile, RichText,
-    Span, SpanKind, UnavailableReason, VerifiedKind,
+    Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostId, PostOrGone, Profile,
+    RichText, Span, SpanKind, UnavailableReason, VerifiedKind,
 };
 
 use crate::{
     format::{compact_count, exact_count, exact_time, relative_time},
-    state::{interactions::Toggle, links, media_layout, motion, toasts::Notice},
+    state::{
+        interactions::Toggle,
+        links, media_layout, motion,
+        toasts::Notice,
+        translation::{self, Note},
+    },
     ui::button::TextButton,
     ui::{
         assets::{BOOKMARK_FILL, HEART_FILL},
@@ -458,9 +463,14 @@ fn post_row(
         );
     }
 
-    if !post.body.is_empty() {
+    let shown = translation::shown(post, hub.showing_original(&post.id));
+    if let Some(note) = shown.note {
         content =
-            content.child(rich_text(("body", key), &post.body, &rcx.hub, theme.link, window, cx));
+            content.child(translation_note(("translation", key), &post.id, note, &rcx.hub, &theme));
+    }
+    if !shown.body.is_empty() {
+        content =
+            content.child(rich_text(("body", key), shown.body, &rcx.hub, theme.link, window, cx));
     }
     if !post.media.is_empty() {
         let grid = media_grid(("media", key), &post.media, width, post, rcx, &theme, window, cx);
@@ -541,6 +551,40 @@ fn post_row(
             }))
         })
         .into_any_element()
+}
+
+/// "Translated from Japanese · Show original" above a translated post's text.
+fn translation_note(
+    id: (&'static str, usize),
+    post: &PostId,
+    note: Note,
+    hub: &Entity<InteractionsHub>,
+    theme: &gpui_kit::component::Theme,
+) -> impl IntoElement {
+    let hub = hub.clone();
+    let post = post.clone();
+    // Wraps in narrow columns and quote cards rather than overflowing.
+    h_flex()
+        .flex_wrap()
+        .gap_x_1()
+        .text_xs()
+        .text_color(theme.muted_foreground)
+        .child(note.label)
+        .child("·")
+        .child(
+            div()
+                .id(id)
+                .debug_selector(move || format!("{}-{}", id.0, id.1))
+                .text_color(theme.link)
+                .cursor_pointer()
+                .hover(|s| s.underline())
+                .on_click(move |_, _, cx| {
+                    // Switching the text must not also open the post's thread.
+                    cx.stop_propagation();
+                    hub.update(cx, |hub, cx| hub.toggle_original(&post, cx));
+                })
+                .child(note.action),
+        )
 }
 
 pub(crate) fn verified_badge(
@@ -820,10 +864,12 @@ fn quote_card(
     cx: &mut App,
 ) -> impl IntoElement {
     let theme = cx.theme().clone();
+    let shown = translation::shown(q, hub.read(cx).showing_original(&q.id));
     let card_hub = hub.clone();
     let quoted = q.id.clone();
     v_flex()
         .id(id)
+        .debug_selector(move || format!("quote-{}", id.1))
         .mt_2()
         .w(px(width))
         .rounded(px(16.))
@@ -868,7 +914,15 @@ fn quote_card(
                             relative_time(q.created_at, Utc::now())
                         ))),
                 )
-                .child(div().text_color(theme.foreground).child(q.body.text().to_owned())),
+                .children(shown.note.map(|note| {
+                    translation_note(("quote-translation", id.1), &q.id, note, hub, &theme)
+                }))
+                .child(
+                    div()
+                        .debug_selector(move || format!("quote-body-{}", id.1))
+                        .text_color(theme.foreground)
+                        .child(shown.body.text().to_owned()),
+                ),
         )
         .children(q.media.first().map(|m| {
             let inner = (width - 2.0 * BORDER).max(0.0);
@@ -1597,6 +1651,85 @@ mod tests {
         cx.simulate_click(at(bounds), gpui_kit::Modifiers::default());
         cx.run_until_parked();
         seen.take()
+    }
+
+    /// The mock post translated from French.
+    fn translated_post() -> Post {
+        mock_items(twitty_model::FeedSource::Bookmarks)
+            .iter()
+            .flat_map(|i| i.posts())
+            .find(|p| p.translation.is_some())
+            .cloned()
+            .expect("the mock has a translated post")
+    }
+
+    #[gpui_kit::test]
+    fn a_translated_post_says_so_and_switches_to_its_original(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let post = translated_post();
+        let id = post.id.clone();
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let seen = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = std::rc::Rc::clone(&seen);
+        cx.update(|cx| {
+            cx.subscribe(&hub, move |_, _: &Navigate, _| count.set(count.get() + 1)).detach();
+        });
+        let row_hub = hub.clone();
+        let (_view, cx) =
+            cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub: row_hub });
+        cx.run_until_parked();
+
+        let note = cx.debug_bounds("translation-0").expect("the translation note is rendered");
+        let body = cx.debug_bounds("body-text-0").expect("the body is rendered");
+        assert!(note.bottom() <= body.top(), "the note sits above the text: {note:?} {body:?}");
+        cx.simulate_click(note.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert!(hub.read_with(cx, |hub, _| hub.showing_original(&id)), "now shows the original");
+        assert_eq!(seen.get(), 0, "switching the text doesn't open the thread");
+
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let note = cx.debug_bounds("translation-0").expect("the note stays to switch back");
+        cx.simulate_click(note.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert!(!hub.read_with(cx, |hub, _| hub.showing_original(&id)));
+    }
+
+    #[gpui_kit::test]
+    fn a_post_without_translation_has_no_note(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
+        post.translation = None;
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("post-row-0").is_some());
+        assert!(cx.debug_bounds("translation-0").is_none());
+    }
+
+    #[gpui_kit::test]
+    fn a_translated_quote_says_so_without_opening_it(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, _) = mock_post();
+        post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(translated_post())) });
+        let seen = navigations(cx, FeedItem::Post(post), "quote-translation-0");
+        assert_eq!(seen, Vec::new(), "the note switches the text in place");
+    }
+
+    #[gpui_kit::test]
+    fn a_translation_note_stays_inside_a_narrow_quote(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
+        post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(translated_post())) });
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+        let note = cx.debug_bounds("quote-translation-0").expect("the quote's note is rendered");
+        let card = cx.debug_bounds("quote-0").expect("the quote card is rendered");
+        assert!(note.right() <= card.right(), "{note:?} overflows {card:?}");
+        let body = cx.debug_bounds("quote-body-0").expect("the quote's text is rendered");
+        assert!(note.bottom() <= body.top(), "the note sits above the text: {note:?} {body:?}");
     }
 
     fn mock_items(source: twitty_model::FeedSource) -> Vec<FeedItem> {

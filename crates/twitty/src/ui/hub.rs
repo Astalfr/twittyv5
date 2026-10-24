@@ -13,6 +13,7 @@ use crate::{
         interactions::{Effective, Interactions, Toggle},
         motion::{self, Recent},
         toasts::Notice,
+        translation::Originals,
     },
 };
 
@@ -40,6 +41,8 @@ pub struct InteractionsHub {
     backend: Arc<dyn Backend>,
     /// Toggles the viewer just turned on, whose icon "pops".
     pops: Recent<(PostId, Toggle), ()>,
+    /// Translated posts the viewer switched back to their original text.
+    originals: Originals,
 }
 
 impl std::fmt::Debug for InteractionsHub {
@@ -53,7 +56,12 @@ impl EventEmitter<Navigate> for InteractionsHub {}
 
 impl InteractionsHub {
     pub fn new(backend: Arc<dyn Backend>) -> Self {
-        Self { state: Interactions::default(), backend, pops: Recent::default() }
+        Self {
+            state: Interactions::default(),
+            backend,
+            pops: Recent::default(),
+            originals: Originals::default(),
+        }
     }
 
     /// State to render for `post`.
@@ -65,6 +73,17 @@ impl InteractionsHub {
     /// just turned it on.
     pub fn popping(&self, id: &PostId, toggle: Toggle) -> bool {
         self.pops.get(&(id.clone(), toggle), Instant::now()).is_some()
+    }
+
+    /// Whether translated post `id` is switched back to its original text.
+    pub fn showing_original(&self, id: &PostId) -> bool {
+        self.originals.showing_original(id)
+    }
+
+    /// Switches translated post `id` between its translation and original.
+    pub fn toggle_original(&mut self, id: &PostId, cx: &mut Context<Self>) {
+        self.originals.toggle(id);
+        cx.notify();
     }
 
     /// Asks the app to open something (see [`Navigate`]).
