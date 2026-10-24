@@ -4,6 +4,11 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Windows installer built with Inno Setup
+- **Decision**: CI builds a per-user Inno Setup installer (`installer/twitty.iss`) next to the raw exe on every run.
+- **Why**: Twitty is a single self-contained exe, so the installer only needs to copy it, add shortcuts and register an uninstaller. Inno Setup does that in one short script, installs without admin rights, and closes a running app on upgrade. WiX/MSI would need a heavier toolchain and authoring for no gain here.
+- **Consequences**: The version comes from the workspace `Cargo.toml`; bumping it is what makes an installer an upgrade. The installer and exe are unsigned (SmartScreen warns). User data survives uninstall. Publishing GitHub Releases from tags isn't set up.
+
 ### 2026-10-24: Community Notes are read in the thread panel
 - **Decision**: A tweet's Community Note is shown in full only under the tweet the thread panel is about. Everywhere else (columns, profiles, the panel's other tweets, quote cards) a compact alert under the text, "Readers added context", says there is one; clicking it, like the rest of the row, opens the panel.
 - **Why**: A note is often longer than the tweet and would crowd narrow columns. A one-line alert under the text warns the reader where they read (an icon in the header was too easy to miss), and the full note is one click away.

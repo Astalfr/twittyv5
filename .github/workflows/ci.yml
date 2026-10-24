@@ -90,3 +90,24 @@ jobs:
           path: target/release/twitty.exe
           if-no-files-found: error
           retention-days: 30
+
+      # Inno Setup may or may not be on the runner image: install it if missing.
+      - name: Build installer
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $version = (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages |
+            Where-Object name -eq 'twitty' | Select-Object -ExpandProperty version
+          & $iscc /Qp "/DAppVersion=$version" installer\twitty.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: twitty-setup-windows-x64-${{ github.sha }}
+          path: target/installer/twitty-setup-*.exe
+          if-no-files-found: error
+          retention-days: 30

@@ -29,7 +29,7 @@
 | Job | Steps |
 |---|---|
 | `check` | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked` |
-| `build` | `cargo build --release --locked -p twitty`, then uploads `target/release/twitty.exe` as the artifact `twitty-windows-x64-<sha>` (kept 30 days) |
+| `build` | `cargo build --release --locked -p twitty`, uploads `target/release/twitty.exe` as the artifact `twitty-windows-x64-<sha>`, then builds the installer and uploads it as `twitty-setup-windows-x64-<sha>` (both kept 30 days) |
 
 - The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` caches debug and release builds separately. Only `main` saves caches, and it saves them even when a step fails or times out (`cache-on-failure`). The compile steps have their own `timeout-minutes`, below the job's, so the save step still runs. Pull requests restore `main`'s cache.
 - CI builds without debug info (`CARGO_PROFILE_DEV_DEBUG=0`) and turns off Defender real-time scanning first. Runs on `main` are never cancelled by a newer push (that would discard their cache); pull request runs are.
@@ -37,6 +37,7 @@
 - `--locked` fails the build if `Cargo.lock` is out of date, so commit the lockfile with every dependency change.
 - GPUI tests use GPUI's test platform, so CI needs no real display.
 - Download the `.exe` from the run's **Artifacts** section on GitHub.
+- **Installer**: `installer/twitty.iss` is an [Inno Setup](https://jrsoftware.org/isinfo.php) script. CI installs Inno Setup with Chocolatey when the runner image lacks it, reads the version from `cargo metadata` and runs `ISCC.exe /DAppVersion=<version> installer\twitty.iss`, which writes `target/installer/twitty-setup-<version>-x64.exe`. To build it locally: `winget install JRSoftware.InnoSetup`, build the release exe, then run the same command (the script refuses to compile without `AppVersion`). It installs per user under `%LOCALAPPDATA%\Programs\Twitty` without admin rights (the wizard offers an all-users install), adds a Start menu shortcut and an optional desktop one, and closes a running Twitty before upgrading. Uninstalling leaves settings, decks, logs and the saved session in place. `AppId` identifies the app for upgrades and uninstall: never change it. The installer isn't signed, so SmartScreen warns on first run.
 - Release builds use the Windows GUI subsystem (no console window). Debug builds keep the console for logs.
 - **App icon**: `crates/twitty/build.rs` compiles `resources/twitty.rc` with `embed-resource` (the Windows SDK's `rc.exe`, present on `windows-latest`), embedding `resources/twitty.ico` as icon resource 1. Explorer uses it for the exe, and GPUI loads resource 1 as the window and taskbar icon. The build fails if the resource can't be compiled. `resources/twitty-logo.png` (256px, the `.ico`'s 256px frame) is the title bar logo, embedded through `ui::assets` as `brand/twitty.png`. GPUI samples images bilinearly with no mipmaps, so a PNG much bigger than its drawn size (`ui::assets::LOGO_SIZE`, 18px) aliases: the title bar draws it through `ui::remote_image::asset`, which resamples it on the CPU to the device size for the window's scale factor (a test checks it at 100–300%). Both were generated from the 512px source PNG with high-quality resampling. The `.ico` holds PNG frames from 16 to 256px.
 
