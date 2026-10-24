@@ -5,8 +5,8 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 ---
 
 ### 2026-10-24: Community Notes are read in the thread panel
-- **Decision**: A post's Community Note is shown in full only under the post the thread panel is about. Everywhere else (columns, profiles, the panel's other posts, quote cards) a small icon after the `@handle` says there is one; clicking the row opens the panel as usual.
-- **Why**: A note is often longer than the post and would crowd narrow columns. The icon is enough to warn the reader, and the full note is one click away.
+- **Decision**: A post's Community Note is shown in full only under the post the thread panel is about. Everywhere else (columns, profiles, the panel's other posts, quote cards) a compact alert under the text, "Readers added context", says there is one; clicking it, like the rest of the row, opens the panel.
+- **Why**: A note is often longer than the post and would crowd narrow columns. A one-line alert under the text warns the reader where they read (an icon in the header was too easy to miss), and the full note is one click away.
 - **Consequences**: `RowCtx` carries the panel's focus (`None` elsewhere), and `state::community_note::display` picks marker or full note. Only notes X sends in `birdwatch_pivot` (rated helpful) are shown; `has_birdwatch_notes` alone shows nothing. The note's title and "Rate it on X" are in English like the rest of the UI; X's localized `title` is not used. Rating notes isn't supported: the link opens the note's page on x.com.
 
 ### 2026-10-24: Grok translations are shown by default

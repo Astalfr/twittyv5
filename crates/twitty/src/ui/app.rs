@@ -6,8 +6,8 @@ use gpui_kit::{
     Animation, AnimationExt, AnyElement, AnyView, AnyWindowHandle, Context, Entity, FocusHandle,
     FontWeight, ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render, Resource,
     ScrollHandle, SharedUri, Styled, StyledImage, Subscription, Task, Window, assets::IconName,
-    component::button::*, component::checkbox::Checkbox, component::scroll::ScrollableElement,
-    component::*, div, img, prelude::*, px,
+    canvas, component::button::*, component::checkbox::Checkbox,
+    component::scroll::ScrollableElement, component::*, div, img, prelude::*, px,
 };
 use twitty_model::{
     Backend, BackendError, FeedSource, Profile, SpanKind, UserRef, mock::MockBackend,
@@ -123,6 +123,9 @@ pub struct TwittyApp {
     columns: Vec<(ColumnId, Entity<ColumnView>)>,
     theme_name: &'static str,
     deck_scroll: ScrollHandle,
+    /// Whether the columns were wider than the deck at the last frame, so the
+    /// scrollbar shows and gets its strip under them.
+    deck_overflows: bool,
     /// The settings page's scroll position, kept in a handle so the copy that
     /// animates out after "Done" doesn't jump back to the top.
     settings_scroll: ScrollHandle,
@@ -201,6 +204,7 @@ impl TwittyApp {
             columns: Vec::new(),
             theme_name,
             deck_scroll: ScrollHandle::new(),
+            deck_overflows: false,
             settings_scroll: ScrollHandle::new(),
             viewer: None,
             login: None,
@@ -1600,15 +1604,35 @@ impl Render for TwittyApp {
                 .child("Use the icons on the left to add one.")
                 .into_any_element()
         } else {
+            // The overflow is only known once the deck is laid out: check it
+            // right after, and render again if the strip must appear or go.
+            let deck_scroll = self.deck_scroll.clone();
+            let rendered_overflows = self.deck_overflows;
+            let this = cx.entity().downgrade();
+            let overflow_check = canvas(
+                move |_, _, cx| {
+                    let overflows = deck_scroll.max_offset().x > px(0.);
+                    if overflows != rendered_overflows {
+                        this.update(cx, |this, cx| {
+                            this.deck_overflows = overflows;
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute();
             // The scrollbar is an overlay on this wrapper (not on the scrolling
-            // element, whose children move with the scroll). The bottom padding
-            // gives it its own strip so it never covers the columns.
+            // element, whose children move with the scroll). While it shows, the
+            // bottom padding gives it its own strip so it never covers the
+            // columns; when they all fit it is hidden, and they reach the bottom.
             div()
                 .relative()
                 .flex_1()
                 .min_w_0()
                 .h_full()
-                .pb(px(DECK_SCROLLBAR_GUTTER))
+                .when(self.deck_overflows, |d| d.pb(px(DECK_SCROLLBAR_GUTTER)))
                 .child(
                     h_flex()
                         .id("deck")
@@ -1621,6 +1645,7 @@ impl Render for TwittyApp {
                         .restrict_scroll_to_axis()
                         .children(self.columns.iter().map(|(_, view)| view.clone())),
                 )
+                .child(overflow_check)
                 .horizontal_scrollbar(&self.deck_scroll)
                 .into_any_element()
         };
@@ -2106,6 +2131,34 @@ mod tests {
                 assert_eq!(button.bounds().size.width, px(54.), "{id}");
             }
         });
+    }
+
+    #[gpui_kit::test]
+    fn columns_reach_the_bottom_unless_the_deck_scrollbar_shows(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(crate::runtime::Runtime::inline());
+        });
+        let mut deck = DeckFile::default();
+        deck.add_column(FeedSource::Bookmarks);
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(deck, Settings::default(), backend, AppOptions::default(), window, cx)
+        });
+        cx.run_until_parked();
+        let gap = |cx: &mut VisualTestContext| {
+            cx.run_until_parked();
+            let area = cx.debug_bounds("deck-area").unwrap();
+            area.bottom() - app.read_with(cx, |app, _| app.deck_scroll.bounds().bottom())
+        };
+        assert_eq!(gap(cx), px(0.), "one column fits: no scrollbar strip");
+
+        app.update(cx, |app, cx| {
+            for _ in 0..7 {
+                app.add_column(FeedSource::Bookmarks, cx);
+            }
+        });
+        assert_eq!(gap(cx), px(DECK_SCROLLBAR_GUTTER), "overflowing deck: strip for its bar");
     }
 
     #[gpui_kit::test]

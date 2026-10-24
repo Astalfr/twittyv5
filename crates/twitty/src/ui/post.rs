@@ -431,7 +431,6 @@ fn post_row(
                 .on_click(open_profile(&post.author, &rcx.hub))
                 .child(format!("@{}", post.author.handle)),
         )
-        .when(note == NoteDisplay::Marker, |h| h.child(note_marker(("note-marker", key), &theme)))
         .child({
             let link = link.clone();
             let exact = exact_time(post.created_at, &chrono::Local);
@@ -477,6 +476,9 @@ fn post_row(
     if !shown.body.is_empty() {
         content =
             content.child(rich_text(("body", key), shown.body, &rcx.hub, theme.link, window, cx));
+    }
+    if note == NoteDisplay::Marker {
+        content = content.child(note_marker(("note-marker", key), &theme));
     }
     if !post.media.is_empty() {
         let grid = media_grid(("media", key), &post.media, width, post, rcx, &theme, window, cx);
@@ -596,17 +598,28 @@ fn translation_note(
         )
 }
 
-/// The small icon in a header saying the post has a Community Note.
+/// The alert under a post's text saying it has a Community Note. Clicking it
+/// opens the post, where the note is shown in full.
 fn note_marker(
     id: (&'static str, usize),
     theme: &gpui_kit::component::Theme,
 ) -> impl IntoElement + use<> {
-    div()
+    h_flex()
         .id(id)
         .debug_selector(move || format!("{}-{}", id.0, id.1))
-        .flex_none()
-        .child(Icon::new(IconName::UsersRound).size(px(14.)).text_color(theme.link))
-        .tooltip(|window, cx| Tooltip::new(community_note::MARKER).build(window, cx))
+        .mt_1()
+        .w_full()
+        .px_3()
+        .py_2()
+        .gap_2()
+        .rounded(px(12.))
+        .border_1()
+        .border_color(theme.border)
+        .text_sm()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme.foreground)
+        .child(Icon::new(IconName::UsersRound).size(px(16.)).flex_none())
+        .child(div().min_w_0().truncate().child(community_note::MARKER))
 }
 
 /// A Community Note in full, under the post a thread panel is about.
@@ -981,10 +994,7 @@ fn quote_card(
                             "@{} · {}",
                             q.author.handle,
                             relative_time(q.created_at, Utc::now())
-                        )))
-                        .when(q.community_note.is_some(), |h| {
-                            h.child(note_marker(("quote-note-marker", id.1), &theme))
-                        }),
+                        ))),
                 )
                 .children(shown.note.map(|note| {
                     translation_note(("quote-translation", id.1), &q.id, note, hub, &theme)
@@ -994,7 +1004,10 @@ fn quote_card(
                         .debug_selector(move || format!("quote-body-{}", id.1))
                         .text_color(theme.foreground)
                         .child(shown.body.text().to_owned()),
-                ),
+                )
+                .when(q.community_note.is_some(), |d| {
+                    d.child(note_marker(("quote-note-marker", id.1), &theme))
+                }),
         )
         .children(q.media.first().map(|m| {
             let inner = (width - 2.0 * BORDER).max(0.0);
@@ -1829,16 +1842,14 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn in_a_column_a_noted_post_only_shows_a_marker_by_its_handle(
-        cx: &mut gpui_kit::TestAppContext,
-    ) {
+    fn in_a_column_a_noted_post_shows_an_alert_under_its_text(cx: &mut gpui_kit::TestAppContext) {
         cx.update(gpui_kit::init);
         let cx = one_post(noted_post(), cx);
-        let marker = cx.debug_bounds("note-marker-0").expect("the marker is rendered");
-        let handle = cx.debug_bounds("post-handle-0").expect("handle");
-        let time = cx.debug_bounds("post-time-0").expect("time");
-        assert!(marker.left() >= handle.right() && marker.right() <= time.left(), "{marker:?}");
-        assert!(marker.top() < time.bottom() && marker.bottom() > time.top(), "on the header line");
+        let marker = cx.debug_bounds("note-marker-0").expect("the alert is rendered");
+        let body = cx.debug_bounds("body-text-0").expect("text");
+        assert!(marker.top() >= body.bottom(), "under the text: {marker:?} {body:?}");
+        assert_eq!(marker.left(), body.left());
+        assert_eq!(marker.right(), body.right(), "as wide as the text column");
         assert!(cx.debug_bounds("note-0").is_none(), "the note itself is for the thread panel");
     }
 
@@ -1860,8 +1871,10 @@ mod tests {
         post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(noted_post())) });
         let cx = one_post(post, cx);
         let card = cx.debug_bounds("quote-0").expect("quote card");
-        let marker = cx.debug_bounds("quote-note-marker-0").expect("the quote's marker");
+        let marker = cx.debug_bounds("quote-note-marker-0").expect("the quote's alert");
+        let body = cx.debug_bounds("quote-body-0").expect("the quote's text");
         assert!(card.contains(&marker.center()));
+        assert!(marker.top() >= body.bottom(), "under the quote's text");
         assert!(cx.debug_bounds("note-marker-0").is_none(), "the quoting post has no note");
     }
 

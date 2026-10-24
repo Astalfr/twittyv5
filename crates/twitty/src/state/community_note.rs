@@ -1,15 +1,16 @@
 //! Community Notes: where a post's note is shown in full, and where only a
-//! marker says it has one.
+//! compact alert says it has one.
 //!
 //! The note is read in the thread panel, under the post the panel is about.
-//! Everywhere else (columns, profiles, the panel's other posts) a small marker
-//! in the post's header says there is one; clicking the row opens the panel.
+//! Everywhere else (columns, profiles, the panel's other posts) a compact
+//! alert under the post's text, "Readers added context", says there is one;
+//! clicking it, like the rest of the row, opens the panel.
 
 use twitty_model::{CommunityNote, Post, PostId};
 
 /// The heading of a note shown in full, as on x.com.
 pub const TITLE: &str = "Readers added context they thought people might want to know";
-/// The marker's tooltip.
+/// The text of the compact alert under a post with a note.
 pub const MARKER: &str = "Readers added context";
 /// The link to the note's page, where it can be rated.
 pub const RATE: &str = "Rate it on X";
@@ -19,7 +20,7 @@ pub const RATE: &str = "Rate it on X";
 pub enum NoteDisplay<'a> {
     /// The post has no note.
     None,
-    /// A small marker in the header.
+    /// A compact alert under the post's text.
     Marker,
     /// The whole note under the post.
     Full(&'a CommunityNote),
