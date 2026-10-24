@@ -4,6 +4,10 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: "For you" is never polled
+- **Decision**: `poll::bucket` returns `None` for Home "For you", like conversations. It loads on open and on an explicit refresh only; "Following" still polls.
+- **Why**: "For you" is algorithmic and re-ranked on every request, so polling it pulls in a churn of posts that aren't "new" and moves the timeline under the reader.
+
 ### 2026-10-24: Random transaction id kept (M10)
 - **Decision**: The planned port of X's real `x-client-transaction-id` algorithm is not done.
 - **Why**: X still accepts random ids (verified with every live request this session), the algorithm depends on fast-changing web bundles, and a wrong port is worse than none. Enforcement is detected: error 353 becomes `TransactionIdRequired`, visible in the UI, the log and Diagnostics.

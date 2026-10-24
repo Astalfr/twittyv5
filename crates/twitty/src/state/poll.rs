@@ -16,10 +16,11 @@ pub const MAX_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const POLL_SHARE: u32 = 3;
 
 /// Feeds that are likely served by the same request type, and so share a
-/// rate limit. Conversations are not polled at all.
+/// rate limit. Conversations are not polled at all, and neither is "For you":
+/// it is re-ranked on every request, so it only refreshes when asked.
 pub fn bucket(source: &FeedSource) -> Option<&'static str> {
     Some(match source {
-        FeedSource::Home { mode: HomeMode::ForYou } => "home",
+        FeedSource::Home { mode: HomeMode::ForYou } | FeedSource::Thread { .. } => return None,
         FeedSource::Home { mode: HomeMode::Following } => "home-latest",
         FeedSource::Notifications { .. } => "notifications",
         FeedSource::Search { .. } => "search",
@@ -29,7 +30,6 @@ pub fn bucket(source: &FeedSource) -> Option<&'static str> {
         FeedSource::User { tab: UserTab::Likes, .. } => "user-likes",
         FeedSource::List { .. } => "list",
         FeedSource::Bookmarks => "bookmarks",
-        FeedSource::Thread { .. } => return None,
     })
 }
 
@@ -118,5 +118,14 @@ mod tests {
                 None,
             ]
         );
+    }
+
+    #[test]
+    fn for_you_is_never_polled_but_following_is() {
+        let sources = vec![
+            FeedSource::Home { mode: HomeMode::ForYou },
+            FeedSource::Home { mode: HomeMode::Following },
+        ];
+        assert_eq!(intervals(&sources, |_| None), vec![None, Some(MIN_INTERVAL)]);
     }
 }

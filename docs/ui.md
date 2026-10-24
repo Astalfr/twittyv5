@@ -98,7 +98,7 @@ Rules:
 
 Each column polls for `Newer` posts at an interval from `state::poll`:
 - polling may use a third of a feed's budget (`Backend::rate_budget`, e.g. X's 15-minute limit for the operation), shared by all columns of the same feed type (`poll::bucket`);
-- never more often than every 30s, never less often than every 30 min; conversations aren't polled;
+- never more often than every 30s, never less often than every 30 min; conversations and Home "For you" aren't polled ("For you" is re-ranked on every request, so it only refreshes when asked);
 - `TwittyApp::update_polling` recomputes intervals when the deck changes and every minute (X reports its real limits with the first responses; before that `XBackend` assumes a limit of 50);
 - the settings page can turn polling off; a rate-limited or unauthorised column also holds off (`ColumnModel::begin`).
 

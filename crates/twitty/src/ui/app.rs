@@ -1945,7 +1945,14 @@ mod tests {
             got.iter().filter(|i| **i == Some(std::time::Duration::from_secs(180))).count(),
             2
         );
-        assert!(got.iter().all(Option::is_some));
+        // Every column polls except the default deck's "For you".
+        let sources = app.read_with(cx, |app, cx| {
+            app.columns().map(|c| c.read(cx).model().source().clone()).collect::<Vec<_>>()
+        });
+        for (source, every) in sources.iter().zip(&got) {
+            let for_you = *source == FeedSource::Home { mode: twitty_model::HomeMode::ForYou };
+            assert_eq!(every.is_none(), for_you, "{source:?}");
+        }
 
         app.update(cx, |app, cx| {
             app.settings.polling = Some(false);
