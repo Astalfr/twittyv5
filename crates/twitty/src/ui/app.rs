@@ -32,9 +32,9 @@ use crate::{
     },
 };
 
-/// Opacity of the theme's overlay colour behind the image viewer: darker than
-/// behind dialogs, so the image stands out.
-const MEDIA_BACKDROP_ALPHA: f32 = 0.7;
+/// Opacity of the theme's overlay colour behind the image viewer, dialogs and
+/// the thread panel.
+const BACKDROP_ALPHA: f32 = 0.7;
 
 /// Height of the strip under the deck reserved for its horizontal scrollbar.
 const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
@@ -293,25 +293,15 @@ impl TwittyApp {
         } else if self.has_dialog() {
             self.close_overlays(cx);
         } else {
-            self.thread = None;
-            self._thread_sub = None;
+            self.close_thread(cx);
         }
         cx.notify();
     }
 
-    /// A press outside the thread panel closes it, unless it landed in an
-    /// overlay (image viewer, dialog) that may have been opened from the panel.
-    /// The press is consumed: whatever was under it (a post, an image, a link)
-    /// doesn't get a click.
-    fn thread_clicked_outside(&mut self, cx: &mut Context<Self>) {
-        if self.thread.is_some() && self.media.is_none() && !self.has_dialog() {
-            self.thread = None;
-            self._thread_sub = None;
-            // Called in the capture phase, so nothing else sees the mouse down
-            // and the following mouse up can't complete a click.
-            cx.stop_propagation();
-            cx.notify();
-        }
+    fn close_thread(&mut self, cx: &mut Context<Self>) {
+        self.thread = None;
+        self._thread_sub = None;
+        cx.notify();
     }
 
     fn render_media_viewer(
@@ -431,11 +421,8 @@ impl TwittyApp {
         let backend = Arc::clone(&self.backend);
         let hub = self.hub.clone();
         let panel = cx.new(|cx| ThreadPanel::new(id, backend, hub, cx));
-        self._thread_sub = Some(cx.subscribe(&panel, |this, _, _: &CloseThread, cx| {
-            this.thread = None;
-            this._thread_sub = None;
-            cx.notify();
-        }));
+        self._thread_sub =
+            Some(cx.subscribe(&panel, |this, _, _: &CloseThread, cx| this.close_thread(cx)));
         self.thread = Some(panel);
         cx.notify();
     }
@@ -1124,6 +1111,7 @@ impl Render for TwittyApp {
                 .horizontal_scrollbar(&self.deck_scroll)
                 .into_any_element()
         };
+        let backdrop = theme.overlay.alpha(BACKDROP_ALPHA);
         let overlay = if let Some((post, index)) = &self.media {
             Some(self.render_media_viewer(post, *index, window, cx))
         } else if let Some(login) = &self.login {
@@ -1139,6 +1127,7 @@ impl Render for TwittyApp {
         } else {
             None
         };
+        let has_overlay = overlay.is_some();
         let demo = self.options.session.is_none();
         let can_sign_in = self.options.account.is_some();
         v_flex()
@@ -1172,6 +1161,7 @@ impl Render for TwittyApp {
             .child(
                 h_flex()
                     .id("deck-root")
+                    .relative()
                     .track_focus(&self.focus)
                     .key_context(keys::DECK)
                     .on_action(cx.listener(|this, _: &keys::SelectNext, _, cx| this.select(1, cx)))
@@ -1224,11 +1214,29 @@ impl Render for TwittyApp {
                             .child(self.render_deck_bar(cx))
                             .child(div().flex_1().min_h_0().flex().child(body)),
                     )
-                    .children(self.thread.clone().map(|panel| {
-                        div().flex_none().h_full().child(panel).on_mouse_down_out(
-                            cx.listener(|this, _, _, cx| this.thread_clicked_outside(cx)),
-                        )
-                    })),
+                    .when_some(self.thread.clone(), |d, panel| {
+                        // A sheet over the deck's right side. Its backdrop takes
+                        // the whole click that closes it, so nothing under it
+                        // (a post, an image, a link) reacts. With an overlay
+                        // open, that overlay's backdrop darkens everything.
+                        d.when(!has_overlay, |d| {
+                            d.child(
+                                div()
+                                    .id("thread-backdrop")
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .size_full()
+                                    .occlude()
+                                    .bg(backdrop)
+                                    .on_any_mouse_down(cx.listener(|this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.close_thread(cx);
+                                    })),
+                            )
+                        })
+                        .child(div().absolute().top_0().right_0().h_full().occlude().child(panel))
+                    }),
             )
             .when_some(overlay, |d, overlay| {
                 d.child(
@@ -1240,11 +1248,7 @@ impl Render for TwittyApp {
                         .left_0()
                         .size_full()
                         .occlude()
-                        .bg(if self.media.is_some() {
-                            theme.overlay.alpha(MEDIA_BACKDROP_ALPHA)
-                        } else {
-                            theme.overlay
-                        })
+                        .bg(backdrop)
                         .flex()
                         .items_center()
                         .justify_center()
