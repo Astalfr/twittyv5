@@ -9,7 +9,7 @@ use std::{
 use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, App, ClickEvent, ClipboardItem, ElementId, Entity,
+    Animation, AnimationExt, AnyElement, App, ClickEvent, ClipboardItem, Div, ElementId, Entity,
     FontWeight, HighlightStyle, Hsla, ImageSource, Img, InteractiveText, IntoElement, ObjectFit,
     ParentElement, Pixels, SharedString, StatefulInteractiveElement, Styled, StyledImage,
     StyledText, UnderlineStyle, Window,
@@ -199,8 +199,9 @@ fn unavailable_text(reason: &UnavailableReason) -> String {
     }
 }
 
-pub(crate) fn avatar(profile: &Profile, size: f32) -> impl IntoElement + use<> {
-    let mut a = Avatar::new().name(profile.display_name.clone()).size(px(size));
+/// A round avatar, without the outline gpui-component draws around it.
+pub(crate) fn avatar(profile: &Profile, size: f32) -> Avatar {
+    let mut a = Avatar::new().name(profile.display_name.clone()).size(px(size)).border_0();
     if let Some(src) = &profile.avatar {
         a = a.src(src.url.as_str().to_owned());
     }
@@ -344,8 +345,27 @@ impl Chain {
 const ROW_TOP: f32 = 12.0;
 /// Space between the thread line and the avatar it leads into or out of.
 const LINE_GAP: f32 = 4.0;
-/// Width of the thread line.
-const LINE_W: f32 = 2.0;
+/// Width of the thread line. Even, like `AVATAR`, so the centred line sits on
+/// whole pixels; wide enough for its rounded ends to show.
+const LINE_W: f32 = 4.0;
+
+/// Which side of the avatar a thread line segment sits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineEnd {
+    Above,
+    Below,
+}
+
+/// One segment of a thread's line. Only the end facing the avatar is rounded:
+/// the other meets the next post's segment at the row edge, and rounding it
+/// would pinch the line there.
+fn thread_line(end: LineEnd, color: Hsla) -> Div {
+    let line = div().flex_none().w(px(LINE_W)).bg(color);
+    match end {
+        LineEnd::Above => line.rounded_b_full(),
+        LineEnd::Below => line.rounded_t_full(),
+    }
+}
 
 fn post_row(
     post: &Post,
@@ -455,20 +475,21 @@ fn post_row(
     // line runs from the row's top edge into the avatar and from the avatar
     // to the row's bottom edge, meeting the next post's line without a break.
     let top = if reposted_by.is_some() { 0.0 } else { ROW_TOP };
-    let line = || div().flex_none().w(px(LINE_W)).bg(theme.border);
     let avatar_col = v_flex()
         .items_center()
         .flex_none()
         .w(px(AVATAR))
         .child(div().flex_none().h(px(top)).when(chain.joined_above(), |d| {
             d.child(
-                line().debug_selector(move || format!("line-above-{key}")).h(px(top - LINE_GAP)),
+                thread_line(LineEnd::Above, theme.border)
+                    .debug_selector(move || format!("line-above-{key}"))
+                    .h(px(top - LINE_GAP)),
             )
         }))
         .child(profile_hover(key, &post.author, &rcx.hub))
         .when(chain.joined_below(), |col| {
             col.child(
-                line()
+                thread_line(LineEnd::Below, theme.border)
                     .debug_selector(move || format!("line-below-{key}"))
                     .mt(px(LINE_GAP))
                     .flex_1(),
@@ -1739,6 +1760,33 @@ mod tests {
         assert_eq!([0, 1, 2].map(|k| Chain::at(k, 3)), [Chain::First, Chain::Middle, Chain::Last]);
         assert!(!Chain::Alone.joined_above() && !Chain::Alone.joined_below());
         assert!(Chain::Middle.joined_above() && Chain::Middle.joined_below());
+    }
+
+    #[test]
+    fn avatars_have_no_border() {
+        let (post, _) = mock_post();
+        let widths = avatar(&post.author, AVATAR).style().border_widths.clone();
+        for side in [widths.top, widths.right, widths.bottom, widths.left] {
+            assert_eq!(side, Some(px(0.).into()));
+        }
+    }
+
+    #[test]
+    fn a_threads_line_is_rounded_only_where_it_meets_an_avatar() {
+        let full = Some(px(9999.).into());
+        let radii = |end| thread_line(end, Hsla::default()).style().corner_radii.clone();
+
+        let above = radii(LineEnd::Above);
+        assert_eq!(
+            (above.bottom_left, above.bottom_right),
+            (full, full),
+            "rounded into the avatar"
+        );
+        assert_eq!((above.top_left, above.top_right), (None, None), "square at the row edge");
+
+        let below = radii(LineEnd::Below);
+        assert_eq!((below.top_left, below.top_right), (full, full), "rounded out of the avatar");
+        assert_eq!((below.bottom_left, below.bottom_right), (None, None), "square at the row edge");
     }
 
     #[gpui_kit::test]
