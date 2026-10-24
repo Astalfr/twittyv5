@@ -47,7 +47,8 @@ depends on nothing else of ours.
 | `ui::app` | Root view: rail + horizontally scrolling deck, persists deck changes |
 | `ui::column` | Column view: header, `list()` + `ListState`, footer row, polling, "new posts" pill |
 | `ui::post` | Row rendering: posts, reposts, threads, media, quotes, link cards, polls, action bar |
-| `ui::player` | `VideoPlayer` view: pulls frames into its `Timeline` on every draw, frees frames that leave the screen from the sprite atlas, click to pause |
+| `ui::player` | `VideoPlayer` view: pulls frames into its `Timeline` on every draw, frees frames that leave the screen from the sprite atlas. It only draws (the container sets how, with `set_draw`, and handles clicks) |
+| `ui::gif` | GIFs playing in timeline tiles: `GifTile` keyed state (`window.use_keyed_state`, so it lives only while the tile is drawn), the hover play/pause button, the `GifAutoplay` global set from the settings |
 | `ui::hub` | `InteractionsHub` entity shared by all columns; sends actions, rolls back, emits `ActionFailed` |
 | `ui::theme`, `ui::assets` | Bundled themes (`themes/x.json`) and the embedded Lucide icon subset |
 
@@ -95,6 +96,7 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - Post rows don't know about panels or dialogs: they emit `hub::Navigate` (`Thread`, `Reply`, `Profile`, `UserColumn`, `Media`) through the hub, and `TwittyApp` opens the thread panel, the compose dialog, the profile sheet, a User column or the image viewer. The thread panel and the profile sheet share one side-sheet slot (`Sheet` in `ui/app.rs`).
 - Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`. Saves are chained (`TwittyApp::persist`), so quick edits never interleave their writes.
 - New-post alerts: a column checks `state::alerts::announce` after each load. The sound goes through the `sound::Sound` global (`SystemSound` from `main.rs`; no global in tests means silence, `RecordingSound` records). System notifications use GPUI's `show_system_notification`, which needs the app identity `main.rs` sets first (`cx.set_app_identity`).
+- Inline GIFs: `ui::post::media_grid` adds `ui::gif::inline_gif` over each GIF tile, keyed by the post and media index inside `RowCtx::scope` (one per list: a column, the thread panel, the profile sheet), so the same post in two columns plays separately. Whether it plays is `state::playback::gif_plays` (the viewer's choice, else the autoplay setting).
 - Video: the image viewer creates a `VideoPlayer` when it shows a GIF (`TwittyApp::sync_media_player`) and drops it when it steps away or closes; dropping it hangs up the channel, which stops the decoder thread. Without a `video::Video` global (tests, by default) the player fails at once and the viewer keeps the poster and "Play on x.com"; `FakeVideo` stands in for tests.
 - Credentials (`twitty::account`): the sign-in dialog stores the session in Windows Credential Manager (`keyring`, entry `Twitty` / `x-session`, a versioned JSON payload). `main.rs` gives the app an `AccountServices` (a `Connector` that turns `Credentials` into an `Arc<dyn Backend>`, plus the `CredentialStore`), so the UI never sees `twitty-x`. Startup order and sign-out rules: "Signing in" in [x-api.md](x-api.md).
 - Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; it holds the theme and the polling and animations switches.

@@ -10,6 +10,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::state::playback::Autoplay;
+
 /// Current version of the settings file.
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -27,11 +29,21 @@ pub struct Settings {
     /// rest (GPUI's reduce motion).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animations: Option<bool>,
+    /// Whether GIFs in timelines play as soon as they are on screen (default
+    /// off: they play when clicked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gif_autoplay: Option<bool>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { schema_version: SCHEMA_VERSION, theme: None, polling: None, animations: None }
+        Self {
+            schema_version: SCHEMA_VERSION,
+            theme: None,
+            polling: None,
+            animations: None,
+            gif_autoplay: None,
+        }
     }
 }
 
@@ -89,6 +101,10 @@ impl Settings {
         self.animations.unwrap_or(true)
     }
 
+    pub fn gif_autoplay(&self) -> Autoplay {
+        if self.gif_autoplay.unwrap_or(false) { Autoplay::On } else { Autoplay::Off }
+    }
+
     /// The saved theme if it is one of `known`, else the first of `known`.
     pub fn theme_or_default<'a>(&self, known: &[&'a str]) -> Option<&'a str> {
         let saved = self.theme.as_deref();
@@ -115,6 +131,7 @@ mod tests {
         assert_eq!(s.theme_or_default(&KNOWN), Some("Dim"));
         assert!(s.polling_enabled(), "v1 files predate the setting: polling on");
         assert!(s.animations_enabled(), "and animations on");
+        assert_eq!(s.gif_autoplay(), Autoplay::Off, "and GIFs wait for a click");
     }
 
     #[test]
@@ -140,6 +157,7 @@ mod tests {
         let s = Settings {
             theme: Some("Light".into()),
             animations: Some(false),
+            gif_autoplay: Some(true),
             ..Settings::default()
         };
         s.save(&path).unwrap();

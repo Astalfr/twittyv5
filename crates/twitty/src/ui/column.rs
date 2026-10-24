@@ -300,7 +300,12 @@ impl ColumnView {
     }
 
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let rcx = RowCtx { ix, column_width: self.settings.width.px(), hub: self.hub.clone() };
+        let rcx = RowCtx {
+            ix,
+            column_width: self.settings.width.px(),
+            hub: self.hub.clone(),
+            scope: ("column", self.id.0 as usize).into(),
+        };
         let row = match self.model.items().get(ix) {
             Some(item) if self.active && self.model.selected() == Some(ix) => div()
                 .bg(cx.theme().list_active)

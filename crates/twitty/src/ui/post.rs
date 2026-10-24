@@ -1,6 +1,10 @@
 //! Rendering of feed rows: posts, reposts, threads and their embeds.
 
-use std::sync::Arc;
+use std::{
+    hash::{DefaultHasher, Hash as _, Hasher as _},
+    rc::Rc,
+    sync::Arc,
+};
 
 use chrono::Utc;
 use gpui_kit::assets::IconName;
@@ -28,6 +32,7 @@ use crate::{
     format::{compact_count, exact_count, exact_time, relative_time},
     state::{interactions::Toggle, links, media_layout, motion},
     ui::{
+        gif::inline_gif,
         hub::{InteractionsHub, Navigate},
         remote_image,
     },
@@ -51,6 +56,10 @@ pub struct RowCtx {
     pub ix: usize,
     pub column_width: f32,
     pub hub: Entity<InteractionsHub>,
+    /// Unique to the list the row is in (a column, the thread panel, …), so
+    /// state kept per row (a playing GIF) isn't shared with the same post
+    /// shown in another list.
+    pub scope: ElementId,
 }
 
 /// Renders one feed row.
@@ -374,8 +383,8 @@ fn post_row(
             content.child(rich_text(("body", key), &post.body, &rcx.hub, theme.link, window, cx));
     }
     if !post.media.is_empty() {
-        content =
-            content.child(media_grid(("media", key), &post.media, width, post, &rcx.hub, &theme));
+        let grid = media_grid(("media", key), &post.media, width, post, rcx, &theme, window, cx);
+        content = content.child(grid);
     }
     if let Some(embed) = &post.embed {
         content = content.child(render_embed(("embed", key), embed, width, &rcx.hub, window, cx));
@@ -536,14 +545,18 @@ pub fn span_url(kind: &SpanKind) -> String {
     }
 }
 
+#[expect(clippy::too_many_arguments, reason = "the row's pieces, passed down as is")]
 fn media_grid(
     id: (&'static str, usize),
     media: &[Media],
     width: f32,
     post: &Post,
-    hub: &Entity<InteractionsHub>,
+    rcx: &RowCtx,
     theme: &gpui_kit::component::Theme,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
+    let hub = &rcx.hub;
     let post = Arc::new(post.clone());
     // Tiles are positioned inside the 1px border, so lay them out on the inner width.
     let inner = (width - 2.0 * BORDER).max(0.0);
@@ -568,6 +581,18 @@ fn media_grid(
                 Media::Gif { .. } => Some(video_badge("GIF", None)),
                 Media::Image { .. } => None,
             };
+            let corners = grid.corners(tile, inner);
+            let gif = match m {
+                Media::Gif { stream: Some(url), .. } => {
+                    let (w, h) = (tile.w, tile.h);
+                    let draw = Rc::new(move |src| rounded_img(src, w, h, corners));
+                    let key = ElementId::NamedInteger("gif".into(), gif_key(&post, index));
+                    Some(window.with_element_namespace(rcx.scope.clone(), |window| {
+                        inline_gif(key, url.as_str(), draw, window, cx)
+                    }))
+                }
+                _ => None,
+            };
             div()
                 .id(("tile", index))
                 .absolute()
@@ -585,10 +610,18 @@ fn media_grid(
                     remote_image::source(m.preview().url.as_str(), tile.w, tile.h),
                     tile.w,
                     tile.h,
-                    grid.corners(tile, inner),
+                    corners,
                 ))
+                .children(gif)
                 .children(overlay)
         }))
+}
+
+/// Tells a post's GIF tiles apart in a list (without reading the opaque id).
+fn gif_key(post: &Post, index: usize) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    (&post.id, index).hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Outer radius of media boxes and cards.
@@ -1057,7 +1090,8 @@ mod tests {
             window: &mut Window,
             cx: &mut gpui_kit::Context<Self>,
         ) -> impl IntoElement {
-            let rcx = RowCtx { ix: 0, column_width: 310., hub: self.hub.clone() };
+            let rcx =
+                RowCtx { ix: 0, column_width: 310., hub: self.hub.clone(), scope: "test".into() };
             div().w(px(310.)).child(render_item(&self.item, &rcx, window, cx))
         }
     }
@@ -1136,6 +1170,109 @@ mod tests {
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("count-tooltip").is_some(), "the full count shows on hover");
+    }
+
+    /// A mock post whose only media is a GIF, rendered with `FakeVideo` and
+    /// the given autoplay setting. Counts the hub's navigation requests.
+    fn gif_post(
+        autoplay: crate::state::playback::Autoplay,
+        cx: &mut gpui_kit::TestAppContext,
+    ) -> (
+        Entity<OnePost>,
+        &mut gpui_kit::VisualTestContext,
+        Arc<crate::video::FakeVideo>,
+        std::rc::Rc<std::cell::Cell<usize>>,
+    ) {
+        let video = cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(crate::ui::gif::GifAutoplay(autoplay));
+            crate::video::FakeVideo::install(vec![std::time::Duration::ZERO], cx)
+        });
+        let (mut post, backend) = mock_post();
+        let poster = twitty_model::ImageRef {
+            url: "https://pbs.twimg.com/tweet_video_thumb/a.jpg".parse().unwrap(),
+            size: Some((480, 270)),
+        };
+        let stream = Some("https://video.twimg.com/tweet_video/a.mp4".parse().unwrap());
+        post.media = vec![Media::Gif { poster, stream, alt: None }];
+        post.embed = None;
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let navigations = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = std::rc::Rc::clone(&navigations);
+        cx.update(|cx| {
+            cx.subscribe(&hub, move |_, _: &Navigate, _| count.set(count.get() + 1)).detach();
+        });
+        let (view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        redraw(cx);
+        (view, cx, video, navigations)
+    }
+
+    fn redraw(cx: &mut gpui_kit::VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    fn click(name: &'static str, cx: &mut gpui_kit::VisualTestContext) {
+        let at = cx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn")).center();
+        cx.simulate_click(at, gpui_kit::Modifiers::default());
+        redraw(cx);
+    }
+
+    #[gpui_kit::test]
+    fn a_gif_waits_for_its_button_and_the_button_never_opens_the_viewer(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use crate::state::playback::Autoplay;
+        let (_view, cx, video, navigations) = gif_post(Autoplay::Off, cx);
+        assert!(video.opened().is_empty(), "off by default: nothing downloads");
+        click("gif-play", cx);
+        assert_eq!(video.opened(), vec!["https://video.twimg.com/tweet_video/a.mp4"]);
+        assert!(cx.debug_bounds("gif-pause").is_some(), "now it offers to pause");
+        click("gif-pause", cx);
+        assert!(cx.debug_bounds("gif-play").is_some());
+        click("gif-play", cx);
+        assert_eq!(video.opened().len(), 1, "resumed, not restarted");
+        assert_eq!(navigations.get(), 0, "the button never opened the viewer");
+    }
+
+    #[gpui_kit::test]
+    fn with_autoplay_a_gif_on_screen_plays_on_its_own(cx: &mut gpui_kit::TestAppContext) {
+        use crate::state::playback::Autoplay;
+        let (_view, cx, video, _) = gif_post(Autoplay::On, cx);
+        assert_eq!(video.opened().len(), 1);
+        assert!(cx.debug_bounds("gif-pause").is_some());
+        click("gif-pause", cx);
+        assert!(cx.debug_bounds("gif-play").is_some(), "the viewer's pause beats autoplay");
+    }
+
+    #[gpui_kit::test]
+    fn the_rest_of_a_gif_tile_still_opens_the_viewer(cx: &mut gpui_kit::TestAppContext) {
+        use crate::state::playback::Autoplay;
+        let (_view, cx, _, navigations) = gif_post(Autoplay::On, cx);
+        let button = cx.debug_bounds("gif-pause").expect("the button is drawn");
+        // Well inside the tile, left of the centred button.
+        let beside = gpui_kit::point(button.left() - px(60.), button.center().y);
+        cx.simulate_click(beside, gpui_kit::Modifiers::default());
+        redraw(cx);
+        assert_eq!(navigations.get(), 1);
+    }
+
+    #[gpui_kit::test]
+    fn a_gif_no_longer_drawn_stops_playing(cx: &mut gpui_kit::TestAppContext) {
+        use crate::state::playback::Autoplay;
+        let (view, cx, video, _) = gif_post(Autoplay::On, cx);
+        assert_eq!(video.listening(), 1);
+        // As when its row scrolls out of the list.
+        view.update(cx, |v, cx| {
+            if let FeedItem::Post(post) = &mut v.item {
+                post.media.clear();
+            }
+            cx.notify();
+        });
+        redraw(cx);
+        redraw(cx);
+        assert_eq!(video.listening(), 0, "its player and decoder are gone");
     }
 
     /// A box like a media tile, holding one rounded image.

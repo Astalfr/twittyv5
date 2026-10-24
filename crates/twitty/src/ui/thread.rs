@@ -119,7 +119,12 @@ impl Render for ThreadPanel {
                 let hub = self.hub.clone();
                 v_flex()
                     .children(rows.iter().enumerate().map(|(ix, item)| {
-                        let rcx = RowCtx { ix, column_width: PANEL_WIDTH, hub: hub.clone() };
+                        let rcx = RowCtx {
+                            ix,
+                            column_width: PANEL_WIDTH,
+                            hub: hub.clone(),
+                            scope: "thread".into(),
+                        };
                         render_item(item, &rcx, window, cx)
                     }))
                     .when(view.more_replies.is_some(), |d| {

@@ -4,6 +4,11 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Timeline GIFs play on demand, autoplay is opt-in
+- **Decision**: GIF tiles in rows play in place. By default they wait for the play/pause button shown on hover; a setting ("Play GIFs automatically", off by default) starts every GIF whose row is drawn. The button's choice beats the setting for that tile. Each tile's state is GPUI keyed state, so a row that leaves the list (scrolled away) drops its player and stops its decoder; coming back starts it over, and forgets a pause.
+- **Why**: Each playing GIF is a download plus a decoder thread and a texture per frame. Off by default keeps a scrolling deck cheap and quiet, and the button covers the occasional GIF. Keyed state ties the cost to what is on screen with no bookkeeping of our own.
+- **Consequences**: The button sits over the middle of the tile and stops its click, so it never opens the viewer; the rest of the tile still does. `RowCtx` gained a `scope` per list so the same post in two columns doesn't share a player. A GIF opened in the viewer decodes a second time there.
+
 ### 2026-10-24: Videos decoded with Media Foundation, in their own crate
 - **Decision**: GIFs (and later videos) are decoded with Windows Media Foundation through the `windows` crate (0.62, the version GPUI already builds). An `IMFSourceReader` opens the MP4 URL itself (progressive download), converts to 32-bit RGB and hands frames to the app, which shows each one as a `RenderImage` in an `img`. The COM code lives in a new crate, `twitty-media`, whose own lint table denies `unsafe_code` and allows it only in the `mf` module (and its fixture generator), with a `// SAFETY:` comment per block.
 - **Why**: GPUI's only video element (`surface`) is macOS-only, and its animated `img` only decodes GIF/WebP files, while X's "GIFs" are H.264 MP4s. Media Foundation ships with Windows (HTTPS, AAC audio for later, and hardware decoding once a D3D device is handed to the reader; it decodes in software today) where ffmpeg would mean bundling DLLs and `openh264` would mean a separate demuxer. The workspace `forbid(unsafe_code)` can't be relaxed per module, so the unsafe code gets its own crate and `twitty`, `twitty-model` and `twitty-x` stay forbid-clean.

@@ -7,6 +7,7 @@ pub mod assets;
 pub mod column;
 pub mod column_settings;
 pub mod compose;
+pub mod gif;
 pub mod hub;
 pub mod keys;
 pub mod login;

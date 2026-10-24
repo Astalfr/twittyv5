@@ -162,13 +162,20 @@ pub struct FakeVideo {
     /// Sent after the frames instead of the end, when set.
     pub failure: Option<String>,
     pub opened: std::sync::Mutex<Vec<String>>,
+    /// Each playback's sender, to tell which views still listen.
+    senders: std::sync::Mutex<Vec<SyncSender<VideoEvent>>>,
 }
 
 #[cfg(test)]
 impl FakeVideo {
     /// Installs a source playing `frames` and returns it.
     pub fn install(frames: Vec<Duration>, cx: &mut App) -> Arc<Self> {
-        let fake = Arc::new(Self { frames, failure: None, opened: Default::default() });
+        let fake = Arc::new(Self {
+            frames,
+            failure: None,
+            opened: Default::default(),
+            senders: Default::default(),
+        });
         cx.set_global(Video(fake.clone()));
         fake
     }
@@ -180,6 +187,7 @@ impl FakeVideo {
             frames: Vec::new(),
             failure: Some("not found".into()),
             opened: Default::default(),
+            senders: Default::default(),
         });
         cx.set_global(Video(fake.clone()));
         fake
@@ -187,6 +195,14 @@ impl FakeVideo {
 
     pub fn opened(&self) -> Vec<String> {
         self.opened.lock().map(|v| v.clone()).unwrap_or_default()
+    }
+
+    /// How many playbacks a view still holds (the others hung up, as a
+    /// decoder thread would notice).
+    pub fn listening(&self) -> usize {
+        let Ok(senders) = self.senders.lock() else { return 0 };
+        // A spare `Ended` is harmless to a playback that already ended.
+        senders.iter().filter(|tx| tx.try_send(VideoEvent::Ended).is_ok()).count()
     }
 }
 
@@ -196,7 +212,8 @@ impl VideoSource for FakeVideo {
         if let Ok(mut opened) = self.opened.lock() {
             opened.push(url.to_owned());
         }
-        let (tx, rx) = sync_channel(self.frames.len() + 1);
+        // Room for the probes of `listening` too.
+        let (tx, rx) = sync_channel(self.frames.len() + 64);
         for &time in &self.frames {
             let image = Arc::new(RenderImage::new(vec![Frame::new(RgbaImage::new(2, 2))]));
             let _ = tx.send(VideoEvent::Frame { time, image });
@@ -205,6 +222,9 @@ impl VideoSource for FakeVideo {
             Some(why) => VideoEvent::Failed(why.clone()),
             None => VideoEvent::Ended,
         });
+        if let Ok(mut senders) = self.senders.lock() {
+            senders.push(tx);
+        }
         rx
     }
 }

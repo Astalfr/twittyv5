@@ -5,8 +5,12 @@
 //! sprite atlas: frames taken off screen (and whatever is left when the view
 //! goes) are dropped from the atlas, or every frame ever shown would stay
 //! there.
+//!
+//! The player only draws pictures; its container handles clicks (the media
+//! viewer pauses on a click, a timeline tile has a play/pause button).
 
 use std::{
+    rc::Rc,
     sync::{
         Arc,
         mpsc::{Receiver, TryRecvError},
@@ -15,8 +19,8 @@ use std::{
 };
 
 use gpui_kit::{
-    Context, ImageSource, IntoElement, ObjectFit, ParentElement, Render, RenderImage, Styled,
-    StyledImage, Subscription, Window, assets::IconName, component::*, div, img, prelude::*, px,
+    Context, Div, ImageSource, Img, IntoElement, ObjectFit, ParentElement, Render, RenderImage,
+    Styled, StyledImage, Subscription, Window, assets::IconName, component::*, div, img, px,
 };
 
 use crate::{
@@ -24,12 +28,16 @@ use crate::{
     video::{self, Repeat, VideoEvent},
 };
 
-/// Plays one video, filling its box; a click pauses or resumes it.
+/// How a frame is drawn in the player's box.
+pub type DrawFrame = Rc<dyn Fn(ImageSource) -> Img>;
+
+/// Plays one video in its box.
 pub struct VideoPlayer {
     /// `None` once the decoder is done (or there was none).
     events: Option<Receiver<VideoEvent>>,
     timeline: Timeline<Arc<RenderImage>>,
     failed: bool,
+    draw: DrawFrame,
     _release: Subscription,
 }
 
@@ -54,7 +62,19 @@ impl VideoPlayer {
                 cx.drop_image(image, Some(window));
             }
         });
-        Self { failed: events.is_none(), events, timeline: Timeline::default(), _release: release }
+        Self {
+            failed: events.is_none(),
+            events,
+            timeline: Timeline::default(),
+            draw: Rc::new(|src| img(src).size_full().object_fit(ObjectFit::Contain)),
+            _release: release,
+        }
+    }
+
+    /// Sets how frames are drawn (by default fitted inside the box). The
+    /// container calls it as it renders, as its box changes.
+    pub fn set_draw(&mut self, draw: DrawFrame) {
+        self.draw = draw;
     }
 
     /// Whether the video can't be played (the reason is in the log).
@@ -75,6 +95,13 @@ impl VideoPlayer {
     pub fn toggle(&mut self, cx: &mut Context<Self>) {
         self.timeline.toggle(Instant::now());
         cx.notify();
+    }
+
+    /// Plays or pauses, whichever it isn't doing yet.
+    pub fn set_playing(&mut self, playing: bool, cx: &mut Context<Self>) {
+        if (self.timeline.state() == State::Playing) != playing {
+            self.toggle(cx);
+        }
     }
 
     /// Takes what the decoder sent, advances the clock and frees the frames
@@ -118,35 +145,26 @@ impl VideoPlayer {
 impl Render for VideoPlayer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.pump(window, cx);
-        let paused = self.timeline.state() == State::Paused;
-        div()
-            .id("video-player")
-            .relative()
-            .size_full()
-            .cursor_pointer()
-            .on_click(cx.listener(|this, _, _, cx| {
-                // Not a click on the viewer's backdrop.
-                cx.stop_propagation();
-                this.toggle(cx);
-            }))
-            .children(self.timeline.current().map(|frame| {
-                img(ImageSource::Render(Arc::clone(frame)))
-                    .size_full()
-                    .object_fit(ObjectFit::Contain)
-            }))
-            .when(paused, |d| {
-                d.child(
-                    div().absolute().inset_0().flex().items_center().justify_center().child(
-                        div()
-                            .p_3()
-                            .rounded_full()
-                            .bg(gpui_kit::black().opacity(0.6))
-                            .text_color(gpui_kit::white())
-                            .child(Icon::new(IconName::Play).size(px(32.))),
-                    ),
-                )
-            })
+        div().size_full().children(
+            self.timeline.current().map(|f| (self.draw)(ImageSource::Render(Arc::clone(f)))),
+        )
     }
+}
+
+/// A round play or pause sign of `size` drawn over media: "play" when the
+/// media is still, "pause" while it plays. Over pictures, so it uses fixed
+/// light-on-dark colours like the media badges, not theme colours.
+pub fn play_pause_sign(playing: bool, size: f32) -> Div {
+    let icon = if playing { IconName::Pause } else { IconName::Play };
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(size))
+        .rounded_full()
+        .bg(gpui_kit::black().opacity(0.6))
+        .text_color(gpui_kit::white())
+        .child(Icon::new(icon).size(px(size / 2.)))
 }
 
 #[cfg(test)]
@@ -212,14 +230,17 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn a_click_pauses_and_resumes(cx: &mut TestAppContext) {
+    fn set_playing_only_changes_what_differs(cx: &mut TestAppContext) {
         let (view, cx) = player(vec![Duration::ZERO], cx);
-        let center = cx.debug_bounds("video-player").map(|b| b.center());
-        let at = center.unwrap_or_else(|| gpui_kit::point(px(10.), px(10.)));
-        cx.simulate_click(at, gpui_kit::Modifiers::default());
-        assert_eq!(view.read_with(cx, |p, _| p.state()), State::Paused);
-        cx.simulate_click(at, gpui_kit::Modifiers::default());
-        assert_eq!(view.read_with(cx, |p, _| p.state()), State::Playing);
+        let state = |cx: &mut VisualTestContext| view.read_with(cx, |p, _| p.state());
+        view.update(cx, |p, cx| p.set_playing(true, cx));
+        assert_eq!(state(cx), State::Playing, "already playing");
+        view.update(cx, |p, cx| p.set_playing(false, cx));
+        assert_eq!(state(cx), State::Paused);
+        view.update(cx, |p, cx| p.set_playing(false, cx));
+        assert_eq!(state(cx), State::Paused, "already paused");
+        view.update(cx, |p, cx| p.set_playing(true, cx));
+        assert_eq!(state(cx), State::Playing);
     }
 
     #[gpui_kit::test]

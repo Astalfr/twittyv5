@@ -20,7 +20,9 @@ use crate::{
         deck::{ColumnConfig, ColumnId, ColumnSettings, DeckFile},
         interactions::Toggle,
         media_layout::{self, viewer},
-        motion, poll,
+        motion,
+        playback::{Autoplay, State},
+        poll,
         settings::Settings,
     },
     ui::{
@@ -28,10 +30,11 @@ use crate::{
         column::{ColumnEvent, ColumnView, source_icon},
         column_settings::{ColumnSettingsEvent, ColumnSettingsView},
         compose::{ComposeEvent, ComposeView},
+        gif::GifAutoplay,
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
         login::{LoginEvent, LoginView},
-        player::VideoPlayer,
+        player::{VideoPlayer, play_pause_sign},
         post::span_url,
         profile::{CloseProfile, ProfilePanel},
         theme,
@@ -228,6 +231,7 @@ impl TwittyApp {
         if !this.settings.animations_enabled() {
             cx.set_reduce_motion(true);
         }
+        cx.set_global(GifAutoplay(this.settings.gif_autoplay()));
         this.build_hub(window, cx);
         this.build_columns(cx);
         if this.options.session.is_some() {
@@ -469,6 +473,7 @@ impl TwittyApp {
         // The GIF playing here, unless it couldn't (the leaving copy shows the
         // poster only).
         let player = self.media_player.as_ref().filter(|p| interactive && !p.read(cx).failed());
+        let paused = player.is_some_and(|p| p.read(cx).state() == State::Paused);
         let playable = !matches!(media, twitty_model::Media::Image { .. }) && player.is_none();
         let url = post.url.to_string();
         let viewport = window.viewport_size();
@@ -578,13 +583,33 @@ impl TwittyApp {
                                 // Over the poster, at its size (the whole box
                                 // until the poster has loaded).
                                 let (w, h) = drawn.unwrap_or((box_w, box_h));
+                                let toggled = player.clone();
                                 div()
+                                    .id("media-player")
+                                    .debug_selector(|| "media-player".into())
                                     .absolute()
                                     .left(px((box_w - w) / 2.))
                                     .top(px((box_h - h) / 2.))
                                     .w(px(w))
                                     .h(px(h))
+                                    .cursor_pointer()
+                                    .on_click(move |_, _, cx| {
+                                        // A click pauses or resumes; not the backdrop's.
+                                        cx.stop_propagation();
+                                        toggled.update(cx, |p, cx| p.toggle(cx));
+                                    })
                                     .child(player.clone())
+                                    .when(paused, |d| {
+                                        d.child(
+                                            div()
+                                                .absolute()
+                                                .inset_0()
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .child(play_pause_sign(false, 64.)),
+                                        )
+                                    })
                             })),
                     )
                     .when(count > 1, |d| d.child(nav("media-next", IconName::ChevronRight, 1))),
@@ -1099,6 +1124,13 @@ impl TwittyApp {
         self.save_settings(cx);
     }
 
+    /// Whether timeline GIFs start on their own when on screen.
+    pub fn set_gif_autoplay(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.gif_autoplay = Some(enabled);
+        cx.set_global(GifAutoplay(self.settings.gif_autoplay()));
+        self.save_settings(cx);
+    }
+
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.options.settings_path.clone() {
             let settings = self.settings.clone();
@@ -1166,6 +1198,17 @@ impl TwittyApp {
                         let weak = weak.clone();
                         move |checked, _, cx| {
                             weak.update(cx, |this, cx| this.set_polling(*checked, cx)).ok();
+                        }
+                    }),
+            )
+            .child(
+                Checkbox::new("gif-autoplay")
+                    .checked(self.settings.gif_autoplay() == Autoplay::On)
+                    .label("Play GIFs automatically when they are on screen")
+                    .on_click({
+                        let weak = weak.clone();
+                        move |checked, _, cx| {
+                            weak.update(cx, |this, cx| this.set_gif_autoplay(*checked, cx)).ok();
                         }
                     }),
             )
@@ -2571,6 +2614,13 @@ mod tests {
         assert!(player.read_with(cx, |p, _| p.current().is_some()), "a frame is drawn");
         assert_eq!(video.opened(), vec![stream.to_string()]);
 
+        let at = cx.debug_bounds("media-player").expect("the GIF is drawn").center();
+        cx.simulate_click(at, Modifiers::default());
+        assert_eq!(player.read_with(cx, |p, _| p.state()), State::Paused, "a click pauses");
+        cx.simulate_click(at, Modifiers::default());
+        assert_eq!(player.read_with(cx, |p, _| p.state()), State::Playing, "and resumes");
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_some()), "not the backdrop");
+
         cx.simulate_keystrokes("right");
         assert!(app.read_with(cx, |app, _| app.media_player().is_none()), "an image: no player");
         cx.simulate_keystrokes("left");
@@ -2925,6 +2975,9 @@ mod tests {
         app.update_in(cx, |app, window, cx| app.set_theme("Light", window, cx));
         app.update(cx, |app, cx| app.set_polling(false, cx));
         app.update(cx, |app, cx| app.set_animations(false, cx));
+        assert_eq!(cx.update(|_, cx| crate::ui::gif::autoplay(cx)), Autoplay::Off, "default");
+        app.update(cx, |app, cx| app.set_gif_autoplay(true, cx));
+        assert_eq!(cx.update(|_, cx| crate::ui::gif::autoplay(cx)), Autoplay::On, "applies live");
         cx.run_until_parked();
         assert_eq!(app.read_with(cx, |app, _| app.theme_name()), "Light");
         let polling = app.read_with(cx, |app, cx| {
@@ -2933,8 +2986,8 @@ mod tests {
         assert!(polling.iter().all(Option::is_none));
         let saved = Settings::load(&path).unwrap();
         assert_eq!(
-            (saved.theme.as_deref(), saved.polling, saved.animations),
-            (Some("Light"), Some(false), Some(false))
+            (saved.theme.as_deref(), saved.polling, saved.animations, saved.gif_autoplay),
+            (Some("Light"), Some(false), Some(false), Some(true))
         );
         assert!(cx.update(|_, cx| cx.reduce_motion()), "animations off is GPUI's reduce motion");
         cx.simulate_keystrokes("escape");

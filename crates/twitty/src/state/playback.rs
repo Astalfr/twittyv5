@@ -11,6 +11,36 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Whether GIFs in timelines start on their own when they are on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Autoplay {
+    On,
+    Off,
+}
+
+/// What the viewer last asked an inline GIF to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GifChoice {
+    Play,
+    Pause,
+}
+
+/// Whether an inline GIF plays: the viewer's choice if they made one, else
+/// the autoplay setting.
+pub fn gif_plays(autoplay: Autoplay, choice: Option<GifChoice>) -> bool {
+    match choice {
+        Some(GifChoice::Play) => true,
+        Some(GifChoice::Pause) => false,
+        None => autoplay == Autoplay::On,
+    }
+}
+
+/// The choice a click on an inline GIF's play/pause button makes: the
+/// opposite of what it does now.
+pub fn gif_toggled(autoplay: Autoplay, choice: Option<GifChoice>) -> GifChoice {
+    if gif_plays(autoplay, choice) { GifChoice::Pause } else { GifChoice::Play }
+}
+
 /// How many decoded frames the view holds beyond the one on screen. The
 /// decoder's own channel adds a few more; together they bound memory.
 pub const QUEUE: usize = 4;
@@ -265,6 +295,26 @@ mod tests {
         assert_eq!(t.current(), Some(&1));
         t.tick(start + ms(100));
         assert_eq!(t.current(), Some(&2));
+    }
+
+    #[test]
+    fn inline_gifs_follow_the_setting_until_the_viewer_chooses() {
+        use Autoplay::{Off, On};
+        assert!(!gif_plays(Off, None), "off by default: wait for a click");
+        assert!(gif_plays(On, None));
+        for autoplay in [On, Off] {
+            assert!(gif_plays(autoplay, Some(GifChoice::Play)));
+            assert!(!gif_plays(autoplay, Some(GifChoice::Pause)));
+        }
+    }
+
+    #[test]
+    fn the_button_does_the_opposite_of_what_the_gif_does() {
+        use Autoplay::{Off, On};
+        assert_eq!(gif_toggled(Off, None), GifChoice::Play);
+        assert_eq!(gif_toggled(On, None), GifChoice::Pause);
+        assert_eq!(gif_toggled(Off, Some(GifChoice::Play)), GifChoice::Pause);
+        assert_eq!(gif_toggled(On, Some(GifChoice::Pause)), GifChoice::Play);
     }
 
     #[test]

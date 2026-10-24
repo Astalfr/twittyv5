@@ -24,6 +24,7 @@ gpui_kit::assets::icon_assets!(
         Ellipsis,
         BadgeCheck,
         Play,
+        Pause,
         X,
         ArrowUp,
         RefreshCw,

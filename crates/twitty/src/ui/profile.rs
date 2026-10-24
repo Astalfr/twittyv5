@@ -248,7 +248,12 @@ impl ProfilePanel {
             Row::Tabs => self.render_tabs(cx).into_any_element(),
             Row::Item(i) => match self.tweets.items().get(i) {
                 Some(item) => {
-                    let rcx = RowCtx { ix: i, column_width: PANEL_WIDTH, hub: self.hub.clone() };
+                    let rcx = RowCtx {
+                        ix: i,
+                        column_width: PANEL_WIDTH,
+                        hub: self.hub.clone(),
+                        scope: "profile".into(),
+                    };
                     render_item(item, &rcx, window, cx)
                 }
                 None => div().into_any_element(),
