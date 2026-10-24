@@ -345,6 +345,12 @@ impl ColumnView {
         cx.notify();
     }
 
+    /// Drops the keyboard selection.
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.model.clear_selection();
+        cx.notify();
+    }
+
     fn render_footer(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let body: AnyElement = match self.model.status() {

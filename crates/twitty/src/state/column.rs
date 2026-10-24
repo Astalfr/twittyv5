@@ -92,6 +92,11 @@ impl ColumnModel {
         self.selected
     }
 
+    /// Drops the selection; the next move selects the first row again.
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+    }
+
     /// The first post of the selected row (a thread's first post, a
     /// notification's target).
     pub fn selected_post(&self) -> Option<&twitty_model::Post> {
@@ -391,6 +396,18 @@ mod tests {
         assert_eq!(m.selected_post().map(|p| p.id.clone()), selected, "same post");
         load(&mut m, &backend, LoadKind::Refresh);
         assert_eq!(m.selected(), None);
+    }
+
+    #[test]
+    fn clearing_the_selection_starts_again_from_the_top() {
+        let backend = MockBackend::new();
+        let mut m = ColumnModel::new(home());
+        load(&mut m, &backend, LoadKind::Refresh);
+        m.select(1);
+        m.select(1);
+        m.clear_selection();
+        assert_eq!(m.selected(), None);
+        assert_eq!(m.select(1), Some(0));
     }
 
     #[test]

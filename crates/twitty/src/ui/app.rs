@@ -483,8 +483,21 @@ impl TwittyApp {
             cx.notify();
             return;
         }
+        let Some(column) = self.active_view() else {
+            return;
+        };
+        // The first arrow press only selects the first post.
+        if column.read(cx).model().selected().is_none() {
+            column.update(cx, |c, cx| c.move_selection(0, cx));
+            return;
+        }
         let target = self.active_column.saturating_add_signed(delta);
         self.set_active_column(target, cx);
+        if let Some(column) = self.active_view()
+            && column.read(cx).model().selected().is_none()
+        {
+            column.update(cx, |c, cx| c.move_selection(0, cx));
+        }
     }
 
     fn selected_post(&self, cx: &mut Context<Self>) -> Option<Arc<twitty_model::Post>> {
@@ -508,10 +521,20 @@ impl TwittyApp {
             self.leave(LeavingOverlay::Media(post, index), cx);
         } else if self.has_dialog() {
             self.close_overlays(cx);
-        } else {
+        } else if self.sheet.is_some() {
             self.close_sheet(cx);
+        } else {
+            self.reset_keyboard(cx);
         }
         cx.notify();
+    }
+
+    /// Back to the launch state: no post selected, the first column active.
+    fn reset_keyboard(&mut self, cx: &mut Context<Self>) {
+        for (_, column) in &self.columns {
+            column.update(cx, |c, cx| c.clear_selection(cx));
+        }
+        self.set_active_column(0, cx);
     }
 
     fn close_sheet(&mut self, cx: &mut Context<Self>) {
@@ -3006,14 +3029,46 @@ mod tests {
     #[gpui_kit::test]
     fn j_k_and_arrows_move_the_selection_and_column(cx: &mut TestAppContext) {
         let (app, cx) = keyboard_app(cx);
+        assert_eq!(selected(&app, cx), None, "nothing selected at launch");
+        cx.simulate_keystrokes("down");
+        assert_eq!(selected(&app, cx), Some(0), "the first press selects the first post");
+        cx.simulate_keystrokes("up");
+        assert_eq!(selected(&app, cx), Some(0));
         cx.simulate_keystrokes("j j j k");
-        assert_eq!(selected(&app, cx), Some(1));
+        assert_eq!(selected(&app, cx), Some(2));
         cx.simulate_keystrokes("right");
         assert_eq!(app.read_with(cx, |app, _| app.active_column()), 1);
+        assert_eq!(selected(&app, cx), Some(0), "the next column starts on its first post");
         cx.simulate_keystrokes("j");
-        assert_eq!(selected(&app, cx), Some(0));
+        assert_eq!(selected(&app, cx), Some(1));
+        cx.simulate_keystrokes("left");
+        assert_eq!(selected(&app, cx), Some(2), "a column keeps its selection");
         cx.simulate_keystrokes("left left left");
         assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "clamped");
+    }
+
+    #[gpui_kit::test]
+    fn escape_resets_keyboard_navigation(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        cx.simulate_keystrokes("down down right down escape");
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0);
+        assert_eq!(selected(&app, cx), None);
+        let second = app.read_with(cx, |app, _| app.columns[1].1.clone());
+        assert_eq!(second.read_with(cx, |c, _| c.model().selected()), None);
+        cx.simulate_keystrokes("right");
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "like at launch");
+        assert_eq!(selected(&app, cx), Some(0));
+    }
+
+    #[gpui_kit::test]
+    fn a_first_right_press_selects_the_first_post_in_place(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        cx.simulate_keystrokes("right");
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "no column change");
+        assert_eq!(selected(&app, cx), Some(0));
+        cx.simulate_keystrokes("right");
+        assert_eq!(app.read_with(cx, |app, _| app.active_column()), 1);
+        assert_eq!(selected(&app, cx), Some(0));
     }
 
     #[gpui_kit::test]
