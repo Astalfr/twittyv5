@@ -2,6 +2,7 @@
 //! tested; GPUI views wrap these types without adding logic of their own.
 
 pub mod add_column;
+pub mod alerts;
 pub mod column;
 pub mod compose;
 pub mod deck;

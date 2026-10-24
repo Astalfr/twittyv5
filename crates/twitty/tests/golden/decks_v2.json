@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "decks": [
+    {
+      "name": "Main",
+      "columns": [
+        { "id": 1, "source": { "type": "home", "mode": "following" }, "width": 350 },
+        {
+          "id": 2,
+          "source": { "type": "search", "query": "rust", "sort": "latest" },
+          "name": "Rust news",
+          "width": 420,
+          "alerts": { "sound": true, "volume": 35, "desktop": true }
+        },
+        { "id": 5, "source": { "type": "notifications" } }
+      ]
+    }
+  ],
+  "active": 0,
+  "next_column_id": 6
+}

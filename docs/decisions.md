@@ -171,3 +171,13 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: Clicking a post's time and **Copy tweet link** use the post's canonical `Post.url` with its host swapped for `vxtwitter.com` (`state::links::vx_link`). (The action bar's share button, which opened the x.com link, was removed on 2026-10-24.)
 - **Why**: vxtwitter links embed properly (video, full text) when pasted into Discord and other chat apps. Swapping the host of `Post.url` keeps the UI from building X URLs out of opaque IDs.
 - **Consequences**: The links depend on a third-party mirror being up. If it goes away, change `VX_HOST` in one place.
+
+### 2026-10-24: Column settings dialog; widths in pixels
+- **Decision**: Each column has a settings dialog (name, width slider, sound with volume, system notification) instead of the width-cycling header button. Widths are stored as pixels (280–640), so the deck file went to `schema_version` 2, which maps the v1 presets to the pixels they stood for. The header's buttons only show on hover.
+- **Why**: Three presets were too coarse for wide screens, and one dialog has room for per-column options. Hiding the buttons gives the title the whole header when the pointer is elsewhere.
+- **Consequences**: Out-of-range widths and volumes in a hand-edited file are clamped on load. Settings apply live; only slider drags wait for the release before saving.
+
+### 2026-10-24: New-post sound through rodio, notifications through GPUI
+- **Decision**: The sound is an embedded mp3 played with `rodio` (`playback` + `mp3` features only), one short-lived thread per play. System notifications use GPUI's own `App::show_system_notification`, not `notify-rust`. `main.rs` calls `cx.set_app_identity("Twitty.Twitty", "Twitty")` before anything else.
+- **Why**: GPUI has no audio. On Windows GPUI shows toasts itself, registers the AppUserModelID for the current user (so toasts appear without a Start-menu shortcut) and makes them silent, so the column's own sound is the only one. GPUI's test platform records notifications, so they're tested without a fake.
+- **Consequences**: Without an audio device the sound is skipped with a warning. The app's taskbar identity is now `Twitty.Twitty`, so an existing taskbar pin may need re-pinning once. Toasts don't act on a click yet (GPUI's `on_system_notification_response` could open the column).

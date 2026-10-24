@@ -15,6 +15,7 @@ gpui-kit.workspace = true
 reqwest_client.workspace = true
 image.workspace = true
 futures.workspace = true
+rodio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

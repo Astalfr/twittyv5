@@ -22,6 +22,8 @@ reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.9" }
 # `image` must stay on the 0.25 line GPUI uses, since `RenderImage` takes its `Frame`).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 futures = "0.3"
+# The notification sound: mp3 decoding and playback only (GPUI has no audio).
+rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
 
 # Async / HTTP for the X adapter.
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }

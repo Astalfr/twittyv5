@@ -26,6 +26,7 @@ use twitty::{
     },
     logging,
     runtime::Runtime,
+    sound::{Sound, SystemSound},
     state::{
         deck::{self, DeckFile},
         settings::{self, Settings},
@@ -119,10 +120,14 @@ fn main() -> anyhow::Result<()> {
     };
 
     gpui_kit::application().with_assets(ui::assets::Assets).run(move |cx| {
+        // Before any window or notification: Windows only shows toasts from
+        // an identified app (GPUI registers the id for the current user).
+        cx.set_app_identity("Twitty.Twitty", "Twitty");
         gpui_kit::init(cx);
         ui::theme::init(theme_name, cx);
         ui::keys::bind(cx);
         cx.set_global(runtime);
+        cx.set_global(Sound(Arc::new(SystemSound)));
         cx.set_http_client(Arc::new(http));
 
         // Demo: new posts trickle into Home so polling and the "new posts" pill can be seen.

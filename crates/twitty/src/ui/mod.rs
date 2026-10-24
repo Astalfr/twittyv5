@@ -5,6 +5,7 @@ pub mod add_column;
 pub mod app;
 pub mod assets;
 pub mod column;
+pub mod column_settings;
 pub mod compose;
 pub mod hub;
 pub mod keys;

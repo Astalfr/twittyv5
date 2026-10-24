@@ -3,9 +3,9 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, AnyView, Context, Entity, FocusHandle, FontWeight,
-    ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render, Resource, ScrollHandle,
-    SharedUri, Styled, StyledImage, Subscription, Task, Window, assets::IconName,
+    Animation, AnimationExt, AnyElement, AnyView, AnyWindowHandle, Context, Entity, FocusHandle,
+    FontWeight, ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render, Resource,
+    ScrollHandle, SharedUri, Styled, StyledImage, Subscription, Task, Window, assets::IconName,
     component::button::*, component::checkbox::Checkbox, component::scroll::ScrollableElement,
     component::*, div, img, prelude::*, px,
 };
@@ -17,7 +17,7 @@ use crate::{
     account::{AccountServices, SessionSource},
     runtime::Runtime,
     state::{
-        deck::{ColumnConfig, ColumnId, DeckFile},
+        deck::{ColumnConfig, ColumnId, ColumnSettings, DeckFile},
         interactions::Toggle,
         media_layout::{self, viewer},
         motion, poll,
@@ -26,6 +26,7 @@ use crate::{
     ui::{
         add_column::{AddColumnEvent, AddColumnView},
         column::{ColumnEvent, ColumnView, source_icon},
+        column_settings::{ColumnSettingsEvent, ColumnSettingsView},
         compose::{ComposeEvent, ComposeView},
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
@@ -66,7 +67,7 @@ struct Leaving<T> {
 /// An overlay that just closed (see [`Leaving`]).
 enum LeavingOverlay {
     Media(Arc<twitty_model::Post>, usize),
-    /// A dialog view: sign-in, add column, compose.
+    /// A dialog view: sign-in, add column, column settings, compose.
     View(AnyView),
     Account,
     Settings,
@@ -122,6 +123,7 @@ pub struct TwittyApp {
     viewer: Option<Profile>,
     login: Option<Entity<LoginView>>,
     add_column: Option<Entity<AddColumnView>>,
+    column_settings: Option<Entity<ColumnSettingsView>>,
     compose: Option<Entity<ComposeView>>,
     /// The side sheet: a conversation or a profile.
     sheet: Option<Sheet>,
@@ -132,6 +134,10 @@ pub struct TwittyApp {
     /// The latest settings write. Each save waits for the previous one, so the
     /// file always ends up with the newest settings.
     settings_save: Option<Task<()>>,
+    /// The latest deck write, chained like `settings_save`.
+    deck_save: Option<Task<()>>,
+    /// The window the app is the root of, for dialogs opened from column events.
+    window: AnyWindowHandle,
     /// The image viewer: a post and the index of the media shown.
     media: Option<(Arc<twitty_model::Post>, usize)>,
     /// The overlay animating out after it closed. Inert: it gets no input.
@@ -147,6 +153,7 @@ pub struct TwittyApp {
     _budget_task: Option<Task<()>>,
     _login_sub: Option<Subscription>,
     _add_sub: Option<Subscription>,
+    _column_settings_sub: Option<Subscription>,
     _compose_sub: Option<Subscription>,
     _sheet_sub: Option<Subscription>,
     _hub_subs: Vec<Subscription>,
@@ -186,12 +193,15 @@ impl TwittyApp {
             viewer: None,
             login: None,
             add_column: None,
+            column_settings: None,
             compose: None,
             sheet: None,
             mention_lookup: None,
             account_panel: false,
             settings_panel: false,
             settings_save: None,
+            deck_save: None,
+            window: window.window_handle(),
             media: None,
             leaving: None,
             leaving_sheet: None,
@@ -202,6 +212,7 @@ impl TwittyApp {
             _budget_task: None,
             _login_sub: None,
             _add_sub: None,
+            _column_settings_sub: None,
             _compose_sub: None,
             _sheet_sub: None,
             _hub_subs: Vec::new(),
@@ -330,6 +341,7 @@ impl TwittyApp {
     fn has_dialog(&self) -> bool {
         self.login.is_some()
             || self.add_column.is_some()
+            || self.column_settings.is_some()
             || self.compose.is_some()
             || self.account_panel
             || self.settings_panel
@@ -747,6 +759,8 @@ impl TwittyApp {
             Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.add_column {
             Some(LeavingOverlay::View(view.clone().into()))
+        } else if let Some(view) = &self.column_settings {
+            Some(LeavingOverlay::View(view.clone().into()))
         } else if let Some(view) = &self.compose {
             Some(LeavingOverlay::View(view.clone().into()))
         } else if self.account_panel {
@@ -763,6 +777,12 @@ impl TwittyApp {
         self._login_sub = None;
         self.add_column = None;
         self._add_sub = None;
+        // A slider moved by keyboard only previews; closing saves whatever
+        // the column was left with.
+        if self.column_settings.take().is_some() {
+            self.persist(cx);
+        }
+        self._column_settings_sub = None;
         self.compose = None;
         self._compose_sub = None;
         self.account_panel = false;
@@ -865,8 +885,7 @@ impl TwittyApp {
         let backend = Arc::clone(&self.backend);
         let hub = self.hub.clone();
         let poll = self.options.poll;
-        let (id, source, width) = (config.id, config.source.clone(), config.width);
-        let view = cx.new(|cx| ColumnView::new(id, source, width, backend, hub, poll, cx));
+        let view = cx.new(|cx| ColumnView::new(config, backend, hub, poll, cx));
         self._subs.push(cx.subscribe(&view, Self::on_column_event));
         view
     }
@@ -885,7 +904,7 @@ impl TwittyApp {
 
     fn on_column_event(
         &mut self,
-        column: Entity<ColumnView>,
+        _: Entity<ColumnView>,
         event: &ColumnEvent,
         cx: &mut Context<Self>,
     ) {
@@ -900,12 +919,18 @@ impl TwittyApp {
                 self.deck.move_column(*id, *delta);
                 self.sync_order();
             }
-            ColumnEvent::CycleWidth(id) => {
-                if let Some(config) = self.deck.column_mut(*id) {
-                    config.width = config.width.cycle();
-                    let width = config.width;
-                    column.update(cx, |c, cx| c.set_width(width, cx));
-                }
+            ColumnEvent::OpenSettings(id) => {
+                // The dialog's text input needs the window, which column
+                // events don't carry: open it once this event is handled.
+                let (id, app, window) = (*id, cx.entity().downgrade(), self.window);
+                cx.defer(move |cx| {
+                    window
+                        .update(cx, |_, window, cx| {
+                            app.update(cx, |this, cx| this.open_column_settings(id, window, cx))
+                        })
+                        .ok();
+                });
+                return;
             }
             ColumnEvent::SourceChanged(id, source) => {
                 if let Some(config) = self.deck.column_mut(*id) {
@@ -927,17 +952,70 @@ impl TwittyApp {
             .sort_by_key(|(id, _)| order.iter().position(|o| o == id).unwrap_or(usize::MAX));
     }
 
-    fn persist(&self, cx: &mut Context<Self>) {
+    /// Saves the decks. Each save waits for the previous one, so quick edits
+    /// can't interleave their writes and the file ends up with the newest deck.
+    fn persist(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.options.deck_path.clone() else {
             return;
         };
         let deck = self.deck.clone();
-        cx.background_spawn(async move {
+        let previous = self.deck_save.take();
+        self.deck_save = Some(cx.background_spawn(async move {
+            if let Some(previous) = previous {
+                previous.await;
+            }
             if let Err(e) = deck.save(&path) {
                 tracing::error!("saving decks to {} failed: {e}", path.display());
             }
-        })
-        .detach();
+        }));
+    }
+
+    pub fn column_settings_dialog(&self) -> Option<&Entity<ColumnSettingsView>> {
+        self.column_settings.as_ref()
+    }
+
+    /// Shows the settings dialog of column `id` (in the active deck).
+    pub fn open_column_settings(
+        &mut self,
+        id: ColumnId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(config) = self.deck.active().columns.iter().find(|c| c.id == id).cloned() else {
+            return;
+        };
+        self.close_overlays(cx);
+        let view =
+            cx.new(|cx| ColumnSettingsView::new(id, &config.source, config.settings, window, cx));
+        self._column_settings_sub =
+            Some(cx.subscribe(&view, |this, _, e: &ColumnSettingsEvent, cx| match e {
+                ColumnSettingsEvent::Preview(id, settings) => {
+                    this.set_column_settings(*id, settings.clone(), cx);
+                }
+                ColumnSettingsEvent::Changed(id, settings) => {
+                    this.set_column_settings(*id, settings.clone(), cx);
+                    this.persist(cx);
+                }
+                ColumnSettingsEvent::Dismissed => this.close_overlays(cx),
+            }));
+        self.column_settings = Some(view);
+        cx.notify();
+    }
+
+    /// Applies edited settings to column `id` and its view (without saving).
+    fn set_column_settings(
+        &mut self,
+        id: ColumnId,
+        settings: ColumnSettings,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(config) = self.deck.column_mut(id) {
+            config.settings = settings.clone();
+        }
+        if let Some((_, view)) = self.columns.iter().find(|(cid, _)| *cid == id) {
+            view.update(cx, |c, cx| c.set_settings(settings, cx));
+        }
+        cx.notify();
     }
 
     pub fn settings(&self) -> &Settings {
@@ -1304,12 +1382,12 @@ impl TwittyApp {
                     .gap_1()
                     .overflow_y_scroll()
                     .children(self.columns.iter().enumerate().map(|(ix, (_, view))| {
-                        let source = view.read(cx).model().source();
+                        let column = view.read(cx);
                         Button::new(("rail-column", ix))
                             .ghost()
                             .large()
-                            .icon(Icon::new(source_icon(source)).size(px(22.)))
-                            .tooltip(source.title())
+                            .icon(Icon::new(source_icon(column.model().source())).size(px(22.)))
+                            .tooltip(column.title())
                             .selected(ix == self.active_column)
                             .w(px(52.))
                             .h(px(44.))
@@ -1393,6 +1471,8 @@ impl Render for TwittyApp {
             Some(("login", true, login.clone().into_any_element()))
         } else if let Some(add) = &self.add_column {
             Some(("add-column", true, add.clone().into_any_element()))
+        } else if let Some(view) = &self.column_settings {
+            Some(("column-settings", true, view.clone().into_any_element()))
         } else if let Some(compose) = &self.compose {
             Some(("compose", true, compose.clone().into_any_element()))
         } else if self.account_panel {
@@ -2741,5 +2821,63 @@ mod tests {
         );
         assert!(cx.update(|_, cx| cx.reduce_motion()), "animations off is GPUI's reduce motion");
         cx.simulate_keystrokes("escape");
+    }
+
+    #[gpui_kit::test]
+    fn column_settings_apply_live_and_are_saved(cx: &mut TestAppContext) {
+        use crate::state::deck::ColumnWidth;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            theme::init(theme::NAMES[0], cx);
+            keys::bind(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("decks.json");
+        let options = AppOptions { deck_path: Some(path.clone()), ..AppOptions::default() };
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(DeckFile::default(), Settings::default(), backend, options, window, cx)
+        });
+        cx.run_until_parked();
+        let column = app.read_with(cx, |app, _| app.columns().next().cloned()).unwrap();
+        let id = column.read_with(cx, |c, _| c.id());
+
+        // The header's settings button.
+        column.update(cx, |_, cx| cx.emit(ColumnEvent::OpenSettings(id)));
+        cx.run_until_parked();
+        let dialog = app.read_with(cx, |app, _| app.column_settings_dialog().cloned());
+        let dialog = dialog.expect("the dialog opened");
+        assert_eq!(dialog.read_with(cx, |d, _| d.id()), id);
+
+        // Dragging the slider resizes the column without saving.
+        dialog.update(cx, |d, cx| d.set_width(500., false, cx));
+        cx.run_until_parked();
+        assert_eq!(column.read_with(cx, |c, _| c.settings().width.px()), 500.);
+        assert!(!path.exists(), "nothing saved while dragging");
+
+        dialog.update(cx, |d, cx| {
+            d.set_width(480., true, cx);
+            d.set_name("Following only", cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(column.read_with(cx, |c, _| c.title()), "Following only");
+        let saved = DeckFile::load(&path).unwrap();
+        let config = saved.active().columns.iter().find(|c| c.id == id).cloned().unwrap();
+        assert_eq!(config.settings.width, ColumnWidth::new(480.));
+        assert_eq!(config.settings.name.as_deref(), Some("Following only"));
+        assert_eq!(app.read_with(cx, |app, _| app.deck().clone()), saved);
+
+        // Esc closes it, even from the focused name field, and saves a change
+        // that was only previewed (a slider moved by keyboard).
+        dialog.update(cx, |d, cx| d.set_width(560., false, cx));
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.column_settings_dialog().is_none()));
+        let saved = DeckFile::load(&path).unwrap();
+        let config = saved.active().columns.iter().find(|c| c.id == id).cloned().unwrap();
+        assert_eq!(config.settings.width, ColumnWidth::new(560.));
     }
 }

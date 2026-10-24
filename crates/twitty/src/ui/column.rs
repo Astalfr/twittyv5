@@ -6,9 +6,9 @@ use std::{
 };
 
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement,
-    ListAlignment, ListOffset, ListState, ParentElement, Render, SharedString, Styled,
-    Subscription, Task, Window, assets::IconName, component::button::*,
+    Animation, AnimationExt, AnyElement, Context, ElementId, Entity, EventEmitter, FontWeight,
+    IntoElement, ListAlignment, ListOffset, ListState, ParentElement, Render, SharedString, Styled,
+    Subscription, SystemNotification, Task, Window, assets::IconName, base, component::button::*,
     component::scroll::ScrollableElement, component::skeleton::Skeleton,
     component::spinner::Spinner, component::*, div, list, prelude::*, px,
 };
@@ -16,9 +16,11 @@ use twitty_model::{Backend, BackendError, FeedSource};
 
 use crate::{
     runtime::Runtime,
+    sound,
     state::{
+        alerts,
         column::{ColumnModel, ListChange, LoadKind, Status},
-        deck::{ColumnId, ColumnWidth},
+        deck::{ColumnConfig, ColumnId, ColumnSettings},
         motion::{self, Entrance, Recent},
         poll,
         sources::{self, Tab},
@@ -39,15 +41,18 @@ const PILL_TOP: f32 = 12.0;
 pub enum ColumnEvent {
     Remove(ColumnId),
     Move(ColumnId, isize),
-    CycleWidth(ColumnId),
+    /// The user asked for the column's settings dialog.
+    OpenSettings(ColumnId),
     SourceChanged(ColumnId, FeedSource),
 }
 
 /// A column view.
 pub struct ColumnView {
     id: ColumnId,
-    width: ColumnWidth,
+    settings: ColumnSettings,
     model: ColumnModel,
+    /// Whether the pointer is over the header, which shows its buttons.
+    header_hovered: bool,
     list: ListState,
     backend: Arc<dyn Backend>,
     hub: Entity<InteractionsHub>,
@@ -77,9 +82,7 @@ impl EventEmitter<ColumnEvent> for ColumnView {}
 
 impl ColumnView {
     pub fn new(
-        id: ColumnId,
-        source: FeedSource,
-        width: ColumnWidth,
+        config: &ColumnConfig,
         backend: Arc<dyn Backend>,
         hub: Entity<InteractionsHub>,
         poll: bool,
@@ -115,9 +118,10 @@ impl ColumnView {
             })
         });
         let mut this = Self {
-            id,
-            width,
-            model: ColumnModel::new(source),
+            id: config.id,
+            settings: config.settings.clone(),
+            model: ColumnModel::new(config.source.clone()),
+            header_hovered: false,
             list,
             backend,
             hub,
@@ -150,11 +154,27 @@ impl ColumnView {
         self.poll_interval = every;
     }
 
-    pub fn set_width(&mut self, width: ColumnWidth, cx: &mut Context<Self>) {
-        self.width = width;
-        // Row heights depend on the width (wrapping, media size).
-        self.list.remeasure();
+    pub fn settings(&self) -> &ColumnSettings {
+        &self.settings
+    }
+
+    /// The header's title: the column's name, else its source's title.
+    pub fn title(&self) -> String {
+        self.settings.title(self.model.source())
+    }
+
+    /// Applies edited settings (name, width, alerts).
+    pub fn set_settings(&mut self, settings: ColumnSettings, cx: &mut Context<Self>) {
+        if settings.width != self.settings.width {
+            // Row heights depend on the width (wrapping, media size).
+            self.list.remeasure();
+        }
+        self.settings = settings;
         cx.notify();
+    }
+
+    pub fn header_hovered(&self) -> bool {
+        self.header_hovered
     }
 
     /// Starts a load of `kind` unless one is already running.
@@ -185,6 +205,7 @@ impl ColumnView {
             tracing::warn!(column = self.id.0, ?kind, "load failed: {e}");
         }
         let change = self.model.finish(kind, result);
+        self.announce(kind, &change, cx);
         self.mark_arrivals(&change, cx);
         match change {
             ListChange::None => {}
@@ -201,6 +222,31 @@ impl ColumnView {
             }
         }
         cx.notify();
+    }
+
+    /// Plays the sound and shows a system notification for new rows, as the
+    /// column's alert settings ask.
+    fn announce(&self, kind: LoadKind, change: &ListChange, cx: &mut Context<Self>) {
+        let alerts = self.settings.alerts;
+        if !alerts.sound && !alerts.desktop {
+            return;
+        }
+        let Some(news) = alerts::announce(kind, change, self.model.items()) else {
+            return;
+        };
+        tracing::debug!(column = self.id.0, count = news.count, "announcing new rows");
+        if alerts.sound {
+            sound::play(alerts.volume, cx);
+        }
+        if alerts.desktop {
+            // One tag per column: a newer batch replaces the column's last toast.
+            cx.show_system_notification(SystemNotification {
+                tag: format!("column-{}", self.id.0).into(),
+                title: self.title().into(),
+                body: news.body.into(),
+                actions: Vec::new(),
+            });
+        }
     }
 
     /// Remembers the rows `change` brings in, so they animate as they appear.
@@ -260,7 +306,7 @@ impl ColumnView {
     }
 
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let rcx = RowCtx { ix, column_width: self.width.px(), hub: self.hub.clone() };
+        let rcx = RowCtx { ix, column_width: self.settings.width.px(), hub: self.hub.clone() };
         let row = match self.model.items().get(ix) {
             Some(item) if self.active && self.model.selected() == Some(ix) => div()
                 .bg(cx.theme().list_active)
@@ -330,7 +376,7 @@ impl ColumnView {
         h_flex().w_full().justify_center().py_6().child(body).into_any_element()
     }
 
-    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_header(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let source = self.model.source();
         let icon = source_icon(source);
@@ -339,7 +385,24 @@ impl ColumnView {
         let header_button = |name: &'static str, icon: IconName, tip: &'static str| {
             Button::new(name).ghost().small().icon(Icon::new(icon)).tooltip(tip)
         };
+        // The buttons fade in while the header is hovered. Hidden ones keep
+        // their place, so the title doesn't reflow; they can only be clicked
+        // while hovered, and then they show.
+        let actions_opacity = base::transition(
+            (ElementId::from(("column-actions", id.0 as usize)), "opacity"),
+            if self.header_hovered { 1.0_f32 } else { 0.0 },
+            base::Transition::new(theme.motion.duration_fast),
+            window,
+            cx,
+        );
         v_flex()
+            .id(("column-header", id.0 as usize))
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if this.header_hovered != *hovered {
+                    this.header_hovered = *hovered;
+                    cx.notify();
+                }
+            }))
             .flex_none()
             .border_b_1()
             .border_color(theme.border)
@@ -357,27 +420,45 @@ impl ColumnView {
                             .truncate()
                             .text_lg()
                             .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(source.title()),
+                            .child(self.title()),
                     )
                     .child(
-                        header_button("refresh", IconName::RefreshCw, "Refresh").on_click(
-                            cx.listener(|this, _, _, cx| this.load(LoadKind::Refresh, cx)),
-                        ),
-                    )
-                    .child(header_button("left", IconName::ChevronLeft, "Move left").on_click(
-                        cx.listener(move |_, _, _, cx| cx.emit(ColumnEvent::Move(id, -1))),
-                    ))
-                    .child(header_button("right", IconName::ChevronRight, "Move right").on_click(
-                        cx.listener(move |_, _, _, cx| cx.emit(ColumnEvent::Move(id, 1))),
-                    ))
-                    .child(
-                        header_button("width", IconName::MoveHorizontal, "Change width").on_click(
-                            cx.listener(move |_, _, _, cx| cx.emit(ColumnEvent::CycleWidth(id))),
-                        ),
-                    )
-                    .child(header_button("remove", IconName::X, "Remove column").on_click(
-                        cx.listener(move |_, _, _, cx| cx.emit(ColumnEvent::Remove(id))),
-                    )),
+                        h_flex()
+                            .debug_selector(|| "column-actions".into())
+                            .flex_none()
+                            .opacity(actions_opacity)
+                            .child(
+                                header_button("refresh", IconName::RefreshCw, "Refresh").on_click(
+                                    cx.listener(|this, _, _, cx| this.load(LoadKind::Refresh, cx)),
+                                ),
+                            )
+                            .child(
+                                header_button("left", IconName::ChevronLeft, "Move left").on_click(
+                                    cx.listener(move |_, _, _, cx| {
+                                        cx.emit(ColumnEvent::Move(id, -1))
+                                    }),
+                                ),
+                            )
+                            .child(
+                                header_button("right", IconName::ChevronRight, "Move right")
+                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                        cx.emit(ColumnEvent::Move(id, 1))
+                                    })),
+                            )
+                            .child(
+                                header_button(
+                                    "settings",
+                                    IconName::SlidersHorizontal,
+                                    "Column settings",
+                                )
+                                .on_click(cx.listener(
+                                    move |_, _, _, cx| cx.emit(ColumnEvent::OpenSettings(id)),
+                                )),
+                            )
+                            .child(header_button("remove", IconName::X, "Remove column").on_click(
+                                cx.listener(move |_, _, _, cx| cx.emit(ColumnEvent::Remove(id))),
+                            )),
+                    ),
             )
             .when(!tabs.is_empty(), |d| d.child(self.render_tabs(tabs, cx)))
     }
@@ -524,16 +605,16 @@ fn skeleton_rows() -> impl IntoElement {
 }
 
 impl Render for ColumnView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         v_flex()
             .flex_none()
-            .w(px(self.width.px()))
+            .w(px(self.settings.width.px()))
             .h_full()
             .bg(theme.background)
             .border_r_1()
             .border_color(theme.border)
-            .child(self.render_header(cx))
+            .child(self.render_header(window, cx))
             .child(self.render_body(cx))
     }
 }
@@ -553,15 +634,9 @@ mod tests {
         let shared: Arc<dyn Backend> = Arc::new(backend.clone());
         let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
         let column = cx.new(|cx| {
-            ColumnView::new(
-                ColumnId(1),
-                FeedSource::Home { mode: HomeMode::Following },
-                ColumnWidth::Medium,
-                shared,
-                hub,
-                false,
-                cx,
-            )
+            let config =
+                ColumnConfig::new(ColumnId(1), FeedSource::Home { mode: HomeMode::Following });
+            ColumnView::new(&config, shared, hub, false, cx)
         });
         (backend, column)
     }
@@ -642,9 +717,7 @@ mod tests {
         let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
         let column = cx.new(|cx| {
             ColumnView::new(
-                ColumnId(1),
-                FeedSource::Bookmarks,
-                ColumnWidth::Medium,
+                &ColumnConfig::new(ColumnId(1), FeedSource::Bookmarks),
                 shared,
                 hub,
                 false,
@@ -687,6 +760,95 @@ mod tests {
         );
     }
 
+    fn set_alerts(
+        column: &Entity<ColumnView>,
+        alerts: crate::state::deck::ColumnAlerts,
+        cx: &mut TestAppContext,
+    ) {
+        column.update(cx, |c, cx| {
+            let settings = ColumnSettings { alerts, ..c.settings().clone() };
+            c.set_settings(settings, cx)
+        });
+    }
+
+    fn poll_new(backend: &MockBackend, column: &Entity<ColumnView>, cx: &mut TestAppContext) {
+        backend.push_new(&FeedSource::Home { mode: HomeMode::Following }, 2);
+        column.update(cx, |c, cx| c.load(LoadKind::Newer, cx));
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn new_posts_play_the_sound_and_notify_as_configured(cx: &mut TestAppContext) {
+        use crate::{
+            sound::RecordingSound,
+            state::deck::{ColumnAlerts, Volume},
+        };
+        let (backend, column) = setup(cx);
+        let sound = cx.update(RecordingSound::install);
+        // Like Windows, GPUI only posts notifications for an identified app.
+        cx.update(|cx| cx.set_app_identity("Twitty.Test", "Twitty"));
+        cx.run_until_parked();
+        assert!(sound.played().is_empty(), "the first page is not news");
+
+        // Off by default.
+        poll_new(&backend, &column, cx);
+        assert!(sound.played().is_empty());
+        assert!(cx.shown_system_notifications().is_empty());
+
+        let volume = Volume::from(30);
+        set_alerts(&column, ColumnAlerts { sound: true, volume, desktop: true }, cx);
+        column.update(cx, |c, cx| {
+            let mut settings = c.settings().clone();
+            settings.set_name("Friends");
+            c.set_settings(settings, cx);
+        });
+        poll_new(&backend, &column, cx);
+        assert_eq!(sound.played(), [volume]);
+        let shown = cx.shown_system_notifications();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].title.as_ref(), "Friends", "titled with the column's name");
+        assert!(shown[0].body.starts_with("2 new posts\n"), "{}", shown[0].body);
+
+        // A refresh is not news.
+        column.update(cx, |c, cx| c.load(LoadKind::Refresh, cx));
+        cx.run_until_parked();
+        assert_eq!(sound.played().len(), 1);
+
+        // Sound only.
+        set_alerts(&column, ColumnAlerts { sound: true, volume, desktop: false }, cx);
+        poll_new(&backend, &column, cx);
+        assert_eq!(sound.played().len(), 2);
+        assert_eq!(cx.shown_system_notifications().len(), 1);
+    }
+
+    #[gpui_kit::test]
+    fn header_buttons_show_while_the_header_is_hovered(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let shared: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            let config = ColumnConfig::new(ColumnId(1), FeedSource::Bookmarks);
+            ColumnView::new(&config, shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+        let over_posts = gpui_kit::point(px(150.), px(400.));
+        cx.simulate_mouse_move(over_posts, None, gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert!(!column.read_with(cx, |c, _| c.header_hovered()));
+
+        let actions = cx.debug_bounds("column-actions").expect("header buttons are laid out");
+        cx.simulate_mouse_move(actions.center(), None, gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert!(column.read_with(cx, |c, _| c.header_hovered()));
+
+        cx.simulate_mouse_move(over_posts, None, gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert!(!column.read_with(cx, |c, _| c.header_hovered()), "hidden again over the posts");
+    }
+
     /// Mounts a real window, draws it, and scrolls with wheel events until the
     /// feed is exhausted. Exercises the scroll handler, prefetch and rendering
     /// of every row shape the mock produces.
@@ -699,7 +861,7 @@ mod tests {
         let shared: Arc<dyn Backend> = Arc::new(backend.clone());
         let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
         let (column, cx) = cx.add_window_view(|_, cx| {
-            ColumnView::new(ColumnId(1), source, ColumnWidth::Medium, shared, hub, false, cx)
+            ColumnView::new(&ColumnConfig::new(ColumnId(1), source), shared, hub, false, cx)
         });
         cx.run_until_parked();
         assert_eq!(column.read_with(cx, |c, _| c.model().items().len()), MockBackend::PAGE_SIZE);

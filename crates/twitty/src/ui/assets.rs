@@ -29,7 +29,7 @@ gpui_kit::assets::icon_assets!(
         RefreshCw,
         ChevronLeft,
         ChevronRight,
-        MoveHorizontal,
+        SlidersHorizontal,
         SunMoon,
         User,
         CircleAlert,

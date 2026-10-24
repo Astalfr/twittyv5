@@ -12,40 +12,146 @@ use serde::{Deserialize, Serialize};
 use twitty_model::{FeedSource, HomeMode, NotificationFilter, SearchSort};
 
 /// Current version of the deck file.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// - v1: widths were presets (`"narrow"`, `"medium"`, `"wide"`).
+/// - v2: widths are pixels; columns gained a name and alert settings.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Stable identifier of a column within a deck file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ColumnId(pub u64);
 
-/// Column width preset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ColumnWidth {
-    Narrow,
-    #[default]
-    Medium,
-    Wide,
-}
+/// Column width in logical pixels, always within [`Self::MIN`]..=[`Self::MAX`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "u16", into = "u16")]
+pub struct ColumnWidth(u16);
 
 impl ColumnWidth {
-    /// Width in logical pixels.
-    pub fn px(self) -> f32 {
-        match self {
-            ColumnWidth::Narrow => 310.0,
-            ColumnWidth::Medium => 350.0,
-            ColumnWidth::Wide => 400.0,
-        }
+    pub const MIN: u16 = 280;
+    pub const MAX: u16 = 640;
+    /// Slider granularity.
+    pub const STEP: u16 = 10;
+
+    /// `px` rounded to the nearest pixel and clamped to the allowed range.
+    pub fn new(px: f32) -> Self {
+        let px = if px.is_finite() { px.round() } else { 0.0 };
+        // In range after the clamp, so the cast is exact.
+        Self(px.clamp(f32::from(Self::MIN), f32::from(Self::MAX)) as u16)
     }
 
-    /// The next preset, wrapping around.
-    pub fn cycle(self) -> Self {
-        match self {
-            ColumnWidth::Narrow => ColumnWidth::Medium,
-            ColumnWidth::Medium => ColumnWidth::Wide,
-            ColumnWidth::Wide => ColumnWidth::Narrow,
+    /// Width in logical pixels.
+    pub fn px(self) -> f32 {
+        f32::from(self.0)
+    }
+
+    /// The width a v1 preset name stood for.
+    fn from_v1_preset(name: &str) -> Self {
+        match name {
+            "narrow" => Self(310),
+            "wide" => Self(400),
+            _ => Self::default(),
         }
+    }
+}
+
+impl Default for ColumnWidth {
+    fn default() -> Self {
+        Self(350)
+    }
+}
+
+impl From<u16> for ColumnWidth {
+    fn from(px: u16) -> Self {
+        Self(px.clamp(Self::MIN, Self::MAX))
+    }
+}
+
+impl From<ColumnWidth> for u16 {
+    fn from(width: ColumnWidth) -> Self {
+        width.0
+    }
+}
+
+/// Loudness of a column's sound, in percent (0..=100).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "u8", into = "u8")]
+pub struct Volume(u8);
+
+impl Volume {
+    pub const MAX: u8 = 100;
+
+    /// `percent` rounded and clamped to 0..=100.
+    pub fn new(percent: f32) -> Self {
+        let percent = if percent.is_finite() { percent.round() } else { 0.0 };
+        // In range after the clamp, so the cast is exact.
+        Self(percent.clamp(0.0, f32::from(Self::MAX)) as u8)
+    }
+
+    pub fn percent(self) -> u8 {
+        self.0
+    }
+
+    /// The gain to play at: 0.0 (silent) to 1.0 (the file's own level).
+    pub fn gain(self) -> f32 {
+        f32::from(self.0) / f32::from(Self::MAX)
+    }
+}
+
+impl Default for Volume {
+    fn default() -> Self {
+        Self(80)
+    }
+}
+
+impl From<u8> for Volume {
+    fn from(percent: u8) -> Self {
+        Self(percent.min(Self::MAX))
+    }
+}
+
+impl From<Volume> for u8 {
+    fn from(volume: Volume) -> Self {
+        volume.0
+    }
+}
+
+/// How a column announces new posts that arrive while it polls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ColumnAlerts {
+    /// Play the notification sound.
+    #[serde(default)]
+    pub sound: bool,
+    /// How loud the sound plays.
+    #[serde(default)]
+    pub volume: Volume,
+    /// Show a system (Windows) notification.
+    #[serde(default)]
+    pub desktop: bool,
+}
+
+/// What the user can change in a column's settings dialog.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ColumnSettings {
+    /// Shown in place of the source's title; never blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub width: ColumnWidth,
+    #[serde(default)]
+    pub alerts: ColumnAlerts,
+}
+
+impl ColumnSettings {
+    /// Sets the name; blank text clears it.
+    pub fn set_name(&mut self, name: &str) {
+        let name = name.trim();
+        self.name = (!name.is_empty()).then(|| name.to_owned());
+    }
+
+    /// The column's title: its name, else the source's title.
+    pub fn title(&self, source: &FeedSource) -> String {
+        self.name.clone().unwrap_or_else(|| source.title())
     }
 }
 
@@ -54,8 +160,15 @@ impl ColumnWidth {
 pub struct ColumnConfig {
     pub id: ColumnId,
     pub source: FeedSource,
-    #[serde(default)]
-    pub width: ColumnWidth,
+    #[serde(flatten)]
+    pub settings: ColumnSettings,
+}
+
+impl ColumnConfig {
+    /// A column with default settings.
+    pub fn new(id: ColumnId, source: FeedSource) -> Self {
+        Self { id, source, settings: ColumnSettings::default() }
+    }
 }
 
 /// A named set of columns.
@@ -116,7 +229,11 @@ impl DeckFile {
         if version > SCHEMA_VERSION {
             return Err(DeckError::TooNew(version));
         }
-        // Migrations from older versions go here, one step at a time.
+        // Migrations from older versions, one step at a time.
+        let mut value = value;
+        if version < 2 {
+            migrate_v1(&mut value);
+        }
         let mut file: DeckFile = serde_json::from_value(value)?;
         file.schema_version = SCHEMA_VERSION;
         file.repair();
@@ -163,7 +280,7 @@ impl DeckFile {
     pub fn add_column(&mut self, source: FeedSource) -> ColumnId {
         let id = ColumnId(self.next_column_id);
         self.next_column_id += 1;
-        self.active_mut().columns.push(ColumnConfig { id, source, width: ColumnWidth::default() });
+        self.active_mut().columns.push(ColumnConfig::new(id, source));
         id
     }
 
@@ -243,6 +360,24 @@ impl DeckFile {
     }
 }
 
+/// v1 -> v2: preset widths become pixels. Everything else is unchanged; the
+/// new fields take their defaults.
+fn migrate_v1(value: &mut serde_json::Value) {
+    let columns = value
+        .get_mut("decks")
+        .and_then(serde_json::Value::as_array_mut)
+        .into_iter()
+        .flatten()
+        .filter_map(|deck| deck.get_mut("columns").and_then(serde_json::Value::as_array_mut))
+        .flatten();
+    for column in columns {
+        if let Some(width) = column.get_mut("width") {
+            let preset = width.as_str().unwrap_or_default();
+            *width = u16::from(ColumnWidth::from_v1_preset(preset)).into();
+        }
+    }
+}
+
 /// Default location: `%APPDATA%\Twitty\decks.json` on Windows.
 pub fn default_path() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", "Twitty").map(|d| d.config_dir().join("decks.json"))
@@ -304,9 +439,55 @@ mod tests {
         let cols = &file.active().columns;
         assert_eq!(cols.len(), 3);
         assert_eq!(cols[0].source, FeedSource::Home { mode: HomeMode::Following });
-        assert_eq!(cols[1].width, ColumnWidth::Wide);
+        // v1 presets migrate to the pixels they stood for.
+        assert_eq!(cols[0].settings.width.px(), 350.0, "medium");
+        assert_eq!(cols[1].settings.width.px(), 400.0, "wide");
         // Width missing in the file falls back to the default.
-        assert_eq!(cols[2].width, ColumnWidth::Medium);
+        assert_eq!(cols[2].settings.width, ColumnWidth::default());
+        assert!(cols.iter().all(|c| c.settings.name.is_none()));
+        assert!(cols.iter().all(|c| c.settings.alerts == ColumnAlerts::default()));
+    }
+
+    #[test]
+    fn narrow_v1_preset_migrates() {
+        let json = r#"{"schema_version":1,"decks":[{"name":"A","columns":[{"id":1,"source":{"type":"bookmarks"},"width":"narrow"}]}],"next_column_id":2}"#;
+        let file = DeckFile::from_json(json).unwrap();
+        assert_eq!(file.active().columns[0].settings.width.px(), 310.0);
+    }
+
+    #[test]
+    fn golden_v2_loads() {
+        let json = include_str!("../../tests/golden/decks_v2.json");
+        let file = DeckFile::from_json(json).unwrap();
+        let cols = &file.active().columns;
+        assert_eq!(cols.len(), 3);
+        let named = &cols[1];
+        assert_eq!(named.settings.name.as_deref(), Some("Rust news"));
+        assert_eq!(named.settings.title(&named.source), "Rust news");
+        assert_eq!(named.settings.width.px(), 420.0);
+        assert_eq!(
+            named.settings.alerts,
+            ColumnAlerts { sound: true, volume: Volume::from(35), desktop: true }
+        );
+        assert_eq!(cols[2].settings, ColumnSettings::default(), "every field is optional");
+        assert_eq!(cols[2].settings.title(&cols[2].source), "Notifications");
+
+        // Saving writes the same shape back.
+        let saved: serde_json::Value = serde_json::from_str(&file.to_json().unwrap()).unwrap();
+        let golden: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(saved["decks"][0]["columns"][1], golden["decks"][0]["columns"][1]);
+    }
+
+    #[test]
+    fn out_of_range_values_are_clamped() {
+        let json = r#"{"schema_version":2,"decks":[{"name":"A","columns":[
+            {"id":1,"source":{"type":"bookmarks"},"width":9999,"alerts":{"volume":250}},
+            {"id":2,"source":{"type":"bookmarks"},"width":10}]}],"next_column_id":3}"#;
+        let file = DeckFile::from_json(json).unwrap();
+        let cols = &file.active().columns;
+        assert_eq!(cols[0].settings.width.px(), f32::from(ColumnWidth::MAX));
+        assert_eq!(cols[0].settings.alerts.volume.percent(), 100);
+        assert_eq!(cols[1].settings.width.px(), f32::from(ColumnWidth::MIN));
     }
 
     #[test]
@@ -348,10 +529,25 @@ mod tests {
     }
 
     #[test]
-    fn width_cycles_through_presets() {
-        let w = ColumnWidth::Narrow;
-        assert_eq!(w.cycle().cycle().cycle(), w);
-        assert!(ColumnWidth::Narrow.px() < ColumnWidth::Wide.px());
+    fn width_and_volume_round_and_clamp() {
+        assert_eq!(ColumnWidth::new(333.4).px(), 333.0);
+        assert_eq!(ColumnWidth::new(0.0).px(), f32::from(ColumnWidth::MIN));
+        assert_eq!(ColumnWidth::new(f32::NAN).px(), f32::from(ColumnWidth::MIN));
+        assert_eq!(ColumnWidth::new(1e9).px(), f32::from(ColumnWidth::MAX));
+        assert_eq!(Volume::new(49.6).percent(), 50);
+        assert_eq!(Volume::new(-3.0).gain(), 0.0);
+        assert_eq!(Volume::new(500.0).gain(), 1.0);
+    }
+
+    #[test]
+    fn blank_names_clear_the_name() {
+        let source = FeedSource::Bookmarks;
+        let mut settings = ColumnSettings::default();
+        settings.set_name("  Saved  ");
+        assert_eq!(settings.title(&source), "Saved", "trimmed");
+        settings.set_name("   ");
+        assert_eq!(settings.name, None);
+        assert_eq!(settings.title(&source), "Bookmarks", "falls back to the source");
     }
 
     #[test]

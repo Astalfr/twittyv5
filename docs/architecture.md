@@ -31,7 +31,8 @@
 |---|---|
 | `state::column` | `ColumnModel`: paging, cursors, de-duplication, unseen count, `ListChange` instructions for the view |
 | `state::interactions` | Optimistic like/repost/bookmark overrides with rollback |
-| `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move/width |
+| `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move, `ColumnSettings` (name, width, alerts) |
+| `state::alerts` | Which loads announce new rows, and the notification text |
 | `state::media_layout` | Geometry of the 1–4 media grid |
 | `state::profile` | Profile sheet: Tweets / Media tabs and their sources, media gallery tiles, list row mapping and splices |
 | `state::motion` | Animation timing: which rows just arrived (`Recent`, `Entrance`), row frames, the toggle "pop" curve ([ui.md](ui.md#animations)) |
@@ -85,7 +86,8 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - Each `ColumnView` owns its `ColumnModel` (rows + cursors) and its `ListState`. The list has one extra footer row (spinner, retry, "caught up").
 - The viewer's likes, reposts and bookmarks are overrides in `InteractionsHub`, so every column shows the change instantly. Failures roll back.
 - Post rows don't know about panels or dialogs: they emit `hub::Navigate` (`Thread`, `Reply`, `Profile`, `UserColumn`, `Media`) through the hub, and `TwittyApp` opens the thread panel, the compose dialog, the profile sheet, a User column or the image viewer. The thread panel and the profile sheet share one side-sheet slot (`Sheet` in `ui/app.rs`).
-- Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`.
+- Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`. Saves are chained (`TwittyApp::persist`), so quick edits never interleave their writes.
+- New-post alerts: a column checks `state::alerts::announce` after each load. The sound goes through the `sound::Sound` global (`SystemSound` from `main.rs`; no global in tests means silence, `RecordingSound` records). System notifications use GPUI's `show_system_notification`, which needs the app identity `main.rs` sets first (`cx.set_app_identity`).
 - Credentials (`twitty::account`): the sign-in dialog stores the session in Windows Credential Manager (`keyring`, entry `Twitty` / `x-session`, a versioned JSON payload). `main.rs` gives the app an `AccountServices` (a `Connector` that turns `Credentials` into an `Arc<dyn Backend>`, plus the `CredentialStore`), so the UI never sees `twitty-x`. Startup order and sign-out rules: "Signing in" in [x-api.md](x-api.md).
 - Settings (`state::settings`): `settings.json` next to `decks.json`, versioned; it holds the theme and the polling and animations switches.
 - Signing in or out replaces the backend: `TwittyApp` rebuilds the hub and every column (old views are dropped, which cancels their loads and polling).
