@@ -1574,7 +1574,7 @@ fn render_title_bar(theme: &gpui_kit::component::Theme) -> impl IntoElement {
         .debug_selector(|| "window-title".into())
         .gap_1p5()
         .items_center()
-        .child(img(crate::ui::assets::LOGO).size(px(18.)))
+        .child(img(crate::ui::assets::LOGO).size(px(crate::ui::assets::LOGO_SIZE)))
         .child(
             div()
                 .text_sm()

@@ -39,8 +39,14 @@ gpui_kit::assets::icon_assets!(
     ]
 );
 
-/// Path of the Twitty logo shown in the rail.
+/// Path of the Twitty logo shown in the title bar.
 pub const LOGO: &str = "brand/twitty.png";
+
+/// Size the logo is drawn at, in logical pixels. GPUI samples images
+/// bilinearly with no mipmaps, so a PNG much larger than its drawn size comes
+/// out jagged: the embedded one is about twice this, which stays smooth from
+/// 100% to 200% display scaling.
+pub const LOGO_SIZE: f32 = 18.;
 
 /// The app's asset source.
 #[derive(Debug, Clone, Copy)]
@@ -103,5 +109,16 @@ mod tests {
         let bytes = Assets.load(LOGO).unwrap().expect("logo is embedded");
         assert_eq!(bytes.get(1..4), Some(&b"PNG"[..]), "PNG signature");
         assert!(Assets.list("brand/").unwrap().iter().any(|p| p.as_ref() == LOGO));
+    }
+
+    #[test]
+    fn the_logo_is_about_twice_its_drawn_size() {
+        // A much larger PNG aliases when GPUI shrinks it (no mipmaps).
+        let bytes = Assets.load(LOGO).unwrap().expect("logo is embedded");
+        let dim = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as f32;
+        let (width, height) = (dim(16), dim(20));
+        assert_eq!(width, height, "square");
+        let ratio = width / LOGO_SIZE;
+        assert!((2.0..=2.5).contains(&ratio), "{width}px logo drawn at {LOGO_SIZE}px");
     }
 }

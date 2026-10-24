@@ -69,6 +69,7 @@ Windows 11 + PowerShell is the main dev environment.
 - **Timelines** use `list()` + `ListState` (variable height). Don't use `uniform_list` / `v_virtual_list` for posts.
 - **`ListState::set_scroll_handler` runs while the `ListState` is mutably borrowed.** Reading the list there panics, so `cx.defer` the reaction (see `ui/column.rs`).
 - **`overflow_hidden` clips to a rectangle, not to rounded corners.** Images inside rounded boxes must round their own outer corners (`rounded_img` + `media_layout::Corners` in `ui/post.rs`).
+- **A loaded `img` takes the bitmap's aspect ratio unless one is set, and it beats the given height.** An `img` sized to a box must also set `.aspect_ratio(w / h)` (see `rounded_img`).
 - **Horizontal-only scroll containers** need `.restrict_scroll_to_axis()`, or GPUI turns vertical wheel input into horizontal scrolling (see the deck in `ui/app.rs`).
 - **Colours** come from the theme (`cx.theme()` tokens), never hard-coded hex in views. UI conventions: [docs/ui.md](docs/ui.md).
 

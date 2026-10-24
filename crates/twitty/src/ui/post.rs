@@ -6,9 +6,9 @@ use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
     Animation, AnimationExt, AnyElement, App, ClickEvent, ClipboardItem, ElementId, Entity,
-    FontWeight, HighlightStyle, Hsla, InteractiveText, IntoElement, ObjectFit, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText, UnderlineStyle,
-    Window,
+    FontWeight, HighlightStyle, Hsla, ImageSource, Img, InteractiveText, IntoElement, ObjectFit,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText,
+    UnderlineStyle, Window,
     component::avatar::Avatar,
     component::button::*,
     component::hover_card::HoverCard,
@@ -521,7 +521,12 @@ fn media_grid(
                 .top(px(tile.y))
                 .w(px(tile.w))
                 .h(px(tile.h))
-                .child(rounded_img(m.preview().url.as_str(), grid.corners(tile, inner)))
+                .child(rounded_img(
+                    m.preview().url.to_string(),
+                    tile.w,
+                    tile.h,
+                    grid.corners(tile, inner),
+                ))
                 .children(overlay)
         }))
 }
@@ -531,15 +536,26 @@ const RADIUS: f32 = 16.0;
 /// Border width of media boxes and cards.
 const BORDER: f32 = 1.0;
 
-/// A cover-fit image that rounds its own outer corners.
+/// A cover-fit `w` × `h` image that rounds its own outer corners.
 ///
 /// GPUI's `overflow_hidden` clips to a rectangle, so a rounded parent does not
 /// round its children: each image rounds the corners that touch the parent's
 /// corners, with the parent's radius minus its border.
-fn rounded_img(url: &str, corners: media_layout::Corners) -> impl IntoElement {
+///
+/// The aspect ratio is explicit: without one, a loaded `img` takes the
+/// bitmap's, and layout lets it beat the given height. A bitmap taller than
+/// its box then overflowed the bottom, and the clip hid its rounded corners.
+fn rounded_img(
+    source: impl Into<ImageSource>,
+    w: f32,
+    h: f32,
+    corners: media_layout::Corners,
+) -> Img {
     let r = px(RADIUS - BORDER);
-    img(url.to_owned())
-        .size_full()
+    img(source)
+        .w(px(w))
+        .h(px(h))
+        .when(h > 0.0, |i| i.aspect_ratio(w / h))
         .object_fit(ObjectFit::Cover)
         .when(corners.top_left, |i| i.rounded_tl(r))
         .when(corners.top_right, |i| i.rounded_tr(r))
@@ -656,11 +672,14 @@ fn quote_card(
                 .child(div().text_color(theme.foreground).child(q.body.text().to_owned())),
         )
         .children(q.media.first().map(|m| {
-            let grid = media_layout::layout(1, m.preview().aspect(), width);
-            div()
-                .w_full()
-                .h(px(grid.height.min(220.)))
-                .child(rounded_img(m.preview().url.as_str(), media_layout::Corners::BOTTOM))
+            let inner = (width - 2.0 * BORDER).max(0.0);
+            let h = media_layout::layout(1, m.preview().aspect(), inner).height.min(220.);
+            div().w_full().h(px(h)).child(rounded_img(
+                m.preview().url.to_string(),
+                inner,
+                h,
+                media_layout::Corners::BOTTOM,
+            ))
         }))
 }
 
@@ -685,10 +704,14 @@ fn link_card(
             cx.open_url(&url);
         })
         .children(card.image.as_ref().map(|image| {
-            div()
-                .w_full()
-                .h(px(width / 1.91))
-                .child(rounded_img(image.url.as_str(), media_layout::Corners::TOP))
+            let inner = (width - 2.0 * BORDER).max(0.0);
+            let h = width / 1.91;
+            div().w_full().h(px(h)).child(rounded_img(
+                image.url.to_string(),
+                inner,
+                h,
+                media_layout::Corners::TOP,
+            ))
         }))
         .child(
             v_flex()
@@ -970,6 +993,42 @@ mod tests {
         let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
         assert!(time.size.width > px(10.), "the time keeps its width: {time:?}");
         assert!(time.right() <= px(310.), "the time is inside the row: {time:?}");
+    }
+
+    /// A box like a media tile, holding one rounded image.
+    struct Tile {
+        image: Arc<gpui_kit::Image>,
+    }
+
+    impl gpui_kit::Render for Tile {
+        fn render(
+            &mut self,
+            _window: &mut Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl IntoElement {
+            div().relative().w(px(200.)).h(px(100.)).child(
+                div().absolute().left_0().top_0().w(px(200.)).h(px(100.)).child(
+                    rounded_img(Arc::clone(&self.image), 200., 100., media_layout::Corners::ALL)
+                        .debug_selector(|| "tile-image".into()),
+                ),
+            )
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_loaded_image_fills_its_tile_whatever_its_own_aspect(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        // 40×120: far taller than the 2:1 tile, like a portrait clamped to 3:4.
+        let png = include_bytes!("../../tests/fixtures/tall-40x120.png").to_vec();
+        let image = Arc::new(gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, png));
+        let (_view, cx) = cx.add_window_view(|_, _| Tile { image });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+
+        let bounds = cx.debug_bounds("tile-image").expect("the image is rendered");
+        // Taller than the tile, its rounded bottom corners would be clipped off.
+        assert_eq!(bounds.size, gpui_kit::size(px(200.), px(100.)));
     }
 
     #[gpui_kit::test]
