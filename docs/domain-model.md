@@ -49,7 +49,8 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`) is
 
 Saved files:
 - `decks.json`: decks, columns, `FeedSource`, widths
-- `settings.json`
+- `settings.json`: theme
+- the keyring entry holding the session (`{schema_version, auth_token, ct0}`, see `twitty::account`)
 - the optional post cache
 
 Rules:

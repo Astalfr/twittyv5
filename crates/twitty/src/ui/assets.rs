@@ -33,6 +33,9 @@ gpui_kit::assets::icon_assets!(
         SunMoon,
         User,
         CircleAlert,
+        CircleUser,
+        LogIn,
+        LogOut,
     ]
 );
 
@@ -72,6 +75,9 @@ mod tests {
             IconName::BadgeCheck,
             IconName::SunMoon,
             IconName::CircleAlert,
+            IconName::CircleUser,
+            IconName::LogIn,
+            IconName::LogOut,
         ] {
             let path = name.path();
             assert!(Assets.load(&path).unwrap().is_some(), "missing icon {path}");

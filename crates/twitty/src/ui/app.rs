@@ -3,17 +3,26 @@
 use std::{path::PathBuf, sync::Arc};
 
 use gpui_kit::{
-    Context, Entity, FontWeight, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
-    Styled, Subscription, Window, assets::IconName, component::button::*,
+    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, Render, ScrollHandle,
+    Styled, Subscription, Task, Window, assets::IconName, component::button::*,
     component::scroll::ScrollableElement, component::*, div, prelude::*, px,
 };
-use twitty_model::{Backend, FeedSource, HomeMode, NotificationFilter, SearchSort};
+use twitty_model::{
+    Backend, BackendError, FeedSource, HomeMode, NotificationFilter, Profile, SearchSort,
+    mock::MockBackend,
+};
 
 use crate::{
-    state::deck::{ColumnConfig, ColumnId, DeckFile},
+    account::{AccountServices, SessionSource},
+    runtime::Runtime,
+    state::{
+        deck::{ColumnConfig, ColumnId, DeckFile},
+        settings::Settings,
+    },
     ui::{
         column::{ColumnEvent, ColumnView},
         hub::{ActionFailed, InteractionsHub},
+        login::{LoginEvent, LoginView},
         theme,
     },
 };
@@ -21,26 +30,40 @@ use crate::{
 /// Height of the strip under the deck reserved for its horizontal scrollbar.
 const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
 
+/// Shown when the session check at startup gets `Unauthorized`.
+pub const EXPIRED_NOTICE: &str = "Your X session expired or was revoked. Sign in again.";
+
 /// Options decided at startup.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AppOptions {
     /// Where to persist decks; `None` keeps them in memory only.
     pub deck_path: Option<PathBuf>,
+    /// Where to persist settings; `None` keeps them in memory only.
+    pub settings_path: Option<PathBuf>,
     /// Whether columns poll for new posts.
     pub poll: bool,
-    /// Shown in a banner, e.g. "Demo data".
-    pub banner: Option<SharedString>,
+    /// Where the backend's session came from; `None` means demo data.
+    pub session: Option<SessionSource>,
+    /// Sign-in support; `None` hides the account controls.
+    pub account: Option<AccountServices>,
 }
 
 /// The root view.
 pub struct TwittyApp {
     deck: DeckFile,
+    settings: Settings,
     options: AppOptions,
     backend: Arc<dyn Backend>,
     hub: Entity<InteractionsHub>,
     columns: Vec<(ColumnId, Entity<ColumnView>)>,
     theme_name: &'static str,
     deck_scroll: ScrollHandle,
+    /// The signed-in account, once the session check answered.
+    viewer: Option<Profile>,
+    login: Option<Entity<LoginView>>,
+    account_panel: bool,
+    session_check: Option<Task<()>>,
+    _login_sub: Option<Subscription>,
     _subs: Vec<Subscription>,
 }
 
@@ -51,36 +74,171 @@ impl std::fmt::Debug for TwittyApp {
 }
 
 impl TwittyApp {
+    /// The app on `backend`. With a session (`options.session`), its account
+    /// is checked right away; an expired session opens the sign-in dialog.
     pub fn new(
         deck: DeckFile,
+        settings: Settings,
         backend: Arc<dyn Backend>,
         options: AppOptions,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let theme_name = settings.theme_or_default(&theme::NAMES).unwrap_or(theme::NAMES[0]);
         let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&backend)));
-        let hub_sub = cx.subscribe(&hub, |_, _, e: &ActionFailed, _| {
-            tracing::warn!("action failed: {}", e.0);
-        });
         let mut this = Self {
             deck,
+            settings,
             options,
             backend,
             hub,
             columns: Vec::new(),
-            theme_name: theme::NAMES[0],
+            theme_name,
             deck_scroll: ScrollHandle::new(),
-            _subs: vec![hub_sub],
+            viewer: None,
+            login: None,
+            account_panel: false,
+            session_check: None,
+            _login_sub: None,
+            _subs: Vec::new(),
         };
-        let configs = this.deck.active().columns.clone();
-        for config in configs {
-            let view = this.make_column(&config, cx);
-            this.columns.push((config.id, view));
+        this.build_columns(cx);
+        if this.options.session.is_some() {
+            this.check_session(window, cx);
         }
         this
     }
 
     pub fn deck(&self) -> &DeckFile {
         &self.deck
+    }
+
+    /// Where the current session came from; `None` in demo mode.
+    pub fn session(&self) -> Option<&SessionSource> {
+        self.options.session.as_ref()
+    }
+
+    pub fn viewer(&self) -> Option<&Profile> {
+        self.viewer.as_ref()
+    }
+
+    pub fn login(&self) -> Option<&Entity<LoginView>> {
+        self.login.as_ref()
+    }
+
+    /// (Re)creates the hub and every column on the current backend. Old views
+    /// are dropped, which cancels their loads and polling.
+    fn build_columns(&mut self, cx: &mut Context<Self>) {
+        self._subs.clear();
+        self.hub = cx.new(|_| InteractionsHub::new(Arc::clone(&self.backend)));
+        self._subs.push(cx.subscribe(&self.hub, |_, _, e: &ActionFailed, _| {
+            tracing::warn!("action failed: {}", e.0);
+        }));
+        self.columns.clear();
+        let configs = self.deck.active().columns.clone();
+        for config in configs {
+            let view = self.make_column(&config, cx);
+            self.columns.push((config.id, view));
+        }
+        cx.notify();
+    }
+
+    fn check_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let backend = Arc::clone(&self.backend);
+        let result = Runtime::global(cx).spawn(async move { backend.viewer().await });
+        self.session_check = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = match result.await {
+                Ok(r) => r,
+                Err(e) => Err(BackendError::Network(e.to_string())),
+            };
+            this.update_in(cx, |this, window, cx| this.session_checked(result, window, cx)).ok();
+        }));
+    }
+
+    fn session_checked(
+        &mut self,
+        result: Result<Profile, BackendError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(viewer) => {
+                tracing::info!("signed in as @{}", viewer.handle);
+                self.viewer = Some(viewer);
+            }
+            Err(BackendError::Unauthorized) => {
+                tracing::warn!("the stored X session was rejected");
+                self.open_login(Some(EXPIRED_NOTICE.to_owned()), window, cx);
+            }
+            // Columns show their own errors; the session may still be fine.
+            Err(e) => tracing::warn!("could not check the X session: {e}"),
+        }
+        cx.notify();
+    }
+
+    /// Shows the sign-in dialog (no-op without account services).
+    pub fn open_login(
+        &mut self,
+        notice: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(services) = self.options.account.clone() else {
+            return;
+        };
+        let view = cx.new(|cx| LoginView::new(services, notice, window, cx));
+        self._login_sub =
+            Some(cx.subscribe_in(&view, window, |this, _, e: &LoginEvent, _, cx| match e {
+                LoginEvent::SignedIn { backend, viewer } => {
+                    this.signed_in(Arc::clone(backend), Profile::clone(viewer), cx);
+                }
+                LoginEvent::Dismissed => this.close_overlays(cx),
+            }));
+        self.login = Some(view);
+        self.account_panel = false;
+        cx.notify();
+    }
+
+    fn close_overlays(&mut self, cx: &mut Context<Self>) {
+        self.login = None;
+        self._login_sub = None;
+        self.account_panel = false;
+        cx.notify();
+    }
+
+    /// Switches to a session that signed in through the dialog.
+    pub fn signed_in(
+        &mut self,
+        backend: Arc<dyn Backend>,
+        viewer: Profile,
+        cx: &mut Context<Self>,
+    ) {
+        tracing::info!("signed in as @{}", viewer.handle);
+        self.options.session = Some(SessionSource::Keyring);
+        self.viewer = Some(viewer);
+        self.session_check = None;
+        self.backend = backend;
+        self.close_overlays(cx);
+        self.build_columns(cx);
+    }
+
+    /// Forgets the stored session and goes back to demo data. Only sessions
+    /// the app stored itself can be removed.
+    pub fn sign_out(&mut self, cx: &mut Context<Self>) {
+        if self.options.session != Some(SessionSource::Keyring) {
+            return;
+        }
+        if let Some(account) = &self.options.account
+            && let Err(e) = account.store.delete()
+        {
+            tracing::error!("could not remove the stored session: {e}");
+        }
+        self.options.session = None;
+        self.viewer = None;
+        self.session_check = None;
+        self.backend = Arc::new(MockBackend::new());
+        self.close_overlays(cx);
+        self.build_columns(cx);
     }
 
     pub fn columns(&self) -> impl Iterator<Item = &Entity<ColumnView>> {
@@ -163,7 +321,90 @@ impl TwittyApp {
     fn cycle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.theme_name = theme::next(self.theme_name);
         theme::apply(self.theme_name, Some(window), cx);
+        self.settings.theme = Some(self.theme_name.to_owned());
+        if let Some(path) = self.options.settings_path.clone() {
+            let settings = self.settings.clone();
+            cx.background_spawn(async move {
+                if let Err(e) = settings.save(&path) {
+                    tracing::error!("saving settings to {} failed: {e}", path.display());
+                }
+            })
+            .detach();
+        }
         cx.notify();
+    }
+
+    fn render_account_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.options.account.as_ref()?;
+        let button = Button::new("account").ghost().large().w(px(52.)).h(px(52.));
+        Some(if self.options.session.is_some() {
+            let tip = match &self.viewer {
+                Some(v) => format!("Signed in as @{}", v.handle),
+                None => "Account".to_owned(),
+            };
+            button
+                .icon(Icon::new(IconName::CircleUser).size(px(26.)))
+                .tooltip(tip)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.account_panel = !this.account_panel;
+                    cx.notify();
+                }))
+                .into_any_element()
+        } else {
+            button
+                .icon(Icon::new(IconName::LogIn).size(px(26.)))
+                .tooltip("Sign in")
+                .on_click(cx.listener(|this, _, window, cx| this.open_login(None, window, cx)))
+                .into_any_element()
+        })
+    }
+
+    fn render_account_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let who = match &self.viewer {
+            Some(v) => format!("Signed in as @{}", v.handle),
+            None => "Signed in".to_owned(),
+        };
+        let (detail, can_sign_out) = match &self.options.session {
+            Some(SessionSource::Keyring) => {
+                ("Stored in Windows Credential Manager.".to_owned(), true)
+            }
+            Some(SessionSource::External(from)) => {
+                (format!("Session from {from}. Remove it there to sign out."), false)
+            }
+            None => (String::new(), false),
+        };
+        v_flex()
+            .w(px(360.))
+            .gap_3()
+            .p_6()
+            .rounded_2xl()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .child(div().text_lg().font_weight(FontWeight::BOLD).child(who))
+            .child(div().text_sm().text_color(theme.muted_foreground).child(detail))
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("account-close")
+                            .ghost()
+                            .label("Close")
+                            .on_click(cx.listener(|this, _, _, cx| this.close_overlays(cx))),
+                    )
+                    .when(can_sign_out, |d| {
+                        d.child(
+                            Button::new("sign-out")
+                                .danger()
+                                .icon(IconName::LogOut)
+                                .label("Sign out")
+                                .on_click(cx.listener(|this, _, _, cx| this.sign_out(cx))),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -223,6 +464,7 @@ impl TwittyApp {
                 ),
             )
             .child(div().flex_1())
+            .children(self.render_account_button(cx))
             .child(
                 rail_button("theme", IconName::SunMoon, "Switch theme")
                     .on_click(cx.listener(|this, _, window, cx| this.cycle_theme(window, cx))),
@@ -277,31 +519,67 @@ impl Render for TwittyApp {
                 .horizontal_scrollbar(&self.deck_scroll)
                 .into_any_element()
         };
+        let overlay = match (&self.login, self.account_panel) {
+            (Some(login), _) => Some(login.clone().into_any_element()),
+            (None, true) => Some(self.render_account_panel(cx)),
+            (None, false) => None,
+        };
+        let demo = self.options.session.is_none();
+        let can_sign_in = self.options.account.is_some();
         v_flex()
+            .relative()
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .when_some(self.options.banner.clone(), |d, banner| {
+            .when(demo, |d| {
                 d.child(
                     h_flex()
                         .w_full()
                         .justify_center()
+                        .items_center()
+                        .gap_3()
                         .py_1()
                         .text_xs()
                         .bg(theme.primary.opacity(0.15))
                         .text_color(theme.primary)
-                        .child(banner),
+                        .child("Demo mode: showing generated posts")
+                        .when(can_sign_in, |d| {
+                            d.child(
+                                Button::new("banner-sign-in").xsmall().label("Sign in").on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.open_login(None, window, cx)
+                                    }),
+                                ),
+                            )
+                        }),
                 )
             })
             .child(h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(body))
+            .when_some(overlay, |d, overlay| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .occlude()
+                        .bg(theme.overlay)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(overlay),
+                )
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, point};
-    use twitty_model::mock::MockBackend;
+    use crate::account::{ConnectError, CredentialStore, Credentials, MemoryStore};
+    use gpui_kit::{
+        Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point,
+    };
 
     #[gpui_kit::test]
     fn vertical_wheel_over_a_column_does_not_scroll_the_deck(cx: &mut TestAppContext) {
@@ -314,9 +592,11 @@ mod tests {
         for _ in 0..8 {
             deck.add_column(FeedSource::Bookmarks);
         }
-        let options = AppOptions { deck_path: None, poll: false, banner: None };
+        let options = AppOptions::default();
         let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
-        let (app, cx) = cx.add_window_view(|_, cx| TwittyApp::new(deck, backend, options, cx));
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(deck, Settings::default(), backend, options, window, cx)
+        });
         cx.run_until_parked();
         let deck_x = |cx: &mut gpui_kit::VisualTestContext| {
             app.read_with(cx, |app, _| app.deck_scroll.offset().x)
@@ -342,5 +622,116 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(deck_x(cx) < px(0.), "horizontal wheel still scrolls the deck");
+    }
+
+    fn services(store: &MemoryStore, signed_in: &MockBackend) -> AccountServices {
+        let backend = signed_in.clone();
+        AccountServices {
+            connect: Arc::new(move |_: &Credentials| -> Result<Arc<dyn Backend>, ConnectError> {
+                Ok(Arc::new(backend.clone()))
+            }),
+            store: Arc::new(store.clone()),
+        }
+    }
+
+    fn start<'a>(
+        cx: &'a mut TestAppContext,
+        backend: MockBackend,
+        session: Option<SessionSource>,
+        store: &MemoryStore,
+    ) -> (Entity<TwittyApp>, &'a mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let options = AppOptions {
+            session,
+            account: Some(services(store, &MockBackend::new())),
+            ..AppOptions::default()
+        };
+        let shared: Arc<dyn Backend> = Arc::new(backend);
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(DeckFile::default(), Settings::default(), shared, options, window, cx)
+        });
+        cx.run_until_parked();
+        (app, cx)
+    }
+
+    fn column_entities(
+        app: &Entity<TwittyApp>,
+        cx: &mut VisualTestContext,
+    ) -> Vec<gpui_kit::EntityId> {
+        app.read_with(cx, |app, _| app.columns().map(|c| c.entity_id()).collect())
+    }
+
+    #[gpui_kit::test]
+    fn sign_in_from_demo_stores_session_and_rebuilds_columns(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), None, &store);
+        let before = column_entities(&app, cx);
+
+        app.update_in(cx, |app, window, cx| app.open_login(None, window, cx));
+        let login = app.read_with(cx, |app, _| app.login().cloned()).unwrap();
+        login.update_in(cx, |l, window, cx| l.set_values("tok", "csrf", window, cx));
+        login.update(cx, |l, cx| l.submit(cx));
+        cx.run_until_parked();
+
+        app.read_with(cx, |app, _| {
+            assert_eq!(app.session(), Some(&SessionSource::Keyring));
+            assert!(app.login().is_none(), "dialog closed");
+            assert!(app.viewer().is_some());
+        });
+        assert!(store.load().unwrap().is_some(), "stored");
+        let after = column_entities(&app, cx);
+        assert_eq!(after.len(), before.len());
+        assert!(after.iter().all(|id| !before.contains(id)), "columns rebuilt on the new backend");
+    }
+
+    #[gpui_kit::test]
+    fn sign_out_clears_store_and_returns_to_demo(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
+        let (app, cx) = start(cx, MockBackend::new(), Some(SessionSource::Keyring), &store);
+        app.update(cx, |app, cx| app.sign_out(cx));
+        assert_eq!(store.load().unwrap(), None);
+        app.read_with(cx, |app, _| {
+            assert_eq!(app.session(), None);
+            assert!(app.viewer().is_none());
+        });
+    }
+
+    #[gpui_kit::test]
+    fn external_sessions_are_not_signed_out(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
+        let source = SessionSource::External("session.json".into());
+        let (app, cx) = start(cx, MockBackend::new(), Some(source.clone()), &store);
+        app.update(cx, |app, cx| app.sign_out(cx));
+        assert!(store.load().unwrap().is_some());
+        assert_eq!(app.read_with(cx, |app, _| app.session().cloned()), Some(source));
+    }
+
+    #[gpui_kit::test]
+    fn expired_session_at_startup_opens_the_dialog(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        // An expired session fails every call: the column loads and the check.
+        for _ in 0..=DeckFile::default().active().columns.len() {
+            backend.fail_next(BackendError::Unauthorized);
+        }
+        let store = MemoryStore::default();
+        store.save(&Credentials { auth_token: "a".into(), ct0: "c".into() }).unwrap();
+        let (app, cx) = start(cx, backend, Some(SessionSource::Keyring), &store);
+        let login = app.read_with(cx, |app, _| app.login().cloned()).expect("dialog open");
+        let notice = login.read_with(cx, |l, _| l.form().notice().map(str::to_owned));
+        assert_eq!(notice.as_deref(), Some(EXPIRED_NOTICE));
+        assert!(store.load().unwrap().is_some(), "kept until a new sign-in replaces it");
+    }
+
+    #[gpui_kit::test]
+    fn working_session_at_startup_knows_the_viewer(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (app, cx) = start(cx, MockBackend::new(), Some(SessionSource::Keyring), &store);
+        assert!(app.read_with(cx, |app, _| app.viewer().is_some()));
+        assert!(app.read_with(cx, |app, _| app.login().is_none()));
     }
 }

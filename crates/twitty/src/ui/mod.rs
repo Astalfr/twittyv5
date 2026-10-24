@@ -5,5 +5,6 @@ pub mod app;
 pub mod assets;
 pub mod column;
 pub mod hub;
+pub mod login;
 pub mod post;
 pub mod theme;

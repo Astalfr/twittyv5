@@ -41,7 +41,7 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 
 | Item | Value |
 |---|---|
-| Cookie `auth_token` | Session token. Secret. Read from a session file or env vars (see "Signing in"); keyring in M6. |
+| Cookie `auth_token` | Session token. Secret. Stored in Windows Credential Manager by the sign-in dialog (see "Signing in"). |
 | Cookie `ct0` | CSRF token, also sent as the `x-csrf-token` header |
 | `authorization` | `Bearer <public web bearer>` (`transport::WEB_BEARER`), the same for every web user. Re-extract it if requests get 403s with an empty body. |
 | `x-twitter-auth-type` | `OAuth2Session` |
@@ -52,19 +52,23 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 | `x-client-uuid`, `x-twitter-client-deviceid` | `ClientIds`: random UUIDs, saved once per install (`%LOCALAPPDATA%\Twitty\cache\client-ids.json`) |
 | `x-client-transaction-id` | Random 32-hex per request. See below. |
 
-**Cookie rotation**: when a response's `Set-Cookie` carries a new `ct0`/`auth_token`, the transport switches to it for the next request and calls the `on_rotate` hook. The app writes the rotated session back to the file it was read from (write + rename); sessions from env vars aren't persisted. Empty values (deletions) are ignored; an expired session shows up as 401 instead.
+**Cookie rotation**: when a response's `Set-Cookie` carries a new `ct0`/`auth_token`, the transport switches to it for the next request and calls the `on_rotate` hook. The app writes the rotated session back to where it came from: the keyring, or the session file (write + rename); sessions from env vars aren't persisted. Empty values (deletions) are ignored; an expired session shows up as 401 instead.
 
 **Login (v1)**: GPUI's webview doesn't support Windows, so the user copies `auth_token` and `ct0` from their browser's DevTools (Application → Cookies → x.com).
 
 ### Signing in
 
-Until the login dialog (M6), the app takes the first of:
+Use **Sign in** (banner or rail). The dialog explains where to find the cookies, normalises what was pasted (quotes, `auth_token=` prefixes, spaces), validates it with `Session::new`, then calls `Viewer`. Only a session X accepts is stored (Windows Credential Manager, entry `Twitty` / `x-session`).
+
+At startup the app takes the first of:
 
 1. `TWITTY_AUTH_TOKEN` and `TWITTY_CT0` environment variables;
-2. `%APPDATA%\Twitty\config\session.json`;
-3. `session.json` in the working directory (the repo root with `cargo run`; gitignored).
+2. the keyring entry stored by the dialog;
+3. `%APPDATA%\Twitty\config\session.json`, then `session.json` in the working directory (for development; gitignored).
 
-The file is `{"auth_token": "…", "ct0": "…"}`. A file that doesn't parse is logged by path (never its contents) and skipped. With none of these, the app runs on demo data with a banner. At startup the app calls `Viewer` and logs `signed in as @handle`, or the error.
+A session file is `{"auth_token": "…", "ct0": "…"}`. Unusable sources are logged (never their contents) and skipped. With none of these, the app runs on demo data with a banner. At startup the app calls `Viewer`: on success the rail's account button shows `@handle`; on `Unauthorized` the sign-in dialog opens with "session expired" (the stored entry is kept until a new sign-in replaces it).
+
+**Sign out** (account button) deletes the keyring entry and returns to demo data. Sessions from env vars or files can't be signed out from the app: the next launch would use them again, so the account panel says where the session comes from instead.
 
 ### What each column calls
 

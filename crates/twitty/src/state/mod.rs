@@ -4,4 +4,6 @@
 pub mod column;
 pub mod deck;
 pub mod interactions;
+pub mod login;
 pub mod media_layout;
+pub mod settings;

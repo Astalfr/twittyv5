@@ -2,7 +2,7 @@
 
 These docs explain **how Twitty works**. They change with the code: any change to architecture, data flow, protocol handling, persisted formats or testing updates the matching page in the same commit.
 
-> Project status: **M0–M5 done**. The app shows real X timelines through `XBackend` when it finds a session (see "Signing in" in [x-api.md](x-api.md)), and falls back to demo data otherwise. Next: M6 (login dialog, keyring).
+> Project status: **M0–M6 done**. Sign in from the app by pasting two cookies; the session is kept in Windows Credential Manager and the app shows your real X timelines. Without a session it runs on demo data. Next: M7 (all column types).
 
 | Page | What it covers |
 |---|---|

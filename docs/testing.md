@@ -27,16 +27,16 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 | Live (opt-in) | `twitty-x/tests/live.rs` `#[ignore]` | real x.com | Extractors over downloaded bundles, logged-out discovery crawl, real HomeTimeline call |
 | Backend contract | `twitty-model/tests/contract.rs` (generic) | run against `MockBackend` and `XBackend`+wiremock | Both backends behave the same for paging, errors and actions |
 | Persistence | `twitty/tests/persistence.rs` + `tests/golden/` | golden files | Every past `schema_version` loads and migrates. Saving then loading gives the same data. |
-| App state | `twitty/src/state/**` `#[cfg(test)]` | std, `MockBackend` | `ColumnModel` paging/dedup/unseen/failures, `Interactions` toggles + rollback, `DeckFile` golden files + repair + atomic save, media grid geometry |
-| UI wiring | `twitty/src/ui/**` `#[gpui_kit::test]` | `TestAppContext`, `MockBackend`, `Runtime::inline()` | Column loads on creation, list rows match the model, newer posts at top vs. scrolled, failure + retry, Home tab switch, hub rollback + `ActionFailed` |
+| App state | `twitty/src/state/**`, `account.rs` `#[cfg(test)]` | std, `MockBackend`, `MemoryStore` | `ColumnModel` paging/dedup/unseen/failures, `Interactions` toggles + rollback, `DeckFile`/`Settings`/credentials golden files + atomic save, `LoginForm` paste normalisation, keyring errors drop their payload, media grid geometry |
+| UI wiring | `twitty/src/ui/**` `#[gpui_kit::test]` | `TestAppContext`, `MockBackend`, `Runtime::inline()` | Column loads on creation, list rows match the model, newer posts at top vs. scrolled, failure + retry, Home tab switch, hub rollback + `ActionFailed`, sign-in stores only accepted sessions and rebuilds columns, sign-out (keyring only), expired session opens the dialog |
 | Live smoke | `twitty-x/tests/live.rs` `#[ignore]` | real X, `TWITTY_LIVE=1` | The current X still works: Viewer, Home, Search, TweetDetail translate with 0 `Unsupported`. Run by hand, never in CI. |
 
-## Current coverage (M5)
+## Current coverage (M6)
 
-207 tests (+3 opt-in live tests):
+233 tests (+3 opt-in live tests):
 - 120 in `twitty-x`: 86 unit tests (session, errors, headers, cookies, rate limits, interpretation, catalog, discovery, anonymiser, wire, request mapping, text incl. a property test, users, media, cards, tweets, notifications), 16 transport and 13 backend mock-server tests, and 5 fixture translation tests.
 - 23 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging and notifications.
-- 64 in `twitty`: state (including rate-limit/session hold-off and end-of-feed rules), formatting, runtime, themes, icons, GPUI view tests, and session discovery/rotation in `main.rs`. Two view tests open a real test window and scroll Home and Notifications to the end with wheel events, which renders every row shape.
+- 90 in `twitty`: state (paging, rate-limit/session hold-off, end-of-feed, settings, login form), credentials payload and stores, formatting, runtime, themes, icons, GPUI view tests (columns, deck scrolling, sign-in dialog, sign-in/out and the startup session check), and session discovery/rotation in `main.rs`. No test touches the real Credential Manager.
 
 ## Manual check
 

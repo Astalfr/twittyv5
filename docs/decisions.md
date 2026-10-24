@@ -4,6 +4,15 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Sign-out only for sessions the app stored (M6)
+- **Decision**: "Sign out" deletes the keyring entry. Sessions from env vars or session files show their source instead of a sign-out button.
+- **Why**: The app can't remove those sources, so a sign-out would silently undo itself on the next launch.
+
+### 2026-10-24: The UI builds backends through an injected `Connector` (M6)
+- **Decision**: `main.rs` passes `AccountServices { connect, store }`; the sign-in dialog turns pasted cookies into a backend through `connect` and checks it with `viewer()` before `store.save`.
+- **Why**: Keeps `twitty-x` out of the UI (architecture rule) and lets the whole flow be tested with `MockBackend` and `MemoryStore`, without touching the real Credential Manager in tests or CI.
+- **Consequences**: Cookie validation lives in one place (`twitty_x::Session::new`); the form only normalises pasted text.
+
 ### 2026-10-24: No separate `PostStore` (M5)
 - **Decision**: Rows stay owned by each `ColumnModel` (deduplicated by `FeedItem::key`). Viewer state that must agree across columns (liked, reposted, bookmarked) lives in `InteractionsHub`, keyed by `PostId`. The planned shared `PostStore` isn't built.
 - **Why**: The only thing columns must share today is viewer state, and the hub already does that. A shared store would add invalidation work without a user-visible gain.
