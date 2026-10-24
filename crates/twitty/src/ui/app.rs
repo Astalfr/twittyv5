@@ -31,12 +31,14 @@ use crate::{
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
         login::{LoginEvent, LoginView},
+        player::VideoPlayer,
         post::span_url,
         profile::{CloseProfile, ProfilePanel},
         theme,
         thread::{CloseThread, ThreadPanel},
         title_bar,
     },
+    video::Repeat,
 };
 
 /// Opacity of the theme's overlay colour behind the image viewer, dialogs and
@@ -141,6 +143,8 @@ pub struct TwittyApp {
     window: AnyWindowHandle,
     /// The image viewer: a post and the index of the media shown.
     media: Option<(Arc<twitty_model::Post>, usize)>,
+    /// Plays the viewer's media when it is a GIF.
+    media_player: Option<Entity<VideoPlayer>>,
     /// The overlay animating out after it closed. Inert: it gets no input.
     leaving: Option<Leaving<LeavingOverlay>>,
     /// The sheet animating out after it closed. Inert too.
@@ -204,6 +208,7 @@ impl TwittyApp {
             deck_save: None,
             window: window.window_handle(),
             media: None,
+            media_player: None,
             leaving: None,
             leaving_sheet: None,
             sheet_opened: None,
@@ -309,6 +314,7 @@ impl TwittyApp {
             Navigate::Media { post, index } => {
                 if index < post.media.len() {
                     self.media = Some((post, index));
+                    self.sync_media_player(window, cx);
                     cx.notify();
                 }
             }
@@ -318,6 +324,23 @@ impl TwittyApp {
     /// The post and media index shown in the image viewer.
     pub fn media_viewer(&self) -> Option<(&twitty_model::Post, usize)> {
         self.media.as_ref().map(|(p, ix)| (p.as_ref(), *ix))
+    }
+
+    /// The player of the viewer's GIF.
+    pub fn media_player(&self) -> Option<&Entity<VideoPlayer>> {
+        self.media_player.as_ref()
+    }
+
+    /// Starts playing the viewer's media if it is a GIF, and stops whatever
+    /// played before.
+    fn sync_media_player(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let stream =
+            self.media.as_ref().and_then(|(post, index)| match post.media.get(*index)? {
+                twitty_model::Media::Gif { stream: Some(url), .. } => Some(url.to_string()),
+                _ => None,
+            });
+        self.media_player =
+            stream.map(|url| cx.new(|cx| VideoPlayer::new(&url, Repeat::Loop, window, cx)));
     }
 
     pub fn active_column(&self) -> usize {
@@ -356,10 +379,11 @@ impl TwittyApp {
         }
     }
 
-    fn step_left_right(&mut self, delta: isize, cx: &mut Context<Self>) {
+    fn step_left_right(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((post, index)) = &mut self.media {
             let len = post.media.len();
             *index = (*index as isize + delta).rem_euclid(len.max(1) as isize) as usize;
+            self.sync_media_player(window, cx);
             cx.notify();
             return;
         }
@@ -384,6 +408,7 @@ impl TwittyApp {
     /// Closes the topmost thing: image viewer, dialog, then the sheet.
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
         if let Some((post, index)) = self.media.take() {
+            self.media_player = None;
             self.leave(LeavingOverlay::Media(post, index), cx);
         } else if self.has_dialog() {
             self.close_overlays(cx);
@@ -441,7 +466,10 @@ impl TwittyApp {
         let Some(media) = post.media.get(index) else {
             return div().into_any_element();
         };
-        let playable = !matches!(media, twitty_model::Media::Image { .. });
+        // The GIF playing here, unless it couldn't (the leaving copy shows the
+        // poster only).
+        let player = self.media_player.as_ref().filter(|p| interactive && !p.read(cx).failed());
+        let playable = !matches!(media, twitty_model::Media::Image { .. }) && player.is_none();
         let url = post.url.to_string();
         let viewport = window.viewport_size();
         let (box_w, box_h) =
@@ -465,10 +493,10 @@ impl TwittyApp {
                 .w(px(viewer::NAV))
                 .icon(Icon::new(icon).size(px(28.)))
                 .when(interactive, |b| {
-                    b.on_click(cx.listener(move |this, _, _, cx| {
+                    b.on_click(cx.listener(move |this, _, window, cx| {
                         // Not a click on the backdrop.
                         cx.stop_propagation();
-                        this.step_left_right(delta, cx)
+                        this.step_left_right(delta, window, cx)
                     }))
                 })
         };
@@ -514,6 +542,7 @@ impl TwittyApp {
                         // picture, and clicks on the bars would not close.
                         h_flex()
                             .flex_none()
+                            .relative()
                             .w(px(box_w))
                             .h(px(box_h))
                             .items_center()
@@ -544,7 +573,19 @@ impl TwittyApp {
                                             i.into_any_element()
                                         }
                                     }),
-                            ),
+                            )
+                            .children(player.map(|player| {
+                                // Over the poster, at its size (the whole box
+                                // until the poster has loaded).
+                                let (w, h) = drawn.unwrap_or((box_w, box_h));
+                                div()
+                                    .absolute()
+                                    .left(px((box_w - w) / 2.))
+                                    .top(px((box_h - h) / 2.))
+                                    .w(px(w))
+                                    .h(px(h))
+                                    .child(player.clone())
+                            })),
                     )
                     .when(count > 1, |d| d.child(nav("media-next", IconName::ChevronRight, 1))),
             )
@@ -565,6 +606,7 @@ impl TwittyApp {
                     .when(playable, |d| {
                         d.child(
                             Button::new("media-play")
+                                .debug_selector(|| "media-play".into())
                                 .primary()
                                 .icon(IconName::Play)
                                 .label("Play on x.com")
@@ -1544,16 +1586,12 @@ impl Render for TwittyApp {
                     .on_action(
                         cx.listener(|this, _: &keys::SelectPrevious, _, cx| this.select(-1, cx)),
                     )
-                    .on_action(
-                        cx.listener(|this, _: &keys::ColumnLeft, _, cx| {
-                            this.step_left_right(-1, cx)
-                        }),
-                    )
-                    .on_action(
-                        cx.listener(|this, _: &keys::ColumnRight, _, cx| {
-                            this.step_left_right(1, cx)
-                        }),
-                    )
+                    .on_action(cx.listener(|this, _: &keys::ColumnLeft, window, cx| {
+                        this.step_left_right(-1, window, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &keys::ColumnRight, window, cx| {
+                        this.step_left_right(1, window, cx)
+                    }))
                     .on_action(cx.listener(|this, _: &keys::LikeSelected, _, cx| {
                         this.toggle_selected(Toggle::Like, cx)
                     }))
@@ -2494,6 +2532,80 @@ mod tests {
         assert_eq!(app.read_with(cx, |app, _| app.active_column()), 0, "columns don't move");
         cx.simulate_keystrokes("escape");
         assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()));
+    }
+
+    #[gpui_kit::test]
+    fn a_gif_plays_in_the_media_viewer_until_it_is_left(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let video = cx
+            .update(|_, cx| crate::video::FakeVideo::install(vec![std::time::Duration::ZERO], cx));
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let mut post = column
+            .read_with(cx, |c, _| {
+                c.model()
+                    .items()
+                    .iter()
+                    .flat_map(|i| i.posts())
+                    .find(|p| !p.media.is_empty())
+                    .cloned()
+            })
+            .expect("the mock has a post with media");
+        let poster = post.media[0].preview().clone();
+        let stream = poster.url.join("/clip.mp4").unwrap();
+        post.media = vec![
+            twitty_model::Media::Gif {
+                poster: poster.clone(),
+                stream: Some(stream.clone()),
+                alt: None,
+            },
+            twitty_model::Media::Image { image: poster, alt: None },
+        ];
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        let to = Navigate::Media { post: Arc::new(post), index: 0 };
+        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+
+        let player = app.read_with(cx, |app, _| app.media_player().cloned()).expect("playing");
+        assert!(player.read_with(cx, |p, _| p.current().is_some()), "a frame is drawn");
+        assert_eq!(video.opened(), vec![stream.to_string()]);
+
+        cx.simulate_keystrokes("right");
+        assert!(app.read_with(cx, |app, _| app.media_player().is_none()), "an image: no player");
+        cx.simulate_keystrokes("left");
+        assert!(app.read_with(cx, |app, _| app.media_player().is_some()), "back on the GIF");
+        assert_eq!(video.opened().len(), 2, "it starts over");
+        cx.simulate_keystrokes("escape");
+        assert!(app.read_with(cx, |app, _| app.media_player().is_none()), "closing stops it");
+    }
+
+    #[gpui_kit::test]
+    fn a_gif_that_fails_to_play_falls_back_to_x_com(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        cx.update(|_, cx| crate::video::FakeVideo::install_failing(cx));
+        let column = app.read_with(cx, |app, _| app.active_view()).unwrap();
+        let mut post = column
+            .read_with(cx, |c, _| {
+                c.model()
+                    .items()
+                    .iter()
+                    .flat_map(|i| i.posts())
+                    .find(|p| !p.media.is_empty())
+                    .cloned()
+            })
+            .expect("the mock has a post with media");
+        let poster = post.media[0].preview().clone();
+        let stream = Some(poster.url.join("/missing.mp4").unwrap());
+        post.media = vec![twitty_model::Media::Gif { poster, stream, alt: None }];
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        let to = Navigate::Media { post: Arc::new(post), index: 0 };
+        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, cx| app.media_player().unwrap().read(cx).failed()));
+        assert!(cx.debug_bounds("media-play").is_some(), "the fallback button is back");
     }
 
     #[gpui_kit::test]

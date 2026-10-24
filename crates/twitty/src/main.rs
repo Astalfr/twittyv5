@@ -35,6 +35,7 @@ use twitty::{
         self,
         app::{AppOptions, TwittyApp},
     },
+    video::{SystemVideo, Video},
 };
 
 fn main() -> anyhow::Result<()> {
@@ -128,6 +129,7 @@ fn main() -> anyhow::Result<()> {
         ui::keys::bind(cx);
         cx.set_global(runtime);
         cx.set_global(Sound(Arc::new(SystemSound)));
+        cx.set_global(Video(Arc::new(SystemVideo)));
         cx.set_http_client(Arc::new(http));
 
         // Demo: new posts trickle into Home so polling and the "new posts" pill can be seen.

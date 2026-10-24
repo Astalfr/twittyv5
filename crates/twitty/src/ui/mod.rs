@@ -10,6 +10,7 @@ pub mod compose;
 pub mod hub;
 pub mod keys;
 pub mod login;
+pub mod player;
 pub mod post;
 pub mod profile;
 pub mod remote_image;

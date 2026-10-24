@@ -8,3 +8,4 @@ pub mod runtime;
 pub mod sound;
 pub mod state;
 pub mod ui;
+pub mod video;

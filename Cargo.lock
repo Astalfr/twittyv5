@@ -7963,8 +7963,17 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "twitty-media",
  "twitty-model",
  "twitty-x",
+]
+
+[[package]]
+name = "twitty-media"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "windows 0.62.2",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/twitty", "crates/twitty-model", "crates/twitty-x"]
+members = ["crates/twitty", "crates/twitty-media", "crates/twitty-model", "crates/twitty-x"]
 default-members = ["crates/twitty"]
 
 [workspace.package]
@@ -13,6 +13,7 @@ publish = false
 [workspace.dependencies]
 twitty-model = { path = "crates/twitty-model" }
 twitty-x = { path = "crates/twitty-x" }
+twitty-media = { path = "crates/twitty-media" }
 
 # UI. gpui-kit pins the gpui-pre snapshot exactly; every gpui-pre-* crate must
 # match it (see docs/development.md before changing these).
@@ -24,6 +25,16 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 futures = "0.3"
 # The notification sound: mp3 decoding and playback only (GPUI has no audio).
 rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
+# Video decoding through Media Foundation (twitty-media only). 0.62 is the
+# version GPUI already builds, so this adds features, not a second copy.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Variant",
+] }
 
 # Async / HTTP for the X adapter.
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }
@@ -86,6 +97,8 @@ ttf-parser = { opt-level = 3 }
 smol = { opt-level = 3 }
 image = { opt-level = 3 }
 zune-jpeg = { opt-level = 3 }
+# Copies every decoded video frame pixel by pixel.
+twitty-media = { opt-level = 3 }
 
 [profile.release]
 strip = "symbols"

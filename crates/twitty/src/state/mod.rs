@@ -13,6 +13,7 @@ pub mod links;
 pub mod login;
 pub mod media_layout;
 pub mod motion;
+pub mod playback;
 pub mod poll;
 pub mod profile;
 pub mod settings;

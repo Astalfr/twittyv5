@@ -63,7 +63,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 | Open a profile | Clicking an author's avatar, name or @handle opens the profile sheet instead of the post's thread. |
 | Profile sheet | `ui::profile::ProfilePanel`, in the same side-sheet slot as the thread panel (one replaces the other; opening the account already shown does nothing). Header: 72px avatar, name + badge, @handle, bio, Tweets / Following / Followers counts. It shows the post's copy of the profile at once, then refreshes it with `Backend::profile`. Below, tabs **Tweets** and **Media**, each half the sheet's width: **Tweets** (the user's posts as normal rows), **Media** (a 3-wide gallery of square tiles: pictures, GIFs and videos with their badge; a click opens the image viewer). Each tab is a `ColumnModel` of `FeedSource::User { tab: Posts / Media }`, loaded the first time it's shown and paged as it scrolls; header, tabs, rows and footer are all rows of one `list()` (mapping in `state::profile`). The **+** button adds the account as a User column. |
 | Composer | `dialog`, with a character counter, reply and quote preview, and image attachments (later) |
-| Video/GIF | Poster image with a ▶ badge and duration. Click opens it externally (GPUI has no video player). |
+| Video/GIF | Poster image with a ▶ badge and duration (GIF: a GIF badge). A click opens the media viewer. There, a GIF plays in a loop over its poster (`ui::player`, decoded by Media Foundation through `twitty-media`); a click on it pauses or resumes. Videos, and GIFs that fail to play, keep the poster and a "Play on x.com" button (sound and video controls come next). |
 
 ### Themes
 
