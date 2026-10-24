@@ -44,8 +44,8 @@ pub const LOGO: &str = "brand/twitty.png";
 
 /// Size the logo is drawn at, in logical pixels. GPUI samples images
 /// bilinearly with no mipmaps, so a PNG much larger than its drawn size comes
-/// out jagged: the embedded one is about twice this, which stays smooth from
-/// 100% to 200% display scaling.
+/// out jagged: the title bar draws the (256px) logo through
+/// `remote_image::asset`, which resamples it to the device size first.
 pub const LOGO_SIZE: f32 = 18.;
 
 /// The app's asset source.
@@ -112,13 +112,22 @@ mod tests {
     }
 
     #[test]
-    fn the_logo_is_about_twice_its_drawn_size() {
-        // A much larger PNG aliases when GPUI shrinks it (no mipmaps).
+    fn the_logo_is_resampled_to_its_drawn_size_at_any_scale() {
+        use crate::{state::image_scale::BoxPx, ui::remote_image::decode};
         let bytes = Assets.load(LOGO).unwrap().expect("logo is embedded");
-        let dim = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as f32;
-        let (width, height) = (dim(16), dim(20));
-        assert_eq!(width, height, "square");
-        let ratio = width / LOGO_SIZE;
-        assert!((2.0..=2.5).contains(&ratio), "{width}px logo drawn at {LOGO_SIZE}px");
+        let dim = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
+        assert_eq!(dim(16), dim(20), "square");
+        // Unshrunk, GPUI would skip source pixels (no mipmaps) and alias.
+        for scale in [1.0, 1.25, 1.5, 2.0, 3.0] {
+            let target = BoxPx::bucket(LOGO_SIZE, LOGO_SIZE, scale).unwrap();
+            assert!(dim(16) > target.w * 2, "the source is sharp enough at {scale}x");
+            let image = decode(&bytes, target).unwrap();
+            let size = image.size(0);
+            assert_eq!(
+                (size.width.0, size.height.0),
+                (target.w as i32, target.h as i32),
+                "drawn at about its own size at {scale}x"
+            );
+        }
     }
 }

@@ -1,15 +1,16 @@
-//! Remote images resampled to the size they are drawn at.
+//! Images resampled to the size they are drawn at.
 //!
 //! GPUI draws a bitmap with no mipmaps, so a photo shrunk to a third of its
-//! size on screen looks jagged (see `state::image_scale`). [`source`] fetches
-//! and decodes the image itself and shrinks it on the CPU with a proper
-//! filter first, in GPUI's background executor.
+//! size on screen looks jagged (see `state::image_scale`). [`source`] (remote
+//! images) and [`asset`] (embedded ones) decode the image themselves and
+//! shrink it on the CPU with a proper filter first, in GPUI's background
+//! executor.
 
 use std::{collections::HashMap, io::Cursor, sync::Arc};
 
 use futures::AsyncReadExt as _;
 use gpui_kit::{
-    App, Asset, Global, ImageCacheError, ImageSource, RenderImage, SharedUri, Window,
+    App, Asset, Global, ImageCacheError, ImageSource, RenderImage, SharedString, SharedUri, Window,
     http_client::{AsyncBody, HttpClient},
 };
 use image::{DynamicImage, Frame, ImageDecoder as _, ImageReader, imageops::FilterType};
@@ -19,9 +20,19 @@ use crate::state::image_scale::{BoxPx, cover_size};
 /// An image source for `url` drawn in a `w` × `h` (logical pixels) box with
 /// `ObjectFit::Cover`.
 pub(crate) fn source(url: &str, w: f32, h: f32) -> ImageSource {
-    let uri = SharedUri::from(url.to_owned());
+    resampled(Origin::Remote(SharedUri::from(url.to_owned())), w, h)
+}
+
+/// An image source for the app asset at `path` (see `ui::assets`) drawn in a
+/// `w` × `h` (logical pixels) box with `ObjectFit::Cover`. The asset can be
+/// much larger than the box, so it stays sharp at any display scaling.
+pub(crate) fn asset(path: &'static str, w: f32, h: f32) -> ImageSource {
+    resampled(Origin::Asset(SharedString::new_static(path)), w, h)
+}
+
+fn resampled(origin: Origin, w: f32, h: f32) -> ImageSource {
     ImageSource::Custom(Arc::new(move |window: &mut Window, cx: &mut App| {
-        let key = Key { uri: uri.clone(), size: BoxPx::bucket(w, h, window.scale_factor())? };
+        let key = Key { origin: origin.clone(), size: BoxPx::bucket(w, h, window.scale_factor())? };
         match window.use_asset::<Scaled>(&key, cx) {
             Some(result) => {
                 if let Ok(image) = &result {
@@ -29,35 +40,44 @@ pub(crate) fn source(url: &str, w: f32, h: f32) -> ImageSource {
                     // runs every frame: write only when the copy changes.
                     let known = cx
                         .try_global::<Latest>()
-                        .and_then(|l| l.0.get(&key.uri))
+                        .and_then(|l| l.0.get(&key.origin))
                         .is_some_and(|known| Arc::ptr_eq(known, image));
                     if !known {
-                        cx.default_global::<Latest>().0.insert(key.uri, Arc::clone(image));
+                        cx.default_global::<Latest>().0.insert(key.origin, Arc::clone(image));
                     }
                 }
                 Some(result)
             }
             // A new size is still loading (the column or the scale changed):
             // keep drawing the previous copy instead of a blank box.
-            None => cx.try_global::<Latest>()?.0.get(&key.uri).cloned().map(Ok),
+            None => cx.try_global::<Latest>()?.0.get(&key.origin).cloned().map(Ok),
         }
     }))
 }
 
 /// The last copy of each image that finished loading, at whatever size.
 #[derive(Default)]
-struct Latest(HashMap<SharedUri, Arc<RenderImage>>);
+struct Latest(HashMap<Origin, Arc<RenderImage>>);
 
 impl Global for Latest {}
 
-/// A remote image at one box bucket.
+/// Where an image's bytes come from.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Origin {
+    /// Fetched over HTTP.
+    Remote(SharedUri),
+    /// The app's asset source (`ui::assets`).
+    Asset(SharedString),
+}
+
+/// An image at one box bucket.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Key {
-    pub(crate) uri: SharedUri,
+    pub(crate) origin: Origin,
     pub(crate) size: BoxPx,
 }
 
-/// Loads a [`Key`]: fetch, decode, shrink to cover the box.
+/// Loads a [`Key`]: fetch or load, decode, shrink to cover the box.
 pub(crate) enum Scaled {}
 
 impl Asset for Scaled {
@@ -69,8 +89,15 @@ impl Asset for Scaled {
         cx: &mut App,
     ) -> impl Future<Output = Self::Output> + Send + 'static {
         let client = cx.http_client();
+        let assets = Arc::clone(cx.asset_source());
         async move {
-            let bytes = fetch(client.as_ref(), &key.uri).await?;
+            let bytes = match &key.origin {
+                Origin::Remote(uri) => fetch(client.as_ref(), uri).await?,
+                Origin::Asset(path) => assets
+                    .load(path)?
+                    .ok_or_else(|| anyhow::anyhow!("no asset {path}"))?
+                    .into_owned(),
+            };
             decode(&bytes, key.size)
         }
     }
@@ -176,11 +203,24 @@ mod tests {
         cx.run_until_parked();
 
         let scale = cx.update(|window, _| window.scale_factor());
-        let key =
-            Key { uri: SharedUri::from(uri), size: BoxPx::bucket(200., 100., scale).unwrap() };
+        let key = Key {
+            origin: Origin::Remote(SharedUri::from(uri)),
+            size: BoxPx::bucket(200., 100., scale).unwrap(),
+        };
         let image = cx.update(|_, cx| cx.fetch_asset::<Scaled>(&key)).expect("loaded").unwrap();
         let (w, h) = cover_size((1200, 800), key.size).expect("shrunk");
         assert_eq!(image.size(0), size(DevicePixels(w as i32), DevicePixels(h as i32)));
+    }
+
+    #[gpui_kit::test]
+    fn a_missing_asset_is_an_error_not_a_panic(cx: &mut gpui_kit::TestAppContext) {
+        // The test app has no assets.
+        let key =
+            Key { origin: Origin::Asset("brand/none.png".into()), size: BoxPx { w: 20, h: 20 } };
+        cx.update(|cx| cx.fetch_asset::<Scaled>(&key));
+        cx.run_until_parked();
+        let result = cx.update(|cx| cx.fetch_asset::<Scaled>(&key)).expect("loaded");
+        assert!(result.is_err());
     }
 
     struct Shown(&'static str);
