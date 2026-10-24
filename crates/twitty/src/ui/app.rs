@@ -4,8 +4,8 @@ use std::{path::PathBuf, sync::Arc};
 
 use gpui_kit::{
     Context, Entity, FontWeight, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
-    Styled, Subscription, Window, assets::IconName, component::button::*, component::*, div,
-    prelude::*, px,
+    Styled, Subscription, Window, assets::IconName, component::button::*,
+    component::scroll::ScrollableElement, component::*, div, prelude::*, px,
 };
 use twitty_model::{Backend, FeedSource, HomeMode, NotificationFilter, SearchSort};
 
@@ -17,6 +17,9 @@ use crate::{
         theme,
     },
 };
+
+/// Height of the strip under the deck reserved for its horizontal scrollbar.
+const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
 
 /// Options decided at startup.
 #[derive(Debug, Clone)]
@@ -250,17 +253,28 @@ impl Render for TwittyApp {
                 .child("Use the icons on the left to add one.")
                 .into_any_element()
         } else {
-            h_flex()
-                .id("deck")
+            // The scrollbar is an overlay on this wrapper (not on the scrolling
+            // element, whose children move with the scroll). The bottom padding
+            // gives it its own strip so it never covers the columns.
+            div()
+                .relative()
                 .flex_1()
                 .min_w_0()
                 .h_full()
-                .overflow_x_scroll()
-                .track_scroll(&self.deck_scroll)
-                // Without this GPUI turns a vertical wheel over a column into a
-                // horizontal deck scroll as well. Shift+wheel / touchpad still scroll sideways.
-                .restrict_scroll_to_axis()
-                .children(self.columns.iter().map(|(_, view)| view.clone()))
+                .pb(px(DECK_SCROLLBAR_GUTTER))
+                .child(
+                    h_flex()
+                        .id("deck")
+                        .size_full()
+                        .overflow_x_scroll()
+                        .track_scroll(&self.deck_scroll)
+                        // Without this GPUI turns a vertical wheel over a column into a
+                        // horizontal deck scroll as well. Shift+wheel / touchpad still
+                        // scroll sideways.
+                        .restrict_scroll_to_axis()
+                        .children(self.columns.iter().map(|(_, view)| view.clone())),
+                )
+                .horizontal_scrollbar(&self.deck_scroll)
                 .into_any_element()
         };
         v_flex()

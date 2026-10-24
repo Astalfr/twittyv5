@@ -2,7 +2,7 @@
 
 use gpui_kit::{
     App, SharedString, Window,
-    component::{Theme, ThemeRegistry},
+    component::{Theme, ThemeRegistry, scroll::ScrollbarMode},
 };
 
 const THEMES: &str = include_str!("../../themes/x.json");
@@ -16,6 +16,8 @@ pub fn init(name: &str, cx: &mut App) {
         tracing::error!("bundled themes failed to load: {err:#}");
     }
     apply(name, None, cx);
+    // Columns and the deck always show their scrollbars, like X Pro.
+    Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
 }
 
 /// Activates the theme called `name`, if it exists.
@@ -58,5 +60,15 @@ mod tests {
         assert_eq!(next("Lights out"), "Dim");
         assert_eq!(next("Light"), "Lights out");
         assert_eq!(next("unknown"), "Lights out");
+    }
+
+    #[gpui_kit::test]
+    fn init_applies_theme_and_always_shows_scrollbars(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            init("Dim", cx);
+            assert_eq!(Theme::global(cx).scrollbar_mode, ScrollbarMode::Always);
+            assert_eq!(Theme::global(cx).theme_name().as_ref(), "Dim");
+        });
     }
 }

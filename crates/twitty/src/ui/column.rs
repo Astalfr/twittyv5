@@ -5,8 +5,9 @@ use std::{sync::Arc, time::Duration};
 use gpui_kit::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, ListAlignment, ListOffset,
     ListState, ParentElement, Render, SharedString, Styled, Subscription, Task, Window,
-    assets::IconName, component::button::*, component::skeleton::Skeleton,
-    component::spinner::Spinner, component::*, div, list, prelude::*, px,
+    assets::IconName, component::button::*, component::scroll::ScrollableElement,
+    component::skeleton::Skeleton, component::spinner::Spinner, component::*, div, list,
+    prelude::*, px,
 };
 use twitty_model::{Backend, BackendError, FeedSource, HomeMode};
 
@@ -349,6 +350,7 @@ impl ColumnView {
             .flex_1()
             .min_h_0()
             .child(list(self.list.clone(), cx.processor(Self::render_row)).size_full())
+            .vertical_scrollbar(&self.list)
             .when(unseen > 0, |d| {
                 d.child(
                     h_flex().absolute().top_3().w_full().justify_center().child(

@@ -37,6 +37,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 |---|---|
 | Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: logo, Home, Search, Notifications, Lists, Add column, Deck switcher. Bottom: Compose (accent), account avatar menu. |
 | Deck | One horizontal scroll area. Columns are separated by 1px `border`. Columns can be reordered by dragging the header. |
+| Scrollbars | Always visible (`Theme::set_scrollbar_mode(Always)` in `ui/theme.rs`). Each column has a vertical bar driven by its `ListState`. The deck has a horizontal bar in a 12px strip under the columns, driven by its `ScrollHandle`. |
 | Column widths | Narrow 310px · Medium 350px (default) · Wide 400px |
 | Column header | 53px tall: icon, title (bold), subtitle (gray, `@handle` / query), ⚙ popover (width, Top/Latest, media size, clear, remove) |
 | Post cell | 12px padding · 40px round avatar · **name** · `@handle · 2m` gray · ⋯ menu · body 15px · media grid (1–4, 16px radius, 2px gap) · quote card (1px border, 16px radius, smaller avatar) · action bar (gray, active colours: like `pink`, repost `green`) |
