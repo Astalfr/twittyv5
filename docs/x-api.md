@@ -278,7 +278,8 @@ cargo run -p twitty-x --bin twitty-x-cli -- --session session.json capture op Tw
 cargo run -p twitty-x --bin twitty-x-cli -- anonymise dumps/home.json crates/twitty-x/tests/fixtures/home.json [--allow word,…]
 ```
 
-Variables that worked live (2026-10-24):
+Variables that worked live (2026-10-24). The app now asks for `"count":50` per page
+(`requests::PAGE_SIZE`); Twitter treats `count` as a hint and may return fewer rows.
 
 | Operation | Variables |
 |---|---|

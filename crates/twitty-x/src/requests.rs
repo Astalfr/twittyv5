@@ -12,7 +12,7 @@ use twitty_model::{
 use crate::client::home_variables;
 
 /// Rows asked for per page.
-pub(crate) const PAGE_SIZE: u32 = 20;
+pub(crate) const PAGE_SIZE: u32 = 50;
 
 /// The operation and variables for one page of `source`.
 pub(crate) fn feed(source: &FeedSource, page: &PageRequest) -> (&'static str, Value) {
@@ -262,11 +262,11 @@ mod tests {
         assert_eq!(op, "SearchTimeline");
         assert_eq!(
             vars,
-            json!({"rawQuery": "rust lang:en", "count": 20, "querySource": "typed_query", "product": "Top"})
+            json!({"rawQuery": "rust lang:en", "count": 50, "querySource": "typed_query", "product": "Top"})
         );
         let (op, vars) = first(FeedSource::Notifications { filter: NotificationFilter::Mentions });
         assert_eq!(op, "NotificationsTimeline");
-        assert_eq!(vars, json!({"timeline_type": "Mentions", "count": 20}));
+        assert_eq!(vars, json!({"timeline_type": "Mentions", "count": 50}));
         let (op, vars) = first(FeedSource::User {
             id: UserId::new("11348282"),
             handle: "NASA".into(),
@@ -292,7 +292,7 @@ mod tests {
         assert_eq!(first(user(UserTab::Likes)).0, "Likes");
         let (op, vars) = first(FeedSource::List { id: ListId::new("5"), name: None });
         assert_eq!(op, "ListLatestTweetsTimeline");
-        assert_eq!(vars, json!({"listId": "5", "count": 20}));
+        assert_eq!(vars, json!({"listId": "5", "count": 50}));
     }
 
     #[test]

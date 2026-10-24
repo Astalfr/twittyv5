@@ -422,7 +422,12 @@ impl ColumnView {
                     .child(Icon::new(icon).size(px(20.)).text_color(theme.foreground))
                     .when(!tabs.is_empty(), |d| d.border_b_1().border_color(theme.border))
                     .child(
+                        // Clicking the name scrolls back to the top, as on Twitter.
                         v_flex()
+                            .id("column-name")
+                            .debug_selector(|| "column-name".into())
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, _, cx| this.scroll_to_top(cx)))
                             .flex_1()
                             .min_w_0()
                             // 12px from the icon, more than the gap to the buttons.
@@ -469,14 +474,10 @@ impl ColumnView {
                                     })),
                             )
                             .child(
-                                header_button(
-                                    "settings",
-                                    IconName::SlidersHorizontal,
-                                    "Column settings",
-                                )
-                                .on_click(cx.listener(
-                                    move |_, _, _, cx| cx.emit(ColumnEvent::OpenSettings(id)),
-                                )),
+                                header_button("settings", IconName::Settings, "Column settings")
+                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                        cx.emit(ColumnEvent::OpenSettings(id))
+                                    })),
                             )
                             .child(header_button("remove", IconName::X, "Remove column").on_click(
                                 cx.listener(move |_, _, _, cx| cx.emit(ColumnEvent::Remove(id))),
@@ -943,6 +944,37 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(column.read_with(cx, |c, _| c.model().unseen()), 0, "the pill scrolled up");
         assert_eq!(navigations.get(), 0, "no thread opened under the pill");
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_column_name_scrolls_back_to_the_top(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let shared: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let source = FeedSource::Home { mode: HomeMode::Following };
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            ColumnView::new(&ColumnConfig::new(ColumnId(1), source), shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(150.), px(400.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-1500.))),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        assert!(column.read_with(cx, |c, _| c.list.logical_scroll_top().item_ix > 0));
+
+        let name = cx.debug_bounds("column-name").expect("the name is drawn");
+        cx.simulate_click(name.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        column.read_with(cx, |c, _| {
+            let top = c.list.logical_scroll_top();
+            assert_eq!((top.item_ix, top.offset_in_item), (0, px(0.)), "back at the top");
+            assert!(c.at_top);
+        });
     }
 
     /// Mounts a real window, draws it, and scrolls with wheel events until the
