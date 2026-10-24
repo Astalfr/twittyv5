@@ -7,8 +7,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::{
     Animation, AnimationExt, AnyElement, App, ClickEvent, ClipboardItem, ElementId, Entity,
     FontWeight, HighlightStyle, Hsla, ImageSource, Img, InteractiveText, IntoElement, ObjectFit,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText,
-    UnderlineStyle, Window,
+    ParentElement, Pixels, SharedString, StatefulInteractiveElement, Styled, StyledImage,
+    StyledText, UnderlineStyle, Window,
     component::avatar::Avatar,
     component::button::*,
     component::hover_card::HoverCard,
@@ -17,7 +17,7 @@ use gpui_kit::{
     component::*,
     div, img,
     prelude::*,
-    px,
+    px, rems,
 };
 use twitty_model::{
     Embed, FeedItem, LinkCard, Media, NotificationKind, Poll, Post, PostOrGone, Profile, RichText,
@@ -178,6 +178,43 @@ pub(crate) fn avatar(profile: &Profile, size: f32) -> impl IntoElement + use<> {
     a
 }
 
+/// Handle size relative to the name's (`text_sm`).
+const HANDLE_SCALE: f32 = 0.875;
+
+/// How far above the name's baseline the handle sits: a little higher
+/// reads better next to the bold name.
+const HANDLE_RAISE: f32 = 1.0;
+
+/// Distance from the bottom of a one-line text box to its baseline: GPUI
+/// centres the glyphs' ascent + descent in the line height.
+fn baseline_from_bottom(line_height: Pixels, ascent: Pixels, descent: Pixels) -> Pixels {
+    (line_height - ascent + descent) / 2.
+}
+
+/// How far to lift the (smaller) handle off the bottom of the header so it
+/// sits `HANDLE_RAISE` above the bold name's baseline. GPUI's flex layout has no baseline
+/// alignment, so this measures the fonts.
+fn handle_lift(window: &Window, family: &SharedString) -> Pixels {
+    let rem = window.rem_size();
+    let base = window.text_style();
+    let text_system = window.text_system();
+    let gap = |weight: FontWeight, size: Pixels| {
+        let mut style = base.clone();
+        style.font_family = family.clone();
+        style.font_weight = weight;
+        style.font_size = size.into();
+        let font = text_system.resolve_font(&style.font());
+        baseline_from_bottom(
+            // Unrounded, like the laid-out text box.
+            style.line_height.to_pixels(style.font_size, rem),
+            text_system.ascent(font, size),
+            text_system.descent(font, size),
+        )
+    };
+    let lift = gap(FontWeight::BOLD, rem) - gap(FontWeight::NORMAL, rem * HANDLE_SCALE);
+    (lift + px(HANDLE_RAISE)).max(px(0.))
+}
+
 /// A click handler that opens `profile` (instead of the post's thread).
 fn open_profile(
     profile: &Arc<Profile>,
@@ -285,7 +322,11 @@ fn post_row(
         .child(
             div()
                 .id(("author-handle", key))
+                .debug_selector(|| format!("post-handle-{key}"))
                 .min_w_0()
+                .text_size(rems(HANDLE_SCALE))
+                .self_end()
+                .mb(handle_lift(window, &theme.font_family))
                 .truncate()
                 .on_click(open_profile(&post.author, &rcx.hub))
                 .child(format!("@{}", post.author.handle)),
@@ -1131,6 +1172,57 @@ mod tests {
         let bounds = cx.debug_bounds("tile-image").expect("the image is rendered");
         // Taller than the tile, its rounded bottom corners would be clipped off.
         assert_eq!(bounds.size, gpui_kit::size(px(200.), px(100.)));
+    }
+
+    #[gpui_kit::test]
+    fn the_handle_is_smaller_than_the_name(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
+        let author = Arc::make_mut(&mut post.author);
+        author.display_name = "Al".into();
+        author.handle = "al".into();
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+
+        let name = cx.debug_bounds("post-name-0").expect("the name is rendered");
+        let handle = cx.debug_bounds("post-handle-0").expect("the handle is rendered");
+        let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
+        assert!(handle.size.height < name.size.height, "smaller text: {handle:?} vs {name:?}");
+        assert_eq!(handle.size.height, time.size.height, "same size as the time");
+        assert!(handle.bottom() <= name.bottom(), "inside the name's line: {handle:?}");
+
+        // Each box's baseline sits `baseline_from_bottom` above its bottom.
+        let mut baseline = |bounds: gpui_kit::Bounds<gpui_kit::Pixels>, weight, scale: f32| {
+            cx.update(|window, cx| {
+                let size = window.rem_size() * scale;
+                let font = gpui_kit::Font {
+                    family: cx.theme().font_family.clone(),
+                    weight,
+                    ..window.text_style().font()
+                };
+                let ts = window.text_system();
+                let id = ts.resolve_font(&font);
+                let from_bottom = baseline_from_bottom(
+                    bounds.size.height,
+                    ts.ascent(id, size),
+                    ts.descent(id, size),
+                );
+                bounds.bottom() - from_bottom
+            })
+        };
+        let name_line = baseline(name, FontWeight::BOLD, 1.);
+        let handle_line = baseline(handle, FontWeight::NORMAL, HANDLE_SCALE);
+        assert!(
+            (name_line - handle_line - px(HANDLE_RAISE)).abs() < px(0.1),
+            "the handle's baseline {handle_line:?} sits {HANDLE_RAISE}px above the name's {name_line:?}"
+        );
+    }
+
+    #[test]
+    fn the_baseline_sits_above_the_descent() {
+        // 20px line, 12px ascent, 4px descent: 2px padding, then the descent.
+        assert_eq!(baseline_from_bottom(px(20.), px(12.), px(4.)), px(6.));
     }
 
     #[gpui_kit::test]
