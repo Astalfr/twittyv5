@@ -21,6 +21,7 @@ use crate::{
     ui::{
         hub::{InteractionsHub, Navigate},
         post::{RowCtx, avatar, fmt_duration, render_item, rich_text, verified_badge, video_badge},
+        remote_image,
         thread::PANEL_WIDTH,
     },
 };
@@ -373,7 +374,7 @@ impl ProfilePanel {
                         hub.update(cx, |hub, cx| hub.navigate(to, cx));
                     })
                     .child(
-                        img(media.preview().url.as_str().to_owned())
+                        img(remote_image::source(media.preview().url.as_str(), TILE, TILE))
                             .size_full()
                             .object_fit(ObjectFit::Cover),
                     )

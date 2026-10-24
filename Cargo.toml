@@ -18,6 +18,10 @@ twitty-x = { path = "crates/twitty-x" }
 # match it (see docs/development.md before changing these).
 gpui-kit = "=0.8.0"
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.9" }
+# Resampling remote images before GPUI draws them (GPUI already builds both;
+# `image` must stay on the 0.25 line GPUI uses, since `RenderImage` takes its `Frame`).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+futures = "0.3"
 
 # Async / HTTP for the X adapter.
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }
@@ -78,6 +82,8 @@ resvg = { opt-level = 3 }
 rustybuzz = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }
 smol = { opt-level = 3 }
+image = { opt-level = 3 }
+zune-jpeg = { opt-level = 3 }
 
 [profile.release]
 strip = "symbols"

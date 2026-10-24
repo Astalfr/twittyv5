@@ -6,6 +6,7 @@ pub mod column;
 pub mod compose;
 pub mod deck;
 pub mod diagnostics;
+pub mod image_scale;
 pub mod interactions;
 pub mod links;
 pub mod login;

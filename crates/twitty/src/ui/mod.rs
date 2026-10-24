@@ -11,5 +11,6 @@ pub mod keys;
 pub mod login;
 pub mod post;
 pub mod profile;
+pub mod remote_image;
 pub mod theme;
 pub mod thread;

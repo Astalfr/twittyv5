@@ -27,7 +27,10 @@ use twitty_model::{
 use crate::{
     format::{compact_count, exact_time, relative_time},
     state::{interactions::Toggle, links, media_layout, motion},
-    ui::hub::{InteractionsHub, Navigate},
+    ui::{
+        hub::{InteractionsHub, Navigate},
+        remote_image,
+    },
 };
 
 /// Horizontal padding of a row.
@@ -522,7 +525,7 @@ fn media_grid(
                 .w(px(tile.w))
                 .h(px(tile.h))
                 .child(rounded_img(
-                    m.preview().url.to_string(),
+                    remote_image::source(m.preview().url.as_str(), tile.w, tile.h),
                     tile.w,
                     tile.h,
                     grid.corners(tile, inner),
@@ -675,7 +678,7 @@ fn quote_card(
             let inner = (width - 2.0 * BORDER).max(0.0);
             let h = media_layout::layout(1, m.preview().aspect(), inner).height.min(220.);
             div().w_full().h(px(h)).child(rounded_img(
-                m.preview().url.to_string(),
+                remote_image::source(m.preview().url.as_str(), inner, h),
                 inner,
                 h,
                 media_layout::Corners::BOTTOM,
@@ -707,7 +710,7 @@ fn link_card(
             let inner = (width - 2.0 * BORDER).max(0.0);
             let h = width / 1.91;
             div().w_full().h(px(h)).child(rounded_img(
-                image.url.to_string(),
+                remote_image::source(image.url.as_str(), inner, h),
                 inner,
                 h,
                 media_layout::Corners::TOP,

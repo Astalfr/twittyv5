@@ -13,6 +13,8 @@ twitty-model = { workspace = true, features = ["mock"] }
 twitty-x.workspace = true
 gpui-kit.workspace = true
 reqwest_client.workspace = true
+image.workspace = true
+futures.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
