@@ -30,6 +30,19 @@ impl ColumnKind {
         ColumnKind::Bookmarks,
     ];
 
+    /// The kind of column showing `source` (a thread is a Tweet column).
+    pub fn of(source: &FeedSource) -> ColumnKind {
+        match source {
+            FeedSource::Home { .. } => ColumnKind::Home,
+            FeedSource::Notifications { .. } => ColumnKind::Notifications,
+            FeedSource::Search { .. } => ColumnKind::Search,
+            FeedSource::User { .. } => ColumnKind::User,
+            FeedSource::List { .. } => ColumnKind::List,
+            FeedSource::Thread { .. } => ColumnKind::Post,
+            FeedSource::Bookmarks => ColumnKind::Bookmarks,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             ColumnKind::Home => "Home",
@@ -189,6 +202,26 @@ fn handle(input: &str) -> Result<String, InputError> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn every_column_has_the_kind_that_adds_it() {
+        let inputs = [
+            (ColumnKind::Home, ""),
+            (ColumnKind::Notifications, ""),
+            (ColumnKind::Search, "rust"),
+            (ColumnKind::List, "123"),
+            (ColumnKind::Post, "456"),
+            (ColumnKind::Bookmarks, ""),
+        ];
+        for (kind, input) in inputs {
+            let Ok(Parsed::Source(source)) = parse(kind, input) else {
+                panic!("{kind:?} parses {input:?}");
+            };
+            assert_eq!(ColumnKind::of(&source), kind);
+        }
+        let user = user_source(twitty_model::UserId::new("1"), "someone");
+        assert_eq!(ColumnKind::of(&user), ColumnKind::User);
+    }
 
     #[test]
     fn kinds_without_input_need_none() {

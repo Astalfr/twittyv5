@@ -18,6 +18,7 @@ use crate::{
     runtime::Runtime,
     sound,
     state::{
+        add_column::ColumnKind,
         alerts,
         column::{ColumnModel, ListChange, LoadKind, Status},
         deck::{ColumnConfig, ColumnId, ColumnSettings},
@@ -419,14 +420,30 @@ impl ColumnView {
                     .px_4()
                     .gap_2()
                     .child(Icon::new(icon).size(px(20.)).text_color(theme.foreground))
+                    .when(!tabs.is_empty(), |d| d.border_b_1().border_color(theme.border))
                     .child(
-                        div()
+                        v_flex()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_lg()
-                            .font_weight(FontWeight::EXTRA_BOLD)
-                            .child(self.title()),
+                            // 12px from the icon, more than the gap to the buttons.
+                            .ml_1()
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .line_height(gpui_kit::relative(1.2))
+                                    .text_color(theme.muted_foreground)
+                                    .debug_selector(|| "column-kind".into())
+                                    .child(ColumnKind::of(source).label()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_lg()
+                                    .line_height(gpui_kit::relative(1.2))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .debug_selector(|| "column-title".into())
+                                    .child(self.title()),
+                            ),
                     )
                     .child(
                         h_flex()
@@ -845,6 +862,28 @@ mod tests {
         poll_new(&backend, &column, cx);
         assert_eq!(sound.played().len(), 2);
         assert_eq!(cx.shown_system_notifications().len(), 1);
+    }
+
+    #[gpui_kit::test]
+    fn the_header_names_the_column_kind_above_its_title(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let shared: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            let source = FeedSource::Search { query: "rust".into(), sort: Default::default() };
+            let mut config = ColumnConfig::new(ColumnId(1), source);
+            config.settings.set_name("Rustaceans");
+            ColumnView::new(&config, shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+        let kind = cx.debug_bounds("column-kind").expect("the kind is drawn");
+        let title = cx.debug_bounds("column-title").expect("the title is drawn");
+        assert!(kind.bottom() <= title.top(), "kind above the title: {kind:?} {title:?}");
+        assert_eq!(title.left(), px(16. + 20. + 12.), "padding, icon, then a 12px gap");
+        assert_eq!(column.read_with(cx, |c, _| c.title()), "Rustaceans");
     }
 
     #[gpui_kit::test]
