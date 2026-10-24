@@ -156,3 +156,8 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: The viewer gives `img` only a max width/height (from the window size) and no explicit size, so GPUI lays it out at the decoded bitmap's size, capped by the available box.
 - **Why**: `ImageRef.size` is X's `original_info`, but the URL served is a smaller variant (`?name=medium`, ≤ 1200 px). Capping at `ImageRef.size` would still upscale big originals, and computing the variant's size in the UI would leak X knowledge out of `twitty-x`.
 - **Consequences**: Bitmap pixels map to logical pixels, so at 150% display scaling an image can still be up to 1.5× physically. Showing large originals sharply on big screens needs a full-size variant in the model (a separate change).
+
+### 2026-10-24: Profiles open in the side sheet, not as a column
+- **Decision**: Clicking an avatar or a name (post author, reposter, quoted author, notification actor) opens a profile sheet with Tweets / Media tabs. Adding the account as a column is an explicit action: **Open column** on the hover card, or **+** in the sheet. The profile sheet and the thread panel share one side-sheet slot (`Sheet` in `ui/app.rs`); opening one replaces the other, with no back stack.
+- **Why**: A click to look at someone shouldn't change the saved deck. One slot keeps the backdrop, slide-in/out, the inert leaving copy and the Esc order identical for both sheets.
+- **Consequences**: A post opened from a profile replaces the profile; going back means clicking the author again. A back stack can be added in `TwittyApp::show_sheet` if that becomes annoying.

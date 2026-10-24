@@ -10,5 +10,6 @@ pub mod hub;
 pub mod keys;
 pub mod login;
 pub mod post;
+pub mod profile;
 pub mod theme;
 pub mod thread;

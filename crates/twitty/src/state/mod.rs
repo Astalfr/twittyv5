@@ -11,6 +11,7 @@ pub mod login;
 pub mod media_layout;
 pub mod motion;
 pub mod poll;
+pub mod profile;
 pub mod settings;
 pub mod sources;
 pub mod thread;

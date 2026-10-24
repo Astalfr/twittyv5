@@ -16,7 +16,7 @@ use crate::{
     Backend, BackendError, Badges, BoxFuture, Draft, Embed, FeedItem, FeedPage, FeedSource,
     ImageRef, LinkCard, Media, Metrics, PageRequest, PageToken, Poll, PollOption, Post, PostAction,
     PostId, PostOrGone, Profile, ProfileCounts, RichText, Span, SpanKind, ThreadView,
-    UnavailableReason, UserId, UserRef, VerifiedKind, ViewerPostState,
+    UnavailableReason, UserId, UserRef, UserTab, VerifiedKind, ViewerPostState,
 };
 use crate::{Notification, NotificationId, NotificationKind};
 
@@ -185,7 +185,29 @@ impl State {
                 if notifications { self.make_notification(i, at) } else { self.make_item(i, at) }
             })
             .collect();
+        let items = match source {
+            FeedSource::User { id, tab, .. } => self.user_feed(id, *tab, items),
+            _ => items,
+        };
         self.feeds.insert(source.clone(), items);
+    }
+
+    /// A known author's posts are theirs; their media tab only has posts
+    /// with media.
+    fn user_feed(&self, id: &UserId, tab: UserTab, items: Vec<FeedItem>) -> Vec<FeedItem> {
+        let Some(user) = self.authors.iter().find(|a| &a.id == id) else {
+            return items;
+        };
+        items
+            .into_iter()
+            .filter_map(|item| match item {
+                FeedItem::Post(mut p) => {
+                    p.author = Arc::clone(user);
+                    (tab != UserTab::Media || !p.media.is_empty()).then_some(FeedItem::Post(p))
+                }
+                other => (tab != UserTab::Media).then_some(other),
+            })
+            .collect()
     }
 
     fn newest_time(&self, source: &FeedSource) -> DateTime<Utc> {
@@ -594,6 +616,28 @@ mod tests {
         // Asking again with the new cursor yields nothing.
         let again = block_on(b.feed(&home(), PageRequest::Newer(newer.newer.unwrap()))).unwrap();
         assert!(again.items.is_empty());
+    }
+
+    #[test]
+    fn user_feeds_hold_that_users_posts_and_media() {
+        let b = MockBackend::new();
+        let user = block_on(b.viewer()).unwrap();
+        let feed = |tab| {
+            let source =
+                FeedSource::User { id: user.id.clone(), handle: user.handle.to_string(), tab };
+            block_on(b.feed(&source, PageRequest::First)).unwrap().items
+        };
+        let posts = feed(UserTab::Posts);
+        let own: Vec<_> = posts
+            .iter()
+            .filter_map(|i| if let FeedItem::Post(p) = i { Some(p) } else { None })
+            .collect();
+        assert!(!own.is_empty());
+        assert!(own.iter().all(|p| p.author.id == user.id));
+        let media = feed(UserTab::Media);
+        assert!(!media.is_empty());
+        assert!(media.iter().all(|i| matches!(i, FeedItem::Post(p)
+            if p.author.id == user.id && !p.media.is_empty())));
     }
 
     #[test]

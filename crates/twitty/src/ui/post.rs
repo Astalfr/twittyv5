@@ -5,8 +5,8 @@ use std::sync::Arc;
 use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, App, ElementId, Entity, FontWeight, HighlightStyle, Hsla,
-    InteractiveText, IntoElement, ObjectFit, ParentElement, SharedString,
+    Animation, AnimationExt, AnyElement, App, ClickEvent, ElementId, Entity, FontWeight,
+    HighlightStyle, Hsla, InteractiveText, IntoElement, ObjectFit, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, StyledImage, StyledText, UnderlineStyle, Window,
     component::avatar::Avatar, component::button::*, component::hover_card::HoverCard,
     component::*, div, img, prelude::*, px,
@@ -82,11 +82,17 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
                             .gap_2()
                             .flex_1()
                             .min_w_0()
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .children(n.actors.iter().take(6).map(|a| avatar(a, 32.0))),
-                            )
+                            .child(h_flex().gap_1().children(
+                                n.actors.iter().take(6).enumerate().map(|(k, a)| {
+                                    let key = rcx.ix * 8 + k;
+                                    div()
+                                        .id(("notif-actor", key))
+                                        .debug_selector(move || format!("notif-actor-{key}"))
+                                        .cursor_pointer()
+                                        .on_click(open_profile(a, &rcx.hub))
+                                        .child(avatar(a, 32.0))
+                                }),
+                            ))
                             .child(rich_text(("notif", rcx.ix), &n.text, theme.link, window, cx))
                             .children(n.target.as_ref().filter(|p| !p.body.is_empty()).map(|p| {
                                 div()
@@ -146,7 +152,7 @@ fn unavailable_text(reason: &UnavailableReason) -> String {
     }
 }
 
-fn avatar(profile: &Profile, size: f32) -> impl IntoElement + use<> {
+pub(crate) fn avatar(profile: &Profile, size: f32) -> impl IntoElement + use<> {
     let mut a = Avatar::new().name(profile.display_name.clone()).size(px(size));
     if let Some(src) = &profile.avatar {
         a = a.src(src.url.as_str().to_owned());
@@ -154,17 +160,36 @@ fn avatar(profile: &Profile, size: f32) -> impl IntoElement + use<> {
     a
 }
 
-/// An avatar that shows the account's card on hover, with a button to add
-/// a column of its posts.
+/// A click handler that opens `profile` (instead of the post's thread).
+fn open_profile(
+    profile: &Arc<Profile>,
+    hub: &Entity<InteractionsHub>,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let profile = Arc::clone(profile);
+    let hub = hub.clone();
+    move |_, _, cx| {
+        cx.stop_propagation();
+        let to = Navigate::Profile(Arc::clone(&profile));
+        hub.update(cx, |hub, cx| hub.navigate(to, cx));
+    }
+}
+
+/// An avatar that opens the account's profile on click and shows its card
+/// on hover, with a button to add a column of its posts.
 fn profile_hover(
-    id: (&'static str, usize),
+    key: usize,
     profile: &Arc<Profile>,
     hub: &Entity<InteractionsHub>,
 ) -> impl IntoElement {
+    let trigger = div()
+        .id(("author-avatar", key))
+        .debug_selector(|| format!("post-avatar-{key}"))
+        .cursor_pointer()
+        .on_click(open_profile(profile, hub))
+        .child(avatar(profile, AVATAR));
     let profile = Arc::clone(profile);
-    let trigger = avatar(&profile, AVATAR);
     let hub = hub.clone();
-    HoverCard::new(id).trigger(trigger).content(move |_, _, cx| {
+    HoverCard::new(("author", key)).trigger(trigger).content(move |_, _, cx| {
         let theme = cx.theme().clone();
         let p = Arc::clone(&profile);
         let hub = hub.clone();
@@ -190,7 +215,7 @@ fn profile_hover(
             )
             .child(Button::new("open-profile").small().label("Open column").on_click(
                 move |_, _, cx| {
-                    let to = Navigate::Profile(Arc::clone(&p));
+                    let to = Navigate::UserColumn(Arc::clone(&p));
                     hub.update(cx, |hub, cx| hub.navigate(to, cx));
                 },
             ))
@@ -224,14 +249,25 @@ fn post_row(
         .text_color(theme.muted_foreground)
         .child(
             div()
+                .id(("author-name", key))
+                .debug_selector(|| format!("post-name-{key}"))
                 .min_w_0()
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme.foreground)
                 .truncate()
+                .hover(|s| s.underline())
+                .on_click(open_profile(&post.author, &rcx.hub))
                 .child(post.author.display_name.clone()),
         )
         .children(post.author.badges.verified.map(|v| verified_badge(v, &theme)))
-        .child(div().min_w_0().truncate().child(format!("@{}", post.author.handle)))
+        .child(
+            div()
+                .id(("author-handle", key))
+                .min_w_0()
+                .truncate()
+                .on_click(open_profile(&post.author, &rcx.hub))
+                .child(format!("@{}", post.author.handle)),
+        )
         .child(
             div()
                 .id(("time", key))
@@ -275,7 +311,7 @@ fn post_row(
         .flex_none()
         .w(px(AVATAR))
         .h_full()
-        .child(profile_hover(("author", key), &post.author, &rcx.hub))
+        .child(profile_hover(key, &post.author, &rcx.hub))
         .when(connector, |col| {
             col.child(div().mt_1().w(px(2.)).flex_1().min_h(px(12.)).bg(theme.border))
         });
@@ -303,14 +339,24 @@ fn post_row(
                     .font_weight(FontWeight::BOLD)
                     .text_color(theme.muted_foreground)
                     .child(Icon::new(IconName::Repeat2).size(px(14.)))
-                    .child(format!("{} reposted", by.display_name)),
+                    .child(
+                        div()
+                            .id(("reposter", key))
+                            .debug_selector(|| format!("post-reposter-{key}"))
+                            .hover(|s| s.underline())
+                            .on_click(open_profile(by, &rcx.hub))
+                            .child(format!("{} reposted", by.display_name)),
+                    ),
             )
         })
         .child(h_flex().items_start().gap(px(GAP)).child(avatar_col).child(content))
         .into_any_element()
 }
 
-fn verified_badge(kind: VerifiedKind, theme: &gpui_kit::component::Theme) -> impl IntoElement {
+pub(crate) fn verified_badge(
+    kind: VerifiedKind,
+    theme: &gpui_kit::component::Theme,
+) -> impl IntoElement {
     let color = match kind {
         VerifiedKind::Individual => theme.blue,
         VerifiedKind::Business => theme.yellow,
@@ -321,7 +367,7 @@ fn verified_badge(kind: VerifiedKind, theme: &gpui_kit::component::Theme) -> imp
 
 /// Text with clickable mentions, hashtags and links. The hovered one is
 /// underlined.
-fn rich_text(
+pub(crate) fn rich_text(
     id: (&'static str, usize),
     text: &RichText,
     link: Hsla,
@@ -471,12 +517,12 @@ fn rounded_img(url: &str, corners: media_layout::Corners) -> impl IntoElement {
         .when(corners.bottom_right, |i| i.rounded_br(r))
 }
 
-fn fmt_duration(d: std::time::Duration) -> String {
+pub(crate) fn fmt_duration(d: std::time::Duration) -> String {
     let s = d.as_secs();
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-fn video_badge(label: &'static str, extra: Option<String>) -> impl IntoElement {
+pub(crate) fn video_badge(label: &'static str, extra: Option<String>) -> impl IntoElement {
     div()
         .absolute()
         .left_2()
@@ -529,7 +575,7 @@ fn quote_card(
     cx: &mut App,
 ) -> impl IntoElement {
     let theme = cx.theme().clone();
-    let hub = hub.clone();
+    let card_hub = hub.clone();
     let quoted = q.id.clone();
     v_flex()
         .id(id)
@@ -543,7 +589,7 @@ fn quote_card(
         .hover(|s| s.bg(theme.list_hover))
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
-            hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(quoted.clone()), cx));
+            card_hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(quoted.clone()), cx));
         })
         .child(
             v_flex()
@@ -555,11 +601,20 @@ fn quote_card(
                     h_flex()
                         .gap_1()
                         .min_w_0()
-                        .child(avatar(&q.author, 20.0))
                         .child(
                             div()
+                                .id(("quote-avatar", id.1))
+                                .on_click(open_profile(&q.author, hub))
+                                .child(avatar(&q.author, 20.0)),
+                        )
+                        .child(
+                            div()
+                                .id(("quote-author", id.1))
+                                .debug_selector(move || format!("quote-author-{}", id.1))
                                 .font_weight(FontWeight::BOLD)
                                 .truncate()
+                                .hover(|s| s.underline())
+                                .on_click(open_profile(&q.author, hub))
                                 .child(q.author.display_name.clone()),
                         )
                         .child(div().text_color(theme.muted_foreground).truncate().child(format!(
@@ -857,30 +912,126 @@ mod tests {
         }
     }
 
-    #[gpui_kit::test]
-    fn a_long_name_never_hides_the_time(cx: &mut gpui_kit::TestAppContext) {
+    /// The first post of the mock's bookmarks.
+    fn mock_post() -> (Post, Arc<dyn twitty_model::Backend>) {
         use twitty_model::{Backend, FeedSource, PageRequest, mock::MockBackend};
-        cx.update(gpui_kit::init);
         let backend = MockBackend::new();
         let page = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
             .block_on(backend.feed(&FeedSource::Bookmarks, PageRequest::First))
             .unwrap();
-        let mut post =
-            page.items.iter().find_map(|i| i.posts().first().map(|p| (*p).clone())).unwrap();
+        let post = page.items.iter().find_map(|i| i.posts().first().map(|p| (*p).clone())).unwrap();
+        (post, Arc::new(backend))
+    }
+
+    #[gpui_kit::test]
+    fn a_long_name_never_hides_the_time(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
         let author = Arc::make_mut(&mut post.author);
         author.display_name = "A display name far too long to fit in any column at all".into();
         author.handle = "a_rather_long_handle_too".into();
         post.reply_to = None;
-        let shared: Arc<dyn Backend> = Arc::new(backend);
-        let hub = cx.new(|_| InteractionsHub::new(shared));
+        let hub = cx.new(|_| InteractionsHub::new(backend));
         let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
         cx.run_until_parked();
 
         let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
         assert!(time.size.width > px(10.), "the time keeps its width: {time:?}");
         assert!(time.right() <= px(310.), "the time is inside the row: {time:?}");
+    }
+
+    /// Renders `item`, clicks the element `target` and returns what the
+    /// row asked the app to open.
+    fn navigations(
+        cx: &mut gpui_kit::TestAppContext,
+        item: FeedItem,
+        target: &'static str,
+    ) -> Vec<Navigate> {
+        use std::{cell::RefCell, rc::Rc};
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&seen);
+        cx.update(|cx| {
+            cx.subscribe(&hub, move |_, e: &Navigate, _| sink.borrow_mut().push(e.clone())).detach()
+        });
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item, hub });
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds(target).unwrap_or_else(|| panic!("{target} rendered"));
+        cx.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        seen.take()
+    }
+
+    fn mock_items(source: twitty_model::FeedSource) -> Vec<FeedItem> {
+        use twitty_model::{Backend, PageRequest, mock::MockBackend};
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(MockBackend::new().feed(&source, PageRequest::First))
+            .unwrap()
+            .items
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_avatar_or_name_opens_the_profile(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, _) = mock_post();
+        let author = Arc::clone(&post.author);
+        for target in ["post-avatar-0", "post-name-0"] {
+            assert_eq!(
+                navigations(cx, FeedItem::Post(post.clone()), target),
+                vec![Navigate::Profile(Arc::clone(&author))],
+                "{target} opens the profile, not the thread"
+            );
+        }
+    }
+
+    #[gpui_kit::test]
+    fn reposters_quoted_authors_and_notification_actors_open_their_profile(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use twitty_model::{FeedSource, NotificationFilter};
+        cx.update(gpui_kit::init);
+        let items = mock_items(FeedSource::Bookmarks);
+
+        let repost = items.iter().find(|i| matches!(i, FeedItem::Repost { .. })).unwrap();
+        let FeedItem::Repost { by, .. } = repost else { unreachable!() };
+        assert_eq!(
+            navigations(cx, repost.clone(), "post-reposter-0"),
+            vec![Navigate::Profile(Arc::clone(by))]
+        );
+
+        let (quoting, quoted) = items
+            .iter()
+            .find_map(|i| match i {
+                FeedItem::Post(p) => match p.embed.as_ref() {
+                    Some(Embed::Quote { quoted }) => match quoted.as_ref() {
+                        PostOrGone::Post(q) => Some((p.clone(), Arc::clone(&q.author))),
+                        PostOrGone::Unavailable { .. } => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the mock has a quote");
+        assert_eq!(
+            navigations(cx, FeedItem::Post(quoting), "quote-author-0"),
+            vec![Navigate::Profile(quoted)],
+            "not the quoted post"
+        );
+
+        let notification =
+            mock_items(FeedSource::Notifications { filter: NotificationFilter::All })
+                .into_iter()
+                .find(|i| matches!(i, FeedItem::Notification(_)))
+                .unwrap();
+        let FeedItem::Notification(n) = &notification else { unreachable!() };
+        let actor = Arc::clone(&n.actors[0]);
+        assert_eq!(navigations(cx, notification, "notif-actor-0"), vec![Navigate::Profile(actor)]);
     }
 
     #[gpui_kit::test]

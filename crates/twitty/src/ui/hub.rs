@@ -25,8 +25,10 @@ pub enum Navigate {
     Thread(PostId),
     /// Compose a reply to a post.
     Reply(Arc<Post>),
-    /// Add a column with an account's posts.
+    /// Show an account's profile.
     Profile(Arc<Profile>),
+    /// Add a column with an account's posts.
+    UserColumn(Arc<Profile>),
     /// Show a post's media in the viewer, starting at `index`.
     Media { post: Arc<Post>, index: usize },
 }

@@ -27,6 +27,7 @@ use crate::{
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
         login::{LoginEvent, LoginView},
+        profile::{CloseProfile, ProfilePanel},
         theme,
         thread::{CloseThread, ThreadPanel},
     },
@@ -64,6 +65,22 @@ enum LeavingOverlay {
     Settings,
 }
 
+/// What the side sheet shows.
+#[derive(Clone)]
+enum Sheet {
+    Thread(Entity<ThreadPanel>),
+    Profile(Entity<ProfilePanel>),
+}
+
+impl Sheet {
+    fn view(&self) -> AnyView {
+        match self {
+            Sheet::Thread(panel) => panel.clone().into(),
+            Sheet::Profile(panel) => panel.clone().into(),
+        }
+    }
+}
+
 /// Options decided at startup.
 #[derive(Debug, Clone, Default)]
 pub struct AppOptions {
@@ -99,7 +116,8 @@ pub struct TwittyApp {
     login: Option<Entity<LoginView>>,
     add_column: Option<Entity<AddColumnView>>,
     compose: Option<Entity<ComposeView>>,
-    thread: Option<Entity<ThreadPanel>>,
+    /// The side sheet: a conversation or a profile.
+    sheet: Option<Sheet>,
     account_panel: bool,
     settings_panel: bool,
     /// The latest settings write. Each save waits for the previous one, so the
@@ -109,10 +127,10 @@ pub struct TwittyApp {
     media: Option<(Arc<twitty_model::Post>, usize)>,
     /// The overlay animating out after it closed. Inert: it gets no input.
     leaving: Option<Leaving<LeavingOverlay>>,
-    /// The thread panel animating out after it closed. Inert too.
-    leaving_thread: Option<Leaving<Entity<ThreadPanel>>>,
-    /// When the thread panel opened (not switched), so its backdrop fades in once.
-    thread_opened: Option<Instant>,
+    /// The sheet animating out after it closed. Inert too.
+    leaving_sheet: Option<Leaving<Sheet>>,
+    /// When the sheet opened (not switched), so its backdrop fades in once.
+    sheet_opened: Option<Instant>,
     /// Index of the column keyboard shortcuts act on.
     active_column: usize,
     focus: FocusHandle,
@@ -121,7 +139,7 @@ pub struct TwittyApp {
     _login_sub: Option<Subscription>,
     _add_sub: Option<Subscription>,
     _compose_sub: Option<Subscription>,
-    _thread_sub: Option<Subscription>,
+    _sheet_sub: Option<Subscription>,
     _hub_subs: Vec<Subscription>,
     /// Column event subscriptions; replaced with the columns.
     _subs: Vec<Subscription>,
@@ -160,14 +178,14 @@ impl TwittyApp {
             login: None,
             add_column: None,
             compose: None,
-            thread: None,
+            sheet: None,
             account_panel: false,
             settings_panel: false,
             settings_save: None,
             media: None,
             leaving: None,
-            leaving_thread: None,
-            thread_opened: None,
+            leaving_sheet: None,
+            sheet_opened: None,
             active_column: 0,
             focus: cx.focus_handle(),
             session_check: None,
@@ -175,7 +193,7 @@ impl TwittyApp {
             _login_sub: None,
             _add_sub: None,
             _compose_sub: None,
-            _thread_sub: None,
+            _sheet_sub: None,
             _hub_subs: Vec::new(),
             _subs: Vec::new(),
         };
@@ -232,12 +250,22 @@ impl TwittyApp {
             }),
         ];
         // Panels show the old account's data.
-        self.thread = None;
-        self._thread_sub = None;
+        self.sheet = None;
+        self._sheet_sub = None;
     }
 
     pub fn thread_panel(&self) -> Option<&Entity<ThreadPanel>> {
-        self.thread.as_ref()
+        match &self.sheet {
+            Some(Sheet::Thread(panel)) => Some(panel),
+            _ => None,
+        }
+    }
+
+    pub fn profile_panel(&self) -> Option<&Entity<ProfilePanel>> {
+        match &self.sheet {
+            Some(Sheet::Profile(panel)) => Some(panel),
+            _ => None,
+        }
     }
 
     pub fn compose(&self) -> Option<&Entity<ComposeView>> {
@@ -249,7 +277,8 @@ impl TwittyApp {
         match to {
             Navigate::Thread(id) => self.open_thread(id, cx),
             Navigate::Reply(post) => self.open_compose(Some(post), window, cx),
-            Navigate::Profile(p) => {
+            Navigate::Profile(p) => self.open_profile(p, cx),
+            Navigate::UserColumn(p) => {
                 let source = crate::state::add_column::user_source(p.id.clone(), &p.handle);
                 self.add_column(source, cx);
             }
@@ -327,26 +356,26 @@ impl TwittyApp {
         }
     }
 
-    /// Closes the topmost thing: image viewer, dialog, then thread panel.
+    /// Closes the topmost thing: image viewer, dialog, then the sheet.
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
         if let Some((post, index)) = self.media.take() {
             self.leave(LeavingOverlay::Media(post, index), cx);
         } else if self.has_dialog() {
             self.close_overlays(cx);
         } else {
-            self.close_thread(cx);
+            self.close_sheet(cx);
         }
         cx.notify();
     }
 
-    fn close_thread(&mut self, cx: &mut Context<Self>) {
-        if let Some(panel) = self.thread.take()
+    fn close_sheet(&mut self, cx: &mut Context<Self>) {
+        if let Some(sheet) = self.sheet.take()
             && !cx.reduce_motion()
         {
-            let clear = Self::after_exit(cx, |this| this.leaving_thread = None);
-            self.leaving_thread = Some(Leaving { what: panel, _clear: clear });
+            let clear = Self::after_exit(cx, |this| this.leaving_sheet = None);
+            self.leaving_sheet = Some(Leaving { what: sheet, _clear: clear });
         }
-        self._thread_sub = None;
+        self._sheet_sub = None;
         cx.notify();
     }
 
@@ -371,7 +400,7 @@ impl TwittyApp {
 
     /// Whether something is still animating out.
     pub fn is_leaving(&self) -> bool {
-        self.leaving.is_some() || self.leaving_thread.is_some()
+        self.leaving.is_some() || self.leaving_sheet.is_some()
     }
 
     fn render_media_viewer(
@@ -514,13 +543,32 @@ impl TwittyApp {
         let backend = Arc::clone(&self.backend);
         let hub = self.hub.clone();
         let panel = cx.new(|cx| ThreadPanel::new(id, backend, hub, cx));
-        if self.thread.is_none() {
-            self.thread_opened = Some(Instant::now());
+        let sub = cx.subscribe(&panel, |this, _, _: &CloseThread, cx| this.close_sheet(cx));
+        self.show_sheet(Sheet::Thread(panel), sub, cx);
+    }
+
+    /// Shows `profile` in the side panel, unless it is already there.
+    pub fn open_profile(&mut self, profile: Arc<Profile>, cx: &mut Context<Self>) {
+        if let Some(panel) = self.profile_panel()
+            && panel.read(cx).profile().id == profile.id
+        {
+            return;
         }
-        self.leaving_thread = None;
-        self._thread_sub =
-            Some(cx.subscribe(&panel, |this, _, _: &CloseThread, cx| this.close_thread(cx)));
-        self.thread = Some(panel);
+        let backend = Arc::clone(&self.backend);
+        let hub = self.hub.clone();
+        let panel = cx.new(|cx| ProfilePanel::new(profile, backend, hub, cx));
+        let sub = cx.subscribe(&panel, |this, _, _: &CloseProfile, cx| this.close_sheet(cx));
+        self.show_sheet(Sheet::Profile(panel), sub, cx);
+    }
+
+    /// Puts `sheet` in the side panel, replacing what it showed.
+    fn show_sheet(&mut self, sheet: Sheet, sub: Subscription, cx: &mut Context<Self>) {
+        if self.sheet.is_none() {
+            self.sheet_opened = Some(Instant::now());
+        }
+        self.leaving_sheet = None;
+        self._sheet_sub = Some(sub);
+        self.sheet = Some(sheet);
         cx.notify();
     }
 
@@ -538,7 +586,7 @@ impl TwittyApp {
                 tracing::info!("published post {}", post.id);
                 // A reply shows up in the open conversation.
                 let parent = post.reply_to.as_ref().and_then(|r| r.post.as_ref());
-                if let Some(panel) = &this.thread
+                if let Some(panel) = this.thread_panel()
                     && parent.is_some_and(|p| p == panel.read(cx).root())
                 {
                     panel.update(cx, |panel, cx| panel.reload(cx));
@@ -1280,14 +1328,14 @@ impl Render for TwittyApp {
             None
         };
         let has_overlay = overlay.is_some();
-        let thread_open = self.thread.is_some();
+        let sheet_open = self.sheet.is_some();
         let leaving = if has_overlay { None } else { self.render_leaving(backdrop, window, cx) };
-        let leaving_thread =
-            if thread_open { None } else { self.leaving_thread.as_ref().map(|l| l.what.clone()) };
-        // The thread's backdrop fades in when the panel opens, not each time
+        let leaving_sheet =
+            if sheet_open { None } else { self.leaving_sheet.as_ref().map(|l| l.what.view()) };
+        // The sheet's backdrop fades in when it opens, not each time
         // an overlay over it closes.
-        let thread_fresh =
-            self.thread_opened.is_some_and(|at| at.elapsed() < theme.motion.duration_normal);
+        let sheet_fresh =
+            self.sheet_opened.is_some_and(|at| at.elapsed() < theme.motion.duration_normal);
         let tokens = theme.motion.clone();
         let enter = move || {
             let easing = tokens.easing_enter.clone();
@@ -1394,7 +1442,7 @@ impl Render for TwittyApp {
                             .child(self.render_deck_bar(cx))
                             .child(div().flex_1().min_h_0().flex().child(body)),
                     )
-                    .when_some(self.thread.clone(), |d, panel| {
+                    .when_some(self.sheet.as_ref().map(Sheet::view), |d, panel| {
                         // A sheet over the deck's right side. Its backdrop takes
                         // the whole click that closes it, so nothing under it
                         // (a post, an image, a link) reacts. With an overlay
@@ -1410,9 +1458,9 @@ impl Render for TwittyApp {
                                 .bg(backdrop)
                                 .on_any_mouse_down(cx.listener(|this, _, _, cx| {
                                     cx.stop_propagation();
-                                    this.close_thread(cx);
+                                    this.close_sheet(cx);
                                 }));
-                            if thread_fresh {
+                            if sheet_fresh {
                                 d.child(shade.with_animation(
                                     "thread-backdrop-in",
                                     enter(),
@@ -1437,7 +1485,7 @@ impl Render for TwittyApp {
                                 }),
                         )
                     })
-                    .when_some(leaving_thread, |d, panel| {
+                    .when_some(leaving_sheet, |d, panel| {
                         // The closed panel sliding out: no handlers, and a cover
                         // so nothing inside it reacts.
                         d.when(!has_overlay, |d| {
@@ -1482,7 +1530,7 @@ impl Render for TwittyApp {
                 // Over the thread panel, the panel's own backdrop was already
                 // drawn: fading this one in would flash lighter.
                 let shade = div().absolute().top_0().left_0().size_full().bg(backdrop);
-                let shade = if thread_open {
+                let shade = if sheet_open {
                     shade.into_any_element()
                 } else {
                     shade
@@ -1596,7 +1644,7 @@ impl TwittyApp {
                 .into_any_element()
         };
         // Over the thread panel, its own backdrop is back already.
-        let shade = self.thread.is_none().then(|| {
+        let shade = self.sheet.is_none().then(|| {
             div().absolute().top_0().left_0().size_full().bg(backdrop).with_animation(
                 anim_id("backdrop-out", name),
                 exit(),
@@ -1938,10 +1986,107 @@ mod tests {
         let (app, cx) = start(cx, MockBackend::new(), None, &store);
         let post = first_post(&app, cx);
         let hub = app.read_with(cx, |app, _| app.hub.clone());
-        hub.update(cx, |hub, cx| hub.navigate(Navigate::Profile(Arc::clone(&post.author)), cx));
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::UserColumn(Arc::clone(&post.author)), cx));
         cx.run_until_parked();
         let last = app.read_with(cx, |app, _| app.deck().active().columns.last().cloned()).unwrap();
         assert_eq!(last.source.title(), format!("@{}", post.author.handle));
+        assert!(app.read_with(cx, |app, _| app.profile_panel().is_none()), "no sheet");
+    }
+
+    fn open_profile(
+        app: &Entity<TwittyApp>,
+        cx: &mut VisualTestContext,
+    ) -> (Arc<Profile>, Entity<ProfilePanel>) {
+        let author = Arc::clone(&first_post(app, cx).author);
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Profile(Arc::clone(&author)), cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        let panel = app.read_with(cx, |app, _| app.profile_panel().cloned()).expect("sheet open");
+        (author, panel)
+    }
+
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} drawn"));
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn an_author_opens_in_a_profile_sheet_not_a_column(cx: &mut TestAppContext) {
+        use crate::state::profile::ProfileTab;
+        let (app, cx) = keyboard_app(cx);
+        let columns = app.read_with(cx, |app, _| app.deck().active().columns.len());
+        let (author, panel) = open_profile(&app, cx);
+        assert_eq!(app.read_with(cx, |app, _| app.deck().active().columns.len()), columns);
+        panel.read_with(cx, |p, _| {
+            assert_eq!(p.profile().id, author.id);
+            assert_eq!(p.tab(), ProfileTab::Tweets);
+            let posts: Vec<_> =
+                p.model(ProfileTab::Tweets).items().iter().flat_map(|i| i.posts()).collect();
+            assert!(!posts.is_empty(), "the user's posts loaded");
+            assert!(!p.model(ProfileTab::Media).loaded_once(), "media waits for its tab");
+        });
+        assert!(cx.debug_bounds("profile-counts").is_some(), "the header shows the counts");
+
+        // Opening the same account again keeps the sheet (and its tab).
+        click(cx, "profile-tab-Media");
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Profile(Arc::clone(&author)), cx));
+        cx.run_until_parked();
+        let same = app.read_with(cx, |app, _| app.profile_panel().cloned()).unwrap();
+        assert_eq!(same, panel);
+        assert_eq!(panel.read_with(cx, |p, _| p.tab()), ProfileTab::Media);
+
+        cx.simulate_keystrokes("escape");
+        assert!(app.read_with(cx, |app, _| app.profile_panel().is_none()), "Esc closes it");
+    }
+
+    #[gpui_kit::test]
+    fn the_media_tab_is_a_gallery_that_opens_the_viewer(cx: &mut TestAppContext) {
+        use crate::state::profile::ProfileTab;
+        use twitty_model::UserTab;
+        let (app, cx) = keyboard_app(cx);
+        let (author, panel) = open_profile(&app, cx);
+        click(cx, "profile-tab-Media");
+        let tile = panel.read_with(cx, |p, _| {
+            assert_eq!(p.tab(), ProfileTab::Media);
+            assert!(matches!(
+                p.model(ProfileTab::Media).source(),
+                twitty_model::FeedSource::User { id, tab: UserTab::Media, .. } if *id == author.id
+            ));
+            assert!(p.tiles().iter().all(|t| t.post.author.id == author.id));
+            p.tiles().get(1).cloned().expect("the user has media")
+        });
+
+        click(cx, "gallery-tile-1");
+        assert_eq!(
+            app.read_with(cx, |app, _| app.media_viewer().map(|(p, ix)| (p.id.clone(), ix))),
+            Some((tile.post.id.clone(), tile.index))
+        );
+        cx.simulate_keystrokes("escape");
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()), "viewer first");
+        assert!(app.read_with(cx, |app, _| app.profile_panel().is_some()), "sheet stays");
+        cx.simulate_keystrokes("escape");
+        assert!(app.read_with(cx, |app, _| app.profile_panel().is_none()));
+    }
+
+    #[gpui_kit::test]
+    fn a_post_in_the_profile_opens_its_thread_in_the_sheet(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let (_, panel) = open_profile(&app, cx);
+        let id = panel.read_with(cx, |p, _| {
+            let items = p.model(crate::state::profile::ProfileTab::Tweets).items();
+            items.iter().flat_map(|i| i.posts()).next().map(|p| p.id.clone()).unwrap()
+        });
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id.clone()), cx));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.profile_panel().is_none()));
+        assert_eq!(panel_root(&app, cx), Some(id.to_string()));
     }
 
     /// A mock whose feeds allow 30 requests per 15 minutes.
@@ -2269,6 +2414,19 @@ mod tests {
     #[gpui_kit::test]
     fn a_closing_thread_panel_animates_out_without_taking_clicks(cx: &mut TestAppContext) {
         let (app, cx) = keyboard_app(cx);
+        // A spot in the deck where a click opens a thread (not, say, a profile).
+        let in_deck = (60..1000)
+            .step_by(20)
+            .map(|y| point(px(250.), px(y as f32)))
+            .find(|&at| {
+                cx.simulate_click(at, Modifiers::default());
+                cx.run_until_parked();
+                let opened = panel_root(&app, cx).is_some();
+                app.update(cx, |app, cx| app.dismiss(cx));
+                finish_exits(cx);
+                opened
+            })
+            .expect("the deck shows a post to click");
         // A spot inside the open panel where a click switches to another post.
         let root = first_post(&app, cx).id.to_string();
         let viewport = cx.update(|window, _| window.viewport_size());
@@ -2302,7 +2460,7 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(panel_root(&app, cx), None, "the leaving panel's posts don't react");
         // ...but the deck beside it does: a post opens its thread.
-        cx.simulate_click(point(px(250.), TITLE_BAR_HEIGHT + px(200.)), Modifiers::default());
+        cx.simulate_click(in_deck, Modifiers::default());
         cx.run_until_parked();
         assert!(panel_root(&app, cx).is_some(), "the leaving panel doesn't block the deck");
         assert!(!app.read_with(cx, |app, _| app.is_leaving()), "reopening drops the old one");
