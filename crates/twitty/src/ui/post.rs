@@ -494,7 +494,7 @@ fn post_row(
         content = content.child(grid);
     }
     if let Some(embed) = &post.embed {
-        content = content.child(render_embed(("embed", key), embed, width, &rcx.hub, window, cx));
+        content = content.child(render_embed(("embed", key), embed, width, rcx, window, cx));
     }
     if let NoteDisplay::Full(note) = note {
         content = content.child(note_box(("note", key), note, &rcx.hub, &theme, window, cx));
@@ -823,6 +823,7 @@ fn media_grid(
         media_layout::layout(media.len(), media.first().and_then(|m| m.preview().aspect()), inner);
     div()
         .id(id)
+        .debug_selector(move || format!("{}-{}", id.0, id.1))
         .relative()
         .mt_2()
         .w(px(width))
@@ -850,6 +851,7 @@ fn media_grid(
             };
             div()
                 .id(("tile", index))
+                .debug_selector(move || format!("{}-{}-tile-{index}", id.0, id.1))
                 .absolute()
                 .cursor_pointer()
                 .on_click(move |_, _, cx| {
@@ -883,6 +885,8 @@ fn gif_key(post: &Post, index: usize) -> u64 {
 const RADIUS: f32 = 16.0;
 /// Border width of media boxes and cards.
 const BORDER: f32 = 1.0;
+/// Padding inside a quote card.
+const QUOTE_PAD: f32 = 12.0;
 
 /// A cover-fit `w` × `h` image that rounds its own outer corners.
 ///
@@ -948,14 +952,14 @@ fn render_embed(
     id: (&'static str, usize),
     embed: &Embed,
     width: f32,
-    hub: &Entity<InteractionsHub>,
-    _window: &mut Window,
+    rcx: &RowCtx,
+    window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     let theme = cx.theme().clone();
     match embed {
         Embed::Quote { quoted } => match quoted.as_ref() {
-            PostOrGone::Post(q) => quote_card(id, q, width, hub, cx).into_any_element(),
+            PostOrGone::Post(q) => quote_card(id, q, width, rcx, window, cx).into_any_element(),
             PostOrGone::Unavailable { reason } => div()
                 .mt_2()
                 .px_3()
@@ -976,10 +980,19 @@ fn quote_card(
     id: (&'static str, usize),
     q: &Post,
     width: f32,
-    hub: &Entity<InteractionsHub>,
+    rcx: &RowCtx,
+    window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
     let theme = cx.theme().clone();
+    let hub = &rcx.hub;
+    // The quoted tweet's media, laid out like a tweet's own, inside the
+    // card's padding.
+    let media = (!q.media.is_empty()).then(|| {
+        let inner = (width - 2.0 * BORDER - 2.0 * QUOTE_PAD).max(0.0);
+        let id = ("quote-media", id.1);
+        media_grid(id, &q.media, inner, q, rcx, &theme, window, cx).into_any_element()
+    });
     let shown = translation::shown(q, hub.read(cx).showing_original(&q.id));
     let card_hub = hub.clone();
     let quoted = q.id.clone();
@@ -1000,9 +1013,9 @@ fn quote_card(
         })
         .child(
             v_flex()
-                .px_3()
-                .pt_3()
-                .pb_2()
+                .px(px(QUOTE_PAD))
+                .pt(px(QUOTE_PAD))
+                .pb(px(if media.is_some() { QUOTE_PAD } else { 8.0 }))
                 .gap_1()
                 .child(
                     h_flex()
@@ -1041,33 +1054,9 @@ fn quote_card(
                 )
                 .when(q.community_note.is_some(), |d| {
                     d.child(note_marker(("quote-note-marker", id.1), &theme))
-                }),
-        )
-        .children(q.media.first().map(|m| {
-            let inner = (width - 2.0 * BORDER).max(0.0);
-            let h = media_layout::layout(1, m.preview().aspect(), inner).height.min(220.);
-            let hub = hub.clone();
-            let post = Arc::new(q.clone());
-            div()
-                .id(("quote-media", id.1))
-                .debug_selector(move || format!("quote-media-{}", id.1))
-                .relative()
-                .w_full()
-                .h(px(h))
-                .on_click(move |_, _, cx| {
-                    // The media opens fullscreen, not the quoted tweet.
-                    cx.stop_propagation();
-                    let to = Navigate::Media { post: Arc::clone(&post), index: 0 };
-                    hub.update(cx, |hub, cx| hub.navigate(to, cx));
                 })
-                .child(rounded_img(
-                    remote_image::source(m.preview().url.as_str(), inner, h),
-                    inner,
-                    h,
-                    media_layout::Corners::BOTTOM,
-                ))
-                .children(media_badge(m))
-        }))
+                .children(media),
+        )
 }
 
 /// A tweet as a dialog shows it (the retweet dialog, a quote being written):
@@ -2236,6 +2225,48 @@ mod tests {
             navigations(cx, FeedItem::Post(quoting), "quote-media-0"),
             vec![Navigate::Media { post: Arc::new(quoted), index: 0 }],
             "not the quoted tweet"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_quote_lays_out_all_its_media_like_a_tweet(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (outer, backend) = mock_post();
+        let image = |k: usize| Media::Image {
+            image: twitty_model::ImageRef {
+                url: format!("https://pbs.twimg.com/media/q{k}.jpg").parse().unwrap(),
+                size: Some((1200, 800)),
+            },
+            alt: None,
+        };
+        let mut quoted = outer.clone();
+        quoted.media = (0..4).map(image).collect();
+        let mut post = outer;
+        post.media.clear();
+        post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted.clone())) });
+
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, vcx) =
+            cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post.clone()), hub });
+        vcx.run_until_parked();
+        let card = vcx.debug_bounds("quote-0").expect("the quote card");
+        let grid = vcx.debug_bounds("quote-media-0").expect("the quoted media grid");
+        assert!(card.contains(&grid.origin) && card.contains(&grid.bottom_right()));
+        let tiles = [
+            "quote-media-0-tile-0",
+            "quote-media-0-tile-1",
+            "quote-media-0-tile-2",
+            "quote-media-0-tile-3",
+        ];
+        for name in tiles {
+            let tile = vcx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn"));
+            assert!(grid.contains(&tile.center()), "{name} in the grid");
+        }
+
+        assert_eq!(
+            navigations(cx, FeedItem::Post(post), "quote-media-0-tile-2"),
+            vec![Navigate::Media { post: Arc::new(quoted), index: 2 }],
+            "the third media, not the quoted tweet"
         );
     }
 
