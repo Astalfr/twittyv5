@@ -389,9 +389,27 @@ impl ProfilePanel {
                                 .children(p.badges.verified.map(|v| verified_badge(v, &theme))),
                         )
                         .child(
-                            div()
-                                .text_color(theme.muted_foreground)
-                                .child(format!("@{}", p.handle)),
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_color(theme.muted_foreground)
+                                        .child(format!("@{}", p.handle)),
+                                )
+                                .when(p.viewer.followed_by, |d| {
+                                    // X's small "Follows you" tag.
+                                    d.child(
+                                        div()
+                                            .debug_selector(|| "profile-follows-you".into())
+                                            .px_1()
+                                            .rounded(px(4.))
+                                            .bg(theme.muted)
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("Follows you"),
+                                    )
+                                }),
                         ),
                 )
                 .when(!p.bio.is_empty(), |d| {
@@ -706,5 +724,19 @@ mod tests {
         let face = cx.debug_bounds("profile-avatar").expect("the avatar is drawn");
         let counts = cx.debug_bounds("profile-counts").expect("the counts are drawn");
         assert!(face.top() > px(53.) && face.bottom() < counts.top(), "{face:?}");
+    }
+
+    #[gpui_kit::test]
+    fn an_account_that_follows_the_viewer_says_so(cx: &mut TestAppContext) {
+        let mut fan = someone();
+        fan.viewer.followed_by = true;
+        let cx = header(fan, cx);
+        assert!(cx.debug_bounds("profile-follows-you").is_some());
+    }
+
+    #[gpui_kit::test]
+    fn other_accounts_have_no_follows_you_tag(cx: &mut TestAppContext) {
+        let cx = header(someone(), cx);
+        assert!(cx.debug_bounds("profile-follows-you").is_none());
     }
 }
