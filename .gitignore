@@ -3,5 +3,6 @@
 *.pending-snap
 *.snap.new
 /session*.json
+/session*.json.tmp
 /.env
 /dumps/

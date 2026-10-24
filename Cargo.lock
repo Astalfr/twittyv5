@@ -7721,6 +7721,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "twitty-model",
+ "twitty-x",
 ]
 
 [[package]]

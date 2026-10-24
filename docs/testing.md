@@ -21,6 +21,7 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 | Translation snapshots | `twitty-x/tests/translate.rs` + `tests/fixtures/*.json` | `insta` (text summaries) | 9 anonymised live responses translate with **zero** `Unsupported` rows and zero warnings · compact per-row summaries are snapshotted · fixtures together must cover reposts, threads, notifications, quotes, link cards, video, GIF, multi-image, replies, long posts and mention/hashtag/link spans · promoted posts skipped · authors shared per page |
 | Wire robustness | `twitty-x/tests/wire_robustness.rs` | `proptest`, mutated fixtures | Missing or renamed fields and unknown typenames never panic, and become `Unsupported` |
 | Entity offsets | `twitty-x/src/translate/text.rs` tests | `proptest` | Code-point → byte conversion with emoji and CJK, display ranges, media-link removal, HTML decoding. A property test feeds random entities and ranges: never panics, spans always valid. |
+| Backend | `twitty-x/tests/backend.rs` | `wiremock`, committed fixtures as bodies | Each `FeedSource` calls its operation and translates with 0 `Unsupported` · older/newer cursors sent · search over POST with `product` · 401 → `Unauthorized` · unmapped sources fail without a request · thread split around the focal post, missing focal → `NotFound` · `Viewer`/`UserByScreenName` → `Profile` · writes refused without a request |
 | Transport | `twitty-x/tests/transport.rs` | `wiremock`, `tokio::test` | Required headers present · `x-csrf-token == ct0` · fresh txid per request · cookie rotation used next + hook · 429 reset + local gate per operation · 5xx retried, 401 not · 404 → discovery → retry once with discovered features · override skips discovery · POST body for mutations · cursor forwarded · secrets never in `Debug`/errors |
 | Discovery + catalog | `twitty-x/src/{discovery,catalog}.rs` unit tests | tiny synthetic JS/HTML strings | Legacy and Relay extractors (quotes, metadata, mutations), script/asset URL resolution, catalog layering, Relay `…Query` names, cache persistence + TTL, features from switches |
 | Live (opt-in) | `twitty-x/tests/live.rs` `#[ignore]` | real x.com | Extractors over downloaded bundles, logged-out discovery crawl, real HomeTimeline call |
@@ -30,18 +31,16 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 | UI wiring | `twitty/src/ui/**` `#[gpui_kit::test]` | `TestAppContext`, `MockBackend`, `Runtime::inline()` | Column loads on creation, list rows match the model, newer posts at top vs. scrolled, failure + retry, Home tab switch, hub rollback + `ActionFailed` |
 | Live smoke | `twitty-x/tests/live.rs` `#[ignore]` | real X, `TWITTY_LIVE=1` | The current X still works: Viewer, Home, Search, TweetDetail translate with 0 `Unsupported`. Run by hand, never in CI. |
 
-## Current coverage (M4)
+## Current coverage (M5)
 
-180 tests (+3 opt-in live tests):
-- 102 in `twitty-x`: 81 unit tests (session, errors, headers, cookies, rate limits, interpretation, catalog, discovery, anonymiser, wire, text incl. a property test, users, media, cards, tweets, notifications), 16 mock-server integration tests and 5 fixture translation tests.
-
-From M2:
+207 tests (+3 opt-in live tests):
+- 120 in `twitty-x`: 86 unit tests (session, errors, headers, cookies, rate limits, interpretation, catalog, discovery, anonymiser, wire, request mapping, text incl. a property test, users, media, cards, tweets, notifications), 16 transport and 13 backend mock-server tests, and 5 fixture translation tests.
 - 23 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging and notifications.
-- 51 in `twitty`: state, formatting, runtime, themes, icons, and GPUI view tests. Two of these open a real test window and scroll Home and Notifications to the end with wheel events, which renders every row shape.
+- 64 in `twitty`: state (including rate-limit/session hold-off and end-of-feed rules), formatting, runtime, themes, icons, GPUI view tests, and session discovery/rotation in `main.rs`. Two view tests open a real test window and scroll Home and Notifications to the end with wheel events, which renders every row shape.
 
 ## Manual check
 
-`cargo run -p twitty` shows the deck on demo data. New demo posts arrive every 20s and columns poll every 30s. After about a minute, a column scrolled away from the top shows the "N new posts" pill.
+With a session (see "Signing in" in [x-api.md](x-api.md)), `cargo run -p twitty` shows real timelines; the log says `signed in as @handle`. Without one it shows the deck on demo data. New demo posts arrive every 20s and columns poll every 30s. After about a minute, a column scrolled away from the top shows the "N new posts" pill.
 
 ## Fixtures
 

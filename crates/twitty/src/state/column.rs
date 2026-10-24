@@ -3,6 +3,7 @@
 
 use std::{collections::HashSet, ops::Range};
 
+use chrono::{DateTime, Utc};
 use twitty_model::{BackendError, FeedItem, FeedPage, FeedSource, PageRequest, PageToken};
 
 /// The kind of load a column can perform.
@@ -104,14 +105,28 @@ impl ColumnModel {
         self.unseen = 0;
     }
 
-    /// Starts a load if it makes sense now, returning the request to send.
+    /// Starts a load if it makes sense at `now`, returning the request to send.
     ///
-    /// Returns `None` when another load is in flight, or when there is no
-    /// cursor for the requested direction. `Older`/`Newer` before the first
-    /// page are turned into a `Refresh`.
-    pub fn begin(&mut self, kind: LoadKind) -> Option<(LoadKind, PageRequest)> {
-        if matches!(self.status, Status::Loading(_)) {
-            return None;
+    /// Returns `None` when another load is in flight, when there is no cursor
+    /// for the requested direction, or while the last failure says retrying
+    /// is pointless: until a rate limit resets, and after `Unauthorized` for
+    /// anything but an explicit `Refresh` (polling and scrolling would only
+    /// repeat the error). `Older`/`Newer` before the first page are turned
+    /// into a `Refresh`.
+    pub fn begin(&mut self, kind: LoadKind, now: DateTime<Utc>) -> Option<(LoadKind, PageRequest)> {
+        match &self.status {
+            Status::Loading(_) => return None,
+            Status::Failed { error: BackendError::RateLimited { reset_at }, .. }
+                if now < *reset_at =>
+            {
+                return None;
+            }
+            Status::Failed { error: BackendError::Unauthorized, .. }
+                if kind != LoadKind::Refresh =>
+            {
+                return None;
+            }
+            _ => {}
         }
         let (kind, request) = match kind {
             _ if !self.loaded_once => (LoadKind::Refresh, PageRequest::First),
@@ -124,6 +139,17 @@ impl ColumnModel {
         };
         self.status = Status::Loading(kind);
         Some((kind, request))
+    }
+
+    /// What a "Retry" after the last failure should load: the failed kind,
+    /// except after `Unauthorized`, where only a `Refresh` is attempted.
+    /// `None` when nothing failed.
+    pub fn retry_kind(&self) -> Option<LoadKind> {
+        match &self.status {
+            Status::Failed { error: BackendError::Unauthorized, .. } => Some(LoadKind::Refresh),
+            Status::Failed { kind, .. } => Some(*kind),
+            _ => None,
+        }
     }
 
     /// Applies the result of a load started with [`Self::begin`].
@@ -139,16 +165,18 @@ impl ColumnModel {
         match kind {
             LoadKind::Refresh => {
                 self.keys.clear();
+                // Same end-of-feed rule as `Older`: no rows means nothing below.
+                self.older = if page.items.is_empty() { None } else { page.older };
                 self.items = self.dedup(page.items);
                 self.newer = page.newer;
-                self.older = page.older;
                 self.loaded_once = true;
                 self.unseen = 0;
                 ListChange::Reset { count: self.items.len() }
             }
             LoadKind::Older => {
-                // An exhausted feed returns no cursor; keep none so we stop asking.
-                self.older = page.older;
+                // An exhausted feed returns no cursor, or (X) a fresh cursor
+                // with no rows; either way stop asking.
+                self.older = if page.items.is_empty() { None } else { page.older };
                 let fresh = self.dedup(page.items);
                 if fresh.is_empty() {
                     return ListChange::None;
@@ -202,7 +230,7 @@ mod tests {
 
     /// Drives one load end to end against the mock.
     fn load(model: &mut ColumnModel, backend: &MockBackend, kind: LoadKind) -> Option<ListChange> {
-        let (kind, req) = model.begin(kind)?;
+        let (kind, req) = model.begin(kind, Utc::now())?;
         let source = model.source().clone();
         let result = block_on(backend.feed(&source, req));
         Some(model.finish(kind, result))
@@ -222,9 +250,9 @@ mod tests {
     #[test]
     fn begin_refuses_concurrent_loads() {
         let mut m = ColumnModel::new(home());
-        assert!(m.begin(LoadKind::Refresh).is_some());
-        assert!(m.begin(LoadKind::Older).is_none());
-        assert!(m.begin(LoadKind::Newer).is_none());
+        assert!(m.begin(LoadKind::Refresh, Utc::now()).is_some());
+        assert!(m.begin(LoadKind::Older, Utc::now()).is_none());
+        assert!(m.begin(LoadKind::Newer, Utc::now()).is_none());
     }
 
     #[test]
@@ -244,7 +272,7 @@ mod tests {
             load(&mut m, &backend, LoadKind::Older);
         }
         assert_eq!(m.items().len(), MockBackend::FEED_LEN);
-        assert!(m.begin(LoadKind::Older).is_none(), "no cursor once exhausted");
+        assert!(m.begin(LoadKind::Older, Utc::now()).is_none(), "no cursor once exhausted");
     }
 
     #[test]
@@ -278,7 +306,7 @@ mod tests {
         let backend = MockBackend::new();
         load(&mut m, &backend, LoadKind::Refresh);
         let dup = m.items()[0].clone();
-        m.begin(LoadKind::Older);
+        m.begin(LoadKind::Older, Utc::now());
         let change =
             m.finish(LoadKind::Older, Ok(FeedPage { items: vec![dup], newer: None, older: None }));
         assert_eq!(change, ListChange::None);
@@ -296,6 +324,65 @@ mod tests {
         assert_eq!(m.items().len(), MockBackend::PAGE_SIZE);
         // Retry works.
         assert!(matches!(load(&mut m, &backend, LoadKind::Older), Some(ListChange::Splice { .. })));
+    }
+
+    #[test]
+    fn empty_older_page_with_a_cursor_ends_the_feed() {
+        let backend = MockBackend::new();
+        let mut m = ColumnModel::new(home());
+        load(&mut m, &backend, LoadKind::Refresh);
+        m.begin(LoadKind::Older, Utc::now());
+        let empty = FeedPage { items: vec![], newer: None, older: Some(PageToken::new("again")) };
+        assert_eq!(m.finish(LoadKind::Older, Ok(empty)), ListChange::None);
+        assert!(!m.has_older(), "no endless requests at the bottom");
+    }
+
+    #[test]
+    fn empty_first_page_is_the_whole_feed() {
+        let mut m = ColumnModel::new(home());
+        m.begin(LoadKind::Refresh, Utc::now());
+        let empty = FeedPage { items: vec![], newer: None, older: Some(PageToken::new("more")) };
+        assert_eq!(m.finish(LoadKind::Refresh, Ok(empty)), ListChange::Reset { count: 0 });
+        assert!(m.loaded_once() && !m.has_older());
+    }
+
+    #[test]
+    fn rate_limit_holds_loads_until_reset() {
+        let backend = MockBackend::new();
+        let mut m = ColumnModel::new(home());
+        load(&mut m, &backend, LoadKind::Refresh);
+        let now = Utc::now();
+        let reset_at = now + chrono::Duration::minutes(5);
+        m.begin(LoadKind::Newer, now);
+        m.finish(LoadKind::Newer, Err(BackendError::RateLimited { reset_at }));
+        for kind in [LoadKind::Newer, LoadKind::Older, LoadKind::Refresh] {
+            assert!(m.begin(kind, now).is_none(), "{kind:?} before reset");
+        }
+        assert!(m.begin(LoadKind::Newer, reset_at).is_some(), "allowed once reset");
+    }
+
+    #[test]
+    fn unauthorized_stops_automatic_loads_but_not_refresh() {
+        let backend = MockBackend::new();
+        let mut m = ColumnModel::new(home());
+        load(&mut m, &backend, LoadKind::Refresh);
+        backend.fail_next(BackendError::Unauthorized);
+        load(&mut m, &backend, LoadKind::Newer);
+        assert!(m.begin(LoadKind::Newer, Utc::now()).is_none(), "polling stops");
+        assert!(m.begin(LoadKind::Older, Utc::now()).is_none(), "scrolling stops");
+        assert_eq!(m.retry_kind(), Some(LoadKind::Refresh));
+        assert!(m.begin(LoadKind::Refresh, Utc::now()).is_some(), "the user can retry");
+    }
+
+    #[test]
+    fn retry_repeats_other_failed_loads() {
+        let backend = MockBackend::new();
+        let mut m = ColumnModel::new(home());
+        assert_eq!(m.retry_kind(), None);
+        load(&mut m, &backend, LoadKind::Refresh);
+        backend.fail_next(BackendError::Network("offline".into()));
+        load(&mut m, &backend, LoadKind::Older);
+        assert_eq!(m.retry_kind(), Some(LoadKind::Older));
     }
 
     #[test]

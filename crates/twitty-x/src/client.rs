@@ -10,10 +10,10 @@ use chrono::Utc;
 use serde_json::{Value, json};
 
 use crate::{
-    XError,
+    Session, XError,
     catalog::{Catalog, Method, OperationSpec, Origin},
     discovery::{Discovery, Report},
-    transport::{ApiRequest, Transport},
+    transport::{ApiRequest, ClientIds, RetryPolicy, RotateHook, Transport},
 };
 
 /// Client for X's internal GraphQL API. Returns raw JSON; translation into
@@ -38,6 +38,23 @@ impl XClient {
             refreshing: tokio::sync::Mutex::new(()),
             post_only: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// A client against x.com with the production defaults: query-id cache and
+    /// client ids under the user's cache directory, live discovery enabled.
+    /// `on_rotate` receives the session whenever X rotates a cookie.
+    pub fn production(session: Session, on_rotate: Option<RotateHook>) -> Result<Self, XError> {
+        let catalog = Arc::new(Catalog::new(Catalog::default_cache_path()));
+        let ids_path = directories::ProjectDirs::from("", "", "Twitty")
+            .map(|d| d.cache_dir().join("client-ids.json"));
+        let ids = ids_path.as_deref().map_or_else(ClientIds::random, ClientIds::load_or_create);
+        let base = url::Url::parse(Transport::API_BASE)
+            .map_err(|e| XError::Decode(format!("API base: {e}")))?;
+        let mut transport = Transport::new(session, &ids, base, RetryPolicy::default())?;
+        if let Some(hook) = on_rotate {
+            transport = transport.on_rotate(hook);
+        }
+        Ok(Self::new(transport, catalog, Some(Discovery::default_pages()?)))
     }
 
     pub fn transport(&self) -> &Transport {

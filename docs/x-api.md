@@ -4,7 +4,9 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 > Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
 
-**Status (M4, done):** X responses are translated into `twitty-model` by `translate::feed_page` and checked against 9 anonymised live fixtures. Wiring `XBackend` into the app is M5.
+**Status (M5, done):** `XBackend` implements `twitty-model`'s `Backend` and the app uses it when it finds a session. Reads (`viewer`, `feed`, `thread`, `profile`) are wired; writes (`act`, `publish`) return an error until M8. Verified live on 2026-10-24: Home, Notifications and Search columns load with images.
+
+**M4:** X responses are translated into `twitty-model` by `translate::feed_page` and checked against 9 anonymised live fixtures.
 
 **M3:** transport, catalog, discovery, `XClient` and the dev CLI are implemented, tested against a mock server, and **verified live on 2026-10-24**: `HomeTimeline` and `HomeLatestTimeline` returned data with the declared feature subsets, and logged-in discovery found every operation Twitty uses. Translation into `twitty-model` (`wire` + `translate`) is M4.
 
@@ -16,9 +18,11 @@ X doesn't document this API. Everything here comes from community clients and ou
 | `transport/` | `Transport`: static + per-request headers, cookie rotation (`on_rotate` hook), per-operation rate limits, retries, HTTP/X-error mapping. Knows nothing about GraphQL shapes. |
 | `catalog.rs` | `Catalog`: resolves an operation name to an `OperationSpec` (query id, method, feature switches, field toggles), builds the `features` map. |
 | `discovery.rs` | Best-effort query-id discovery from x.com's bundles (legacy + Relay formats). |
-| `client.rs` | `XClient::graphql(op, variables)` and helpers like `home_timeline`. Recovers once from stale ids. |
+| `client.rs` | `XClient::graphql(op, variables)` and helpers like `home_timeline`. Recovers once from stale ids. `XClient::production` builds one with the default cache paths and discovery (used by the app and the CLI). |
+| `requests.rs` | Private: which operation and variables serve each `FeedSource` and `PageRequest`. Only live-verified variable sets are mapped. |
+| `backend.rs` | `XBackend`: `Backend` over `XClient` + `translate`. |
 | `wire.rs` | Private, lenient readers over X JSON: `at`/`str_at`/`u64_at`…, `timeline()` classifying entries (items, modules, cursors). |
-| `translate/` | X JSON → `twitty-model`: `text` (entities → `RichText`), `user`, `tweet`, `media`, `card`, `notification`, and `feed_page()` for whole timelines. |
+| `translate/` | X JSON → `twitty-model`: `text` (entities → `RichText`), `user`, `tweet`, `media`, `card`, `notification`; entry points `feed_page()` (any timeline), `thread()` (`TweetDetail` split around the focal post), `viewer()` and `user()`. |
 | `anonymise.rs` | Scrubs captures into committable fixtures, plus a leak check. |
 | `bin/twitty-x-cli.rs` | Dev tool: `ops`, `refresh-ids`, `capture home`, `capture op`, `anonymise`. |
 | `data/operations.json` | Embedded fallback ids with feature switches and field toggles, regenerated from a live discovery run. |
@@ -37,7 +41,7 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 
 | Item | Value |
 |---|---|
-| Cookie `auth_token` | Session token. Secret. Will be stored in keyring (M5). |
+| Cookie `auth_token` | Session token. Secret. Read from a session file or env vars (see "Signing in"); keyring in M6. |
 | Cookie `ct0` | CSRF token, also sent as the `x-csrf-token` header |
 | `authorization` | `Bearer <public web bearer>` (`transport::WEB_BEARER`), the same for every web user. Re-extract it if requests get 403s with an empty body. |
 | `x-twitter-auth-type` | `OAuth2Session` |
@@ -48,9 +52,33 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 | `x-client-uuid`, `x-twitter-client-deviceid` | `ClientIds`: random UUIDs, saved once per install (`%LOCALAPPDATA%\Twitty\cache\client-ids.json`) |
 | `x-client-transaction-id` | Random 32-hex per request. See below. |
 
-**Cookie rotation**: when a response's `Set-Cookie` carries a new `ct0`/`auth_token`, the transport switches to it for the next request and calls the `on_rotate` hook (the app will persist it in M5). Empty values (deletions) are ignored; an expired session shows up as 401 instead.
+**Cookie rotation**: when a response's `Set-Cookie` carries a new `ct0`/`auth_token`, the transport switches to it for the next request and calls the `on_rotate` hook. The app writes the rotated session back to the file it was read from (write + rename); sessions from env vars aren't persisted. Empty values (deletions) are ignored; an expired session shows up as 401 instead.
 
 **Login (v1)**: GPUI's webview doesn't support Windows, so the user copies `auth_token` and `ct0` from their browser's DevTools (Application → Cookies → x.com).
+
+### Signing in
+
+Until the login dialog (M6), the app takes the first of:
+
+1. `TWITTY_AUTH_TOKEN` and `TWITTY_CT0` environment variables;
+2. `%APPDATA%\Twitty\config\session.json`;
+3. `session.json` in the working directory (the repo root with `cargo run`; gitignored).
+
+The file is `{"auth_token": "…", "ct0": "…"}`. A file that doesn't parse is logged by path (never its contents) and skipped. With none of these, the app runs on demo data with a banner. At startup the app calls `Viewer` and logs `signed in as @handle`, or the error.
+
+### What each column calls
+
+| `FeedSource` | Operation | Notes |
+|---|---|---|
+| `Home { ForYou }` / `Home { Following }` | `HomeTimeline` / `HomeLatestTimeline` | |
+| `Notifications { filter }` | `NotificationsTimeline` | `timeline_type`: `All`, `Verified`, `Mentions` |
+| `Search { query, sort }` | `SearchTimeline` (POST) | `product`: `Top`, `Latest`, `Media` |
+| `User { tab: Posts }` | `UserTweets` | |
+| `Bookmarks` | `Bookmarks` | |
+| `Thread { root }` | `TweetDetail` | |
+| `User { Replies / Media / Likes }`, `List` | not mapped yet | the column shows "… can't be loaded from X yet" (M7) |
+
+`PageRequest::Older` sends the bottom cursor and `Newer` the top cursor, both as `cursor`. A page with no rows ends the feed even if X sends a cursor, so scrolling can't loop on empty pages.
 
 ## Query IDs and features
 

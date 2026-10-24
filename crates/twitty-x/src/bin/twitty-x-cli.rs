@@ -7,18 +7,12 @@
 
 #![expect(clippy::print_stdout, clippy::print_stderr, reason = "command-line output")]
 
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use anyhow::Context as _;
 use clap::{Parser, Subcommand};
 use serde_json::Value;
-use twitty_x::{
-    Session, XClient,
-    catalog::Catalog,
-    discovery::Discovery,
-    transport::{ClientIds, RetryPolicy, Transport},
-};
-use url::Url;
+use twitty_x::{Session, XClient, catalog::Catalog};
 
 #[derive(Parser)]
 #[command(about = "Twitty's X adapter dev tool")]
@@ -94,10 +88,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
     let cli = Cli::parse();
-    let catalog = Arc::new(Catalog::new(Catalog::default_cache_path()));
 
     match cli.command {
         Command::Ops => {
+            let catalog = Catalog::new(Catalog::default_cache_path());
             for (name, spec, origin) in catalog.list() {
                 println!(
                     "{name:<28} {:<24} {:?} {:?} ({})",
@@ -136,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
             println!("wrote {} (no names or handles survived)", output.display());
         }
         Command::RefreshIds => {
-            let client = client(cli.session, catalog)?;
+            let client = client(cli.session)?;
             let report = client.refresh_ids().await?;
             println!("scripts fetched by family: {:?}", report.scripts_by_family);
             println!("operations found by format: {:?}", report.ops_by_format);
@@ -150,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::Capture { what: Capture::Home { latest, count, cursor, query_id, out } } => {
-            let client = client(cli.session, catalog)?;
+            let client = client(cli.session)?;
             if let Some(id) = query_id {
                 let op = if latest { "HomeLatestTimeline" } else { "HomeTimeline" };
                 client.catalog().set_override(op, &id);
@@ -160,7 +154,7 @@ async fn main() -> anyhow::Result<()> {
             save(&client, op, &body, &out)?;
         }
         Command::Capture { what: Capture::Op { name, vars, out } } => {
-            let client = client(cli.session, catalog)?;
+            let client = client(cli.session)?;
             let variables: Value = serde_json::from_str(&vars).context("--vars is not JSON")?;
             let body = client.graphql(&name, variables).await?;
             save(&client, &name, &body, &out)?;
@@ -184,19 +178,14 @@ fn save(client: &XClient, op: &str, body: &Value, out: &std::path::Path) -> anyh
     Ok(())
 }
 
-fn client(session_file: Option<PathBuf>, catalog: Arc<Catalog>) -> anyhow::Result<XClient> {
+fn client(session_file: Option<PathBuf>) -> anyhow::Result<XClient> {
     let session = match session_file {
         Some(path) => {
             Session::from_file(&path).with_context(|| format!("reading {}", path.display()))?
         }
         None => Session::from_env()?,
     };
-    let ids_path = directories::ProjectDirs::from("", "", "Twitty")
-        .map(|d| d.cache_dir().join("client-ids.json"));
-    let ids = ids_path.as_deref().map_or_else(ClientIds::random, ClientIds::load_or_create);
-    let transport =
-        Transport::new(session, &ids, Url::parse(Transport::API_BASE)?, RetryPolicy::default())?;
-    Ok(XClient::new(transport, catalog, Some(Discovery::default_pages()?)))
+    Ok(XClient::production(session, None)?)
 }
 
 /// Instruction types and the total number of timeline entries, wherever they are.

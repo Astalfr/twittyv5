@@ -2,7 +2,7 @@
 
 A native desktop client for X (Twitter), written in Rust with **GPUI** (via **GPUI Kit**). It talks to X's internal web GraphQL API (`https://x.com/i/api/graphql/<queryId>/<Operation>`) and looks like the new **X Pro / TweetDeck**: a multi-column deck.
 
-> Status: **M0–M4 done** (X transport verified live; translation into `twitty-model` checked against 9 anonymised live captures). Next: M5 (`XBackend` in the app, login).
+> Status: **M0–M5 done**. The app runs on real X data (`XBackend`) when a session file or env vars are present, and on demo data otherwise. Next: M6 (login dialog, keyring).
 >
 > Living documentation is in [docs/](docs/README.md) and contributor/agent rules are in [CLAUDE.md](CLAUDE.md). Every milestone below is done only when it meets the definition of done in [docs/testing.md](docs/testing.md).
 
@@ -297,7 +297,7 @@ I can't access X Pro myself, so this is a spec rather than a copy. The colours b
 | **M2** | UI skeleton on mock data | Rail, deck, three columns with `list()`/`ListState`, post cells, the Lights-out theme. Everything driven by `MockBackend`. |
 | **M3** | X transport | Session, static headers, txid (random), cookie rotation, rate-limit tracker, queryId/features discovery and cache. `twitty-x-cli` dumps raw HomeTimeline JSON. |
 | **M4** | Wire + translate | Lenient wire readers and translation into the model. At least 15 fixtures (retweet, quote, quote-of-deleted, thread module, long note, 4 images, video, GIF, poll, card, tombstone, withheld, pinned, cursors), with `insta` snapshots of the **model** output. |
-| **M5** | Real Home column | `XBackend` is plugged into the UI. Paging with older/newer tokens, image loading, `PostStore` deduplication. |
+| **M5** | Real Home column | `XBackend` is plugged into the UI. Paging with older/newer tokens, image loading, `PostStore` deduplication. *(Done: no separate `PostStore`, see [decisions.md](docs/decisions.md).)* |
 | **M6** | Login + persistence | Cookie dialog (paste `auth_token` + `ct0`, with how-to steps), checked by `viewer()`, stored in keyring. Decks and settings saved in `%APPDATA%\Twitty` with `schema_version`. |
 | **M7** | All column types | Notifications, Search, List, User, Bookmarks, Thread. Add/remove/reorder/resize columns. Several decks. |
 | **M8** | Interaction | Like, repost, bookmark (optimistic updates with rollback), reply/compose (`publish`), thread panel, profile hover card, open in browser. |

@@ -128,7 +128,7 @@ impl ColumnView {
 
     /// Starts a load of `kind` unless one is already running.
     pub fn load(&mut self, kind: LoadKind, cx: &mut Context<Self>) {
-        let Some((kind, request)) = self.model.begin(kind) else {
+        let Some((kind, request)) = self.model.begin(kind, chrono::Utc::now()) else {
             return;
         };
         let backend = Arc::clone(&self.backend);
@@ -217,21 +217,28 @@ impl ColumnView {
         let theme = cx.theme().clone();
         let body: AnyElement = match self.model.status() {
             Status::Loading(LoadKind::Older) => Spinner::new().into_any_element(),
-            Status::Failed { kind: LoadKind::Older, error } => v_flex()
-                .items_center()
-                .gap_2()
-                .child(div().text_color(theme.muted_foreground).child(error.to_string()))
-                .child(
-                    Button::new("retry-older")
-                        .small()
-                        .label("Retry")
-                        .on_click(cx.listener(|this, _, _, cx| this.load(LoadKind::Older, cx))),
-                )
-                .into_any_element(),
+            Status::Failed { kind: LoadKind::Older, error } => {
+                let retry = self.model.retry_kind().unwrap_or(LoadKind::Older);
+                v_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().text_color(theme.muted_foreground).child(error.to_string()))
+                    .child(
+                        Button::new("retry-older")
+                            .small()
+                            .label("Retry")
+                            .on_click(cx.listener(move |this, _, _, cx| this.load(retry, cx))),
+                    )
+                    .into_any_element()
+            }
             _ if self.model.loaded_once() && !self.model.has_older() => div()
                 .text_color(theme.muted_foreground)
                 .text_sm()
-                .child("You're all caught up")
+                .child(if self.model.items().is_empty() {
+                    "Nothing to show here yet"
+                } else {
+                    "You're all caught up"
+                })
                 .into_any_element(),
             _ => div().into_any_element(),
         };

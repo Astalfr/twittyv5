@@ -41,7 +41,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 | Column widths | Narrow 310px · Medium 350px (default) · Wide 400px |
 | Column header | 53px tall: icon, title (bold), subtitle (gray, `@handle` / query), ⚙ popover (width, Top/Latest, media size, clear, remove) |
 | Post cell | 12px padding · 40px round avatar · **name** · `@handle · 2m` gray · ⋯ menu · body 15px · media grid (1–4, 16px radius, 2px gap) · quote card (1px border, 16px radius, smaller avatar) · action bar (gray, active colours: like `pink`, repost `green`) |
-| Feedback | "↑ N new posts" pill when scrolled down · skeleton rows while loading · inline error with Retry · rate-limit countdown |
+| Feedback | "↑ N new posts" pill when scrolled down · skeleton rows while loading · inline error with Retry (a full refresh after a session error, see `ColumnModel::retry_kind`) · footer row: spinner, Retry, "You're all caught up", or "Nothing to show here yet" for an empty feed · rate-limit countdown |
 | Thread | Clicking a post opens a side `sheet` with the conversation |
 | Composer | `dialog`, with a character counter, reply and quote preview, and image attachments (later) |
 | Video/GIF | Poster image with a ▶ badge and duration. Click opens it externally (GPUI has no video player). |

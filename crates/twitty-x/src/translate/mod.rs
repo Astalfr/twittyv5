@@ -15,7 +15,7 @@ mod user;
 use std::{collections::HashMap, sync::Arc};
 
 use serde_json::Value;
-use twitty_model::{FeedItem, FeedPage, PageToken, Post, Profile};
+use twitty_model::{FeedItem, FeedPage, PageToken, Post, PostId, Profile, ThreadView};
 
 use crate::wire::{self, CursorKind, Entry, at, str_at};
 
@@ -98,6 +98,33 @@ pub fn feed_page(root: &Value) -> Translated {
         }
     }
     Translated { page, warnings: ctx.warnings }
+}
+
+/// The signed-in account from a `Viewer` response.
+pub fn viewer(root: &Value) -> Option<Profile> {
+    user::profile(at(root, &["data", "viewer", "user_results", "result"])?)
+}
+
+/// The profile from a `UserByScreenName` response.
+pub fn user(root: &Value) -> Option<Profile> {
+    user::profile(at(root, &["data", "user", "result"])?)
+}
+
+/// Splits a `TweetDetail` response around the `focal` post: rows before it are
+/// its ancestors, rows after it the replies. `None` when the focal post isn't
+/// in the response (deleted, protected, withheld…).
+pub fn thread(root: &Value, focal: &PostId) -> Option<ThreadView> {
+    let page = feed_page(root).page;
+    let at_focus = |item: &FeedItem| matches!(item, FeedItem::Post(p) if &p.id == focal);
+    let split = page.items.iter().position(at_focus)?;
+    let mut items = page.items.into_iter();
+    let ancestors = items
+        .by_ref()
+        .take(split)
+        .flat_map(|item| item.posts().into_iter().cloned().collect::<Vec<_>>())
+        .collect();
+    let Some(FeedItem::Post(focus)) = items.next() else { return None };
+    Some(ThreadView { ancestors, focus, replies: items.collect(), more_replies: page.older })
 }
 
 fn is_promoted(entry: &str, content: &Value) -> bool {

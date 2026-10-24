@@ -4,6 +4,23 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: No separate `PostStore` (M5)
+- **Decision**: Rows stay owned by each `ColumnModel` (deduplicated by `FeedItem::key`). Viewer state that must agree across columns (liked, reposted, bookmarked) lives in `InteractionsHub`, keyed by `PostId`. The planned shared `PostStore` isn't built.
+- **Why**: The only thing columns must share today is viewer state, and the hub already does that. A shared store would add invalidation work without a user-visible gain.
+- **Consequences**: Revisit if a feature needs one post's content to update everywhere (e.g. live metrics or edits).
+
+### 2026-10-24: `XBackend` refuses writes until M8
+- **Decision**: `XBackend::act` and `publish` return `BackendError::Upstream` without calling X. The UI's optimistic like/repost/bookmark rolls back.
+- **Why**: Wiring the real backend shouldn't silently turn existing buttons into writes on the user's account. Mutations get their own tests and review in M8.
+
+### 2026-10-24: Columns hold off after rate limits and session errors
+- **Decision**: `ColumnModel::begin` refuses any load until a `RateLimited` error's `reset_at`, and after `Unauthorized` refuses everything but an explicit `Refresh`. An empty page ends the feed even when X sends a cursor.
+- **Why**: With a real backend, the 30s poll and scroll-triggered paging would otherwise keep firing requests that can only fail, or page through empty results forever.
+
+### 2026-10-24: Only live-verified variables are mapped
+- **Decision**: `requests::feed` maps a `FeedSource` to an operation only when its variables were seen working live. The others return an error instead of a guess.
+- **Why**: A wrong guess fails at X with unhelpful errors, or worse, returns subtly different data.
+
 ### 2026-10-24: X entity offsets are code points
 - **Finding**: Across 453 entities in live captures (66 texts with emoji), 98 only match as Unicode code-point offsets and none only as UTF-16. The plan had assumed UTF-16.
 - **Decision**: `translate::text` slices by code points, then emits byte ranges.

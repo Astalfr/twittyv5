@@ -23,7 +23,7 @@
 | `twitty-x` | Everything X-specific: HTTP, auth, query-ID discovery, GraphQL ops, wire parsing, translation into the model | twitty-model, reqwest, tokio, serde_json, regex | gpui, twitty |
 | `twitty` | UI, app state, persistence of decks and settings, keyring, runtime bridge | twitty-model, twitty-x, gpui-kit | (X JSON types, which aren't public anyway) |
 
-`twitty` uses `twitty-x` only in `main.rs`, to build an `XBackend` and hand it over as `Arc<dyn Backend>`. Until M5, `main.rs` uses `MockBackend` and shows a "Demo mode" banner.
+`twitty` uses `twitty-x` only in `main.rs`, to find a session, build an `XBackend` and hand it over as `Arc<dyn Backend>`. Without a session, `main.rs` uses `MockBackend` and shows a "Demo mode" banner.
 
 `twitty` is a library plus a thin binary:
 
@@ -73,8 +73,8 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 
 1. `DeckView` creates a `ColumnView` for `FeedSource::Home { mode: Following }`.
 2. `ColumnView` asks the backend for `PageRequest::First` through the runtime bridge, and shows skeleton rows meanwhile.
-3. `XBackend::feed` resolves the `HomeLatestTimeline` queryId, sends the request and translates the response into a `FeedPage`.
-4. `ColumnView` adds the items to the shared `PostStore` (deduplicated by `PostId`) and keeps its own ordered list of IDs. It then calls `ListState::splice` and `cx.notify()`.
+3. `XBackend::feed` picks the operation and variables for the source (`requests::feed`: `HomeLatestTimeline`, cursor if any), sends the request through `XClient::graphql` and translates the response with `translate::feed_page`.
+4. `ColumnModel` drops rows it already has (by `FeedItem::key`), stores the cursors and returns a `ListChange`. `ColumnView` applies it with `ListState::reset`/`splice` and calls `cx.notify()`. Viewer state shared between columns (likes, reposts, bookmarks) lives in `InteractionsHub`, keyed by `PostId`.
 5. Scrolling near the bottom triggers `PageRequest::Older(token)`. The "new posts" poll uses `PageRequest::Newer(token)`.
 
 ## App state (`twitty` crate)
@@ -83,4 +83,4 @@ Images use GPUI's own loader, with `cx.set_http_client(gpui-pre-reqwest-client)`
 - Each `ColumnView` owns its `ColumnModel` (rows + cursors) and its `ListState`. The list has one extra footer row (spinner, retry, "caught up").
 - The viewer's likes, reposts and bookmarks are overrides in `InteractionsHub`, so every column shows the change instantly. Failures roll back.
 - Decks are saved as JSON in `%APPDATA%\Twitty\config\decks.json` (atomic write), with a `schema_version`.
-- Credentials live in Windows Credential Manager (`keyring`), never in plain files.
+- Credentials: until M6 the session is read from `TWITTY_AUTH_TOKEN`/`TWITTY_CT0`, `%APPDATA%\Twitty\config\session.json` or `./session.json`, and rotated cookies are written back to that file. M6 moves them to Windows Credential Manager (`keyring`).

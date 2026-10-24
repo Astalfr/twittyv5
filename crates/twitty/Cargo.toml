@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 twitty-model = { workspace = true, features = ["mock"] }
+# Only main.rs uses the X adapter; everything else sees `dyn Backend`.
+twitty-x.workspace = true
 gpui-kit.workspace = true
 reqwest_client.workspace = true
 anyhow.workspace = true
