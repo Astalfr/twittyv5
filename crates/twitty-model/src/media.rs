@@ -44,14 +44,31 @@ impl AspectRatio {
     }
 }
 
+/// One playable file of a video, at one quality.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VideoVariant {
+    pub url: Url,
+    /// Bits per second, when known.
+    pub bitrate: Option<u32>,
+    /// Width and height in pixels, when known.
+    pub size: Option<(u32, u32)>,
+}
+
 /// Media attached to a post.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Media {
     /// A still image.
     Image { image: ImageRef, alt: Option<String> },
-    /// A video; `stream` is the best playable file, if any.
-    Video { poster: ImageRef, stream: Option<Url>, duration: Option<Duration>, alt: Option<String> },
+    /// A video. `variants` are its playable files, best quality first
+    /// (empty when none can be played).
+    Video {
+        poster: ImageRef,
+        #[serde(default)]
+        variants: Vec<VideoVariant>,
+        duration: Option<Duration>,
+        alt: Option<String>,
+    },
     /// A looping animation without sound.
     Gif { poster: ImageRef, stream: Option<Url>, alt: Option<String> },
 }
@@ -62,6 +79,15 @@ impl Media {
         match self {
             Media::Image { image, .. } => image,
             Media::Video { poster, .. } | Media::Gif { poster, .. } => poster,
+        }
+    }
+
+    /// The file to play by default: a video's best variant, a GIF's stream.
+    pub fn stream(&self) -> Option<&Url> {
+        match self {
+            Media::Image { .. } => None,
+            Media::Video { variants, .. } => variants.first().map(|v| &v.url),
+            Media::Gif { stream, .. } => stream.as_ref(),
         }
     }
 
@@ -89,7 +115,29 @@ mod tests {
     #[test]
     fn preview_returns_poster_for_video() {
         let poster = ImageRef::new(Url::parse("https://img.example/p.jpg").unwrap());
-        let m = Media::Video { poster: poster.clone(), stream: None, duration: None, alt: None };
+        let m = Media::Video {
+            poster: poster.clone(),
+            variants: Vec::new(),
+            duration: None,
+            alt: None,
+        };
         assert_eq!(m.preview(), &poster);
+        assert_eq!(m.stream(), None);
+    }
+
+    #[test]
+    fn a_videos_stream_is_its_best_variant() {
+        let url = |s: &str| Url::parse(s).unwrap();
+        let variant = |s: &str| VideoVariant { url: url(s), bitrate: None, size: None };
+        let m = Media::Video {
+            poster: ImageRef::new(url("https://img.example/p.jpg")),
+            variants: vec![
+                variant("https://v.example/high.mp4"),
+                variant("https://v.example/low.mp4"),
+            ],
+            duration: None,
+            alt: None,
+        };
+        assert_eq!(m.stream().map(Url::as_str), Some("https://v.example/high.mp4"));
     }
 }

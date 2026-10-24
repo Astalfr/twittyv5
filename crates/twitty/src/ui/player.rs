@@ -8,7 +8,7 @@
 //! there.
 //!
 //! The player draws pictures and, for videos, a control bar (play/pause,
-//! time, progress, mute, volume). Clicks on the picture belong to its
+//! time, progress, quality, mute, volume). Clicks on the picture belong to its
 //! container (the media viewer pauses on a click, a timeline tile has a
 //! play/pause button); the bar's clicks stay in the bar.
 
@@ -22,9 +22,16 @@ use std::{
 };
 
 use gpui_kit::{
-    App, Context, Div, Entity, Global, ImageSource, Img, IntoElement, ObjectFit, ParentElement,
-    Render, RenderImage, Styled, StyledImage, Subscription, Window, assets::IconName,
-    component::slider::*, component::*, div, img, prelude::*, px,
+    Anchor, App, Context, Div, Entity, Global, ImageSource, Img, IntoElement, ObjectFit,
+    ParentElement, Render, RenderImage, SharedString, Styled, StyledImage, Subscription, Window,
+    assets::IconName,
+    component::button::*,
+    component::menu::{DropdownMenu as _, PopupMenuItem},
+    component::slider::*,
+    component::*,
+    div, img,
+    prelude::*,
+    px,
 };
 
 use crate::{
@@ -62,6 +69,14 @@ impl Options {
     pub fn video(duration: Option<Duration>) -> Self {
         Self { repeat: Repeat::Once, sound: Sound::On, controls: Controls::Bar, duration }
     }
+}
+
+/// One file of a video the viewer can switch to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Quality {
+    /// What the quality menu shows ("720p").
+    pub label: SharedString,
+    pub url: String,
 }
 
 /// The video volume for the session (not saved): every player starts with
@@ -110,6 +125,13 @@ pub struct VideoPlayer {
     volume: VideoVolume,
     progress: Option<Entity<SliderState>>,
     volume_slider: Option<Entity<SliderState>>,
+    /// The volume slider is being dragged.
+    volume_drag: bool,
+    /// The files of other qualities (empty or one: no menu), and the one
+    /// playing.
+    qualities: Vec<Quality>,
+    quality: usize,
+    quality_menu_open: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -166,6 +188,7 @@ impl VideoPlayer {
                     cx.notify();
                 }));
                 subscriptions.push(cx.subscribe(&level, |this, _, e: &SliderEvent, cx| {
+                    this.volume_drag = matches!(e, SliderEvent::Change(_));
                     let (SliderEvent::Change(v) | SliderEvent::Release(v)) = e;
                     this.set_volume(VideoVolume { level: v.start() / 100., muted: false }, cx);
                 }));
@@ -193,8 +216,61 @@ impl VideoPlayer {
             volume,
             progress,
             volume_slider,
+            volume_drag: false,
+            qualities: Vec::new(),
+            quality: 0,
+            quality_menu_open: false,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The video's files, the first being the one opened.
+    pub fn with_qualities(mut self, qualities: Vec<Quality>) -> Self {
+        self.qualities = qualities;
+        self.quality = 0;
+        self
+    }
+
+    /// The index of the quality playing.
+    pub fn quality(&self) -> usize {
+        self.quality
+    }
+
+    /// Switches to quality `index`, continuing from where it is (and paused
+    /// if it was).
+    pub fn set_quality(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(url) = self.qualities.get(index).map(|q| q.url.clone()) else { return };
+        if index == self.quality {
+            return;
+        }
+        self.quality = index;
+        let at = self.position();
+        let paused = self.timeline.state() == State::Paused;
+        // Dropping the old playback stops its decoder.
+        match video::open(&url, self.options.repeat, self.options.sound, cx) {
+            Some(playback) => {
+                self.events = Some(playback.events);
+                self.control = Some(playback.control);
+            }
+            None => {
+                self.events = None;
+                self.control = None;
+                self.failed = true;
+            }
+        }
+        if let Some(control) = &self.control {
+            control.set_volume(self.volume.gain());
+            control.set_paused(paused);
+        }
+        self.seek(at, cx);
+    }
+
+    /// Whether the control bar stays up even when the pointer leaves: while
+    /// the video doesn't play, a slider is dragged or the quality menu is
+    /// open.
+    pub fn controls_pinned(&self) -> bool {
+        let playing = self.timeline.state() == State::Playing && !self.timeline.is_ended();
+        !playing || self.scrub.is_some() || self.volume_drag || self.quality_menu_open
     }
 
     /// Sets how frames are drawn (by default fitted inside the box). The
@@ -360,6 +436,46 @@ impl VideoPlayer {
         }
     }
 
+    /// The quality menu's button, when there is a choice.
+    fn quality_button(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let label = self.qualities.get(self.quality)?.label.clone();
+        if self.qualities.len() < 2 {
+            return None;
+        }
+        let labels: Vec<SharedString> = self.qualities.iter().map(|q| q.label.clone()).collect();
+        let current = self.quality;
+        let this = cx.entity().downgrade();
+        let menu_state = this.clone();
+        Some(
+            Button::new("video-quality")
+                .debug_selector(|| "video-quality".into())
+                // Not `ghost`: the theme's hover barely shows on the dark bar.
+                .custom(bar_button(cx))
+                .xsmall()
+                .label(label)
+                .dropdown_menu_with_anchor(Anchor::BottomRight, move |menu, _, _| {
+                    labels.iter().enumerate().fold(menu, |menu, (index, label)| {
+                        let this = this.clone();
+                        menu.item(
+                            PopupMenuItem::new(label.clone()).checked(index == current).on_click(
+                                move |_, _, cx| {
+                                    this.update(cx, |p, cx| p.set_quality(index, cx)).ok();
+                                },
+                            ),
+                        )
+                    })
+                })
+                .on_open_change(move |open, _, cx| {
+                    menu_state
+                        .update(cx, |p, cx| {
+                            p.quality_menu_open = *open;
+                            cx.notify();
+                        })
+                        .ok();
+                }),
+        )
+    }
+
     fn render_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let playing = self.timeline.state() == State::Playing && !self.timeline.is_ended();
         let play_icon = if self.timeline.is_ended() {
@@ -384,7 +500,7 @@ impl VideoPlayer {
                 .p_1()
                 .rounded(px(4.))
                 .cursor_pointer()
-                .hover(|s| s.bg(gpui_kit::white().opacity(0.15)))
+                .hover(|s| s.bg(bar_hover()))
                 .child(Icon::new(icon).size(px(16.)))
         };
         h_flex()
@@ -402,8 +518,9 @@ impl VideoPlayer {
             .bg(gpui_kit::black().opacity(0.6))
             .text_color(gpui_kit::white())
             .text_xs()
-            // Shown while hovered, and always while it doesn't play.
-            .opacity(if playing { 0. } else { 1. })
+            // Shown while hovered, and always while it doesn't play or is
+            // being used (a drag can leave the player).
+            .opacity(if self.controls_pinned() { 1. } else { 0. })
             .group_hover("video-player", |s| s.opacity(1.))
             // The bar's clicks aren't the picture's (pause) or the backdrop's.
             .on_click(|_, _, cx| cx.stop_propagation())
@@ -412,19 +529,28 @@ impl VideoPlayer {
                 this.toggle(cx);
             })))
             .child(div().flex_none().child(time))
+            // The sliders' thumbs stick out of their track: room on the sides.
             .children(self.progress.as_ref().map(|p| {
                 div()
                     .debug_selector(|| "video-progress".into())
                     .flex_1()
                     .min_w_0()
+                    .mx_1()
                     .child(Slider::new(p).accessibility_label("Progress"))
             }))
+            .children(self.quality_button(cx))
             .child(icon_button("video-mute", mute_icon).on_click(cx.listener(|this, _, _, cx| {
                 cx.stop_propagation();
                 this.toggle_mute(cx);
             })))
             .children(self.volume_slider.as_ref().map(|v| {
-                div().flex_none().w(px(72.)).child(Slider::new(v).accessibility_label("Volume"))
+                div()
+                    .debug_selector(|| "video-volume".into())
+                    .flex_none()
+                    .w(px(72.))
+                    .ml_1()
+                    .mr_2()
+                    .child(Slider::new(v).accessibility_label("Volume"))
             }))
     }
 }
@@ -445,6 +571,20 @@ impl Render for VideoPlayer {
             )
             .when(bar, |d| d.child(self.render_bar(cx)))
     }
+}
+
+/// The hover surface of the control bar's buttons. The bar is fixed
+/// light-on-dark over the picture, so this is too, not a theme colour.
+fn bar_hover() -> gpui_kit::Hsla {
+    gpui_kit::white().opacity(0.25)
+}
+
+/// The control bar's text buttons: white, with [`bar_hover`] on hover.
+fn bar_button(cx: &App) -> ButtonCustomVariant {
+    ButtonCustomVariant::new(cx)
+        .foreground(gpui_kit::white())
+        .hover(bar_hover())
+        .active(gpui_kit::white().opacity(0.35))
 }
 
 /// A round play or pause sign of `size` drawn over media: "play" when the
@@ -609,6 +749,114 @@ mod tests {
         click("video-play", cx);
         assert_eq!(video.control(0).unwrap().seeks(), vec![(Duration::ZERO, 1)]);
         assert_eq!(view.read_with(cx, |p, _| p.state()), State::Playing);
+    }
+
+    fn drag(name: &'static str, cx: &mut VisualTestContext) -> gpui_kit::Point<gpui_kit::Pixels> {
+        let slider = cx.debug_bounds(name).unwrap_or_else(|| panic!("{name} is drawn"));
+        // On the track, off the thumb: the value follows from the press.
+        let from = gpui_kit::point(slider.left() + slider.size.width / 3., slider.center().y);
+        cx.simulate_mouse_down(from, gpui_kit::MouseButton::Left, gpui_kit::Modifiers::default());
+        // Far off the player, as a drag can go.
+        let away = gpui_kit::point(slider.center().x, slider.top() - px(300.));
+        for to in [from, away] {
+            cx.simulate_mouse_move(to, gpui_kit::MouseButton::Left, gpui_kit::Modifiers::default());
+        }
+        cx.run_until_parked();
+        away
+    }
+
+    #[gpui_kit::test]
+    fn the_bar_stays_up_while_a_slider_is_dragged(cx: &mut TestAppContext) {
+        let frames = vec![Duration::ZERO, Duration::from_secs(60)];
+        let (view, cx, _) = player_with(frames, Options::video(None), cx);
+        assert!(!view.read_with(cx, |p, _| p.controls_pinned()), "playing: shown on hover only");
+        for slider in ["video-progress", "video-volume"] {
+            let away = drag(slider, cx);
+            assert!(view.read_with(cx, |p, _| p.controls_pinned()), "{slider} held");
+            cx.simulate_mouse_up(away, gpui_kit::MouseButton::Left, gpui_kit::Modifiers::default());
+            redraw(cx);
+            let playing = view.read_with(cx, |p, _| p.state() == State::Playing);
+            assert!(playing && !view.read_with(cx, |p, _| p.controls_pinned()), "{slider} let go");
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_volume_slider_keeps_off_the_right_edge(cx: &mut TestAppContext) {
+        let (_view, cx, _) = player_with(vec![Duration::ZERO], Options::video(None), cx);
+        let bar = cx.debug_bounds("video-controls").expect("the bar");
+        let volume = cx.debug_bounds("video-volume").expect("the volume slider");
+        assert!(bar.right() - volume.right() >= px(16.), "room for the thumb: {bar:?} {volume:?}");
+    }
+
+    fn qualities() -> Vec<Quality> {
+        ["720p", "480p", "270p"]
+            .into_iter()
+            .map(|label| Quality { label: label.into(), url: format!("{URL}?{label}") })
+            .collect()
+    }
+
+    #[gpui_kit::test]
+    fn switching_quality_reopens_where_it_was(cx: &mut TestAppContext) {
+        let video = cx.update(|cx| {
+            gpui_kit::init(cx);
+            FakeVideo::install_with_duration(
+                vec![Duration::ZERO, Duration::from_secs(60)],
+                Duration::from_secs(10),
+                cx,
+            )
+        });
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            VideoPlayer::new(URL, Options::video(None), window, cx).with_qualities(qualities())
+        });
+        redraw(cx);
+        assert!(cx.debug_bounds("video-quality").is_some(), "a menu: there is a choice");
+        view.update(cx, |p, cx| {
+            p.toggle(cx);
+            p.seek(Duration::from_secs(3), cx);
+        });
+        view.update(cx, |p, cx| p.set_quality(2, cx));
+        redraw(cx);
+        assert_eq!(
+            video.opened().last().map(String::as_str),
+            Some("https://video.twimg.com/a.mp4?270p")
+        );
+        let control = video.control(1).expect("a second playback");
+        assert_eq!(control.seeks(), vec![(Duration::from_secs(3), 2)], "from where it was");
+        assert_eq!(control.paused(), Some(true), "and still paused");
+        assert_eq!(video.listening(), 1, "the first playback was dropped");
+        assert_eq!(view.read_with(cx, |p, _| p.quality()), 2);
+        view.update(cx, |p, cx| p.set_quality(2, cx));
+        assert_eq!(video.opened().len(), 2, "the same quality doesn't reopen");
+    }
+
+    #[gpui_kit::test]
+    fn the_bar_buttons_hover_shows_on_the_dark_bar(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let hover = bar_hover();
+        assert!(hover.l > 0.9 && hover.a >= 0.2, "a clear light surface: {hover:?}");
+        // The quality button uses it too, not the theme's faint ghost hover.
+        let quality = cx.update(|cx| bar_button(cx));
+        let expected = cx.update(|cx| {
+            ButtonCustomVariant::new(cx)
+                .foreground(gpui_kit::white())
+                .hover(hover)
+                .active(gpui_kit::white().opacity(0.35))
+        });
+        assert_eq!(quality, expected);
+    }
+
+    #[gpui_kit::test]
+    fn one_quality_has_no_menu(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            FakeVideo::install(vec![Duration::ZERO], cx);
+        });
+        let one = vec![Quality { label: "720p".into(), url: URL.into() }];
+        let (_view, cx) = cx.add_window_view(|window, cx| {
+            VideoPlayer::new(URL, Options::video(None), window, cx).with_qualities(one)
+        });
+        redraw(cx);
+        assert!(cx.debug_bounds("video-quality").is_none());
     }
 
     #[gpui_kit::test]

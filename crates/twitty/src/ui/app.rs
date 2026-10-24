@@ -21,7 +21,7 @@ use crate::{
         interactions::Toggle,
         media_layout::{self, viewer},
         motion,
-        playback::{Autoplay, State},
+        playback::{self, Autoplay, State},
         poll,
         settings::Settings,
     },
@@ -34,7 +34,7 @@ use crate::{
         hub::{ActionFailed, InteractionsHub, Navigate},
         keys,
         login::{LoginEvent, LoginView},
-        player::{Options as PlayerOptions, VideoPlayer, play_pause_sign},
+        player::{Options as PlayerOptions, Quality, VideoPlayer, play_pause_sign},
         post::span_url,
         profile::{CloseProfile, ProfilePanel},
         theme,
@@ -343,13 +343,31 @@ impl TwittyApp {
                 twitty_model::Media::Gif { stream: Some(url), .. } => {
                     Some((url.to_string(), PlayerOptions::GIF))
                 }
-                twitty_model::Media::Video { stream: Some(url), duration, .. } => {
-                    Some((url.to_string(), PlayerOptions::video(*duration)))
+                twitty_model::Media::Video { variants, duration, .. } => {
+                    let best = variants.first()?.url.to_string();
+                    Some((best, PlayerOptions::video(*duration)))
                 }
                 _ => None,
             });
-        self.media_player =
-            stream.map(|(url, options)| cx.new(|cx| VideoPlayer::new(&url, options, window, cx)));
+        let qualities = self.media_qualities();
+        self.media_player = stream.map(|(url, options)| {
+            cx.new(|cx| VideoPlayer::new(&url, options, window, cx).with_qualities(qualities))
+        });
+    }
+
+    /// The viewer's video's files for the quality menu, best first.
+    fn media_qualities(&self) -> Vec<Quality> {
+        let Some((post, index)) = &self.media else { return Vec::new() };
+        let Some(twitty_model::Media::Video { variants, .. }) = post.media.get(*index) else {
+            return Vec::new();
+        };
+        variants
+            .iter()
+            .map(|v| Quality {
+                label: playback::quality_label(v.size, v.bitrate).into(),
+                url: v.url.to_string(),
+            })
+            .collect()
     }
 
     pub fn active_column(&self) -> usize {
@@ -2655,7 +2673,11 @@ mod tests {
         let poster = post.media[0].preview().clone();
         let stream = Some(poster.url.join("/clip.mp4").unwrap());
         let duration = Some(Duration::from_secs(42));
-        post.media = vec![twitty_model::Media::Video { poster, stream, duration, alt: None }];
+        let variants = stream
+            .into_iter()
+            .map(|url| twitty_model::VideoVariant { url, bitrate: None, size: None })
+            .collect();
+        post.media = vec![twitty_model::Media::Video { poster, variants, duration, alt: None }];
         let hub = app.read_with(cx, |app, _| app.hub.clone());
         let to = Navigate::Media { post: Arc::new(post), index: 0 };
         hub.update(cx, |hub, cx| hub.navigate(to, cx));
@@ -2704,7 +2726,11 @@ mod tests {
         let poster = post.media[0].preview().clone();
         let stream = Some(poster.url.join("/clip.mp4").unwrap());
         let duration = Some(Duration::from_secs(42));
-        post.media = vec![twitty_model::Media::Video { poster, stream, duration, alt: None }];
+        let variants = stream
+            .into_iter()
+            .map(|url| twitty_model::VideoVariant { url, bitrate: None, size: None })
+            .collect();
+        post.media = vec![twitty_model::Media::Video { poster, variants, duration, alt: None }];
         let hub = app.read_with(cx, |app, _| app.hub.clone());
         let to = Navigate::Media { post: Arc::new(post), index: 0 };
         hub.update(cx, |hub, cx| hub.navigate(to, cx));

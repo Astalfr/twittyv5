@@ -63,12 +63,16 @@ fn post_line(p: &Post, indent: &str) -> String {
     for m in &p.media {
         let (kind, extra) = match m {
             Media::Image { .. } => ("image", String::new()),
-            Media::Video { stream, duration, .. } => (
+            Media::Video { variants, duration, .. } => (
                 "video",
                 format!(
                     " {}s{}",
                     duration.map_or(0, |d| d.as_secs()),
-                    if stream.is_some() { " mp4" } else { "" }
+                    if variants.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" mp4 ×{}", variants.len())
+                    }
                 ),
             ),
             Media::Gif { stream, .. } => {
@@ -194,7 +198,10 @@ fn fixtures_cover_every_shape_we_translate() {
     assert!(has_post(&|p| matches!(&p.embed, Some(Embed::Quote { .. }))), "quote");
     assert!(has_post(&|p| matches!(&p.embed, Some(Embed::Link(_)))), "link card");
     assert!(
-        has_post(&|p| p.media.iter().any(|m| matches!(m, Media::Video { stream: Some(_), .. }))),
+        has_post(&|p| p
+            .media
+            .iter()
+            .any(|m| matches!(m, Media::Video { .. }) && m.stream().is_some())),
         "video"
     );
     assert!(has_post(&|p| p.media.iter().any(|m| matches!(m, Media::Gif { .. }))), "gif");

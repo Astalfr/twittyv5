@@ -48,6 +48,17 @@ pub fn gif_toggled(autoplay: Autoplay, choice: Option<GifChoice>) -> GifChoice {
     if gif_plays(autoplay, choice) { GifChoice::Pause } else { GifChoice::Play }
 }
 
+/// What a video's quality menu calls a file: its height ("720p", the
+/// short side for portrait videos), else its bitrate.
+pub fn quality_label(size: Option<(u32, u32)>, bitrate: Option<u32>) -> String {
+    match (size, bitrate) {
+        (Some((w, h)), _) => format!("{}p", w.min(h)),
+        (None, Some(b)) if b >= 1_000_000 => format!("{:.1} Mbps", f64::from(b) / 1e6),
+        (None, Some(b)) if b > 0 => format!("{} kbps", b / 1000),
+        _ => "Default".to_owned(),
+    }
+}
+
 /// How many decoded frames the view holds beyond the one on screen. The
 /// decoder's own channel adds a few more; together they bound memory.
 pub const QUEUE: usize = 4;
@@ -458,6 +469,16 @@ mod tests {
         assert_eq!(t.current(), Some(&1), "the last picture stays up");
         t.seek(Duration::ZERO);
         assert!(!t.is_ended(), "a seek starts it again");
+    }
+
+    #[test]
+    fn qualities_are_named_by_height_or_bitrate() {
+        assert_eq!(quality_label(Some((1280, 720)), Some(2_176_000)), "720p");
+        assert_eq!(quality_label(Some((720, 1280)), None), "720p", "portrait: the short side");
+        assert_eq!(quality_label(None, Some(2_176_000)), "2.2 Mbps");
+        assert_eq!(quality_label(None, Some(832_000)), "832 kbps");
+        assert_eq!(quality_label(None, Some(0)), "Default");
+        assert_eq!(quality_label(None, None), "Default");
     }
 
     #[test]

@@ -576,11 +576,7 @@ fn media_grid(
         .children(grid.tiles.iter().zip(media).enumerate().map(|(index, (tile, m))| {
             let hub = hub.clone();
             let post = Arc::clone(&post);
-            let overlay = match m {
-                Media::Video { duration, .. } => Some(video_badge("▶", duration.map(fmt_duration))),
-                Media::Gif { .. } => Some(video_badge("GIF", None)),
-                Media::Image { .. } => None,
-            };
+            let overlay = media_badge(m);
             let corners = grid.corners(tile, inner);
             let gif = match m {
                 Media::Gif { stream: Some(url), .. } => {
@@ -661,6 +657,16 @@ pub(crate) fn fmt_duration(d: std::time::Duration) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
+/// The badge drawn over a media's picture: ▶ and the length for a video,
+/// "GIF" for a GIF, none for an image.
+pub(crate) fn media_badge(m: &Media) -> Option<impl IntoElement + use<>> {
+    match m {
+        Media::Video { duration, .. } => Some(video_badge("▶", duration.map(fmt_duration))),
+        Media::Gif { .. } => Some(video_badge("GIF", None)),
+        Media::Image { .. } => None,
+    }
+}
+
 pub(crate) fn video_badge(label: &'static str, extra: Option<String>) -> impl IntoElement {
     div()
         .absolute()
@@ -672,6 +678,7 @@ pub(crate) fn video_badge(label: &'static str, extra: Option<String>) -> impl In
         .text_color(gpui_kit::white())
         .text_xs()
         .font_weight(FontWeight::BOLD)
+        .debug_selector(move || format!("media-badge-{label}"))
         .child(match extra {
             Some(e) => format!("{label} {e}"),
             None => label.to_owned(),
@@ -772,6 +779,7 @@ fn quote_card(
             div()
                 .id(("quote-media", id.1))
                 .debug_selector(move || format!("quote-media-{}", id.1))
+                .relative()
                 .w_full()
                 .h(px(h))
                 .on_click(move |_, _, cx| {
@@ -786,6 +794,7 @@ fn quote_card(
                     h,
                     media_layout::Corners::BOTTOM,
                 ))
+                .children(media_badge(m))
         }))
 }
 
@@ -1273,6 +1282,40 @@ mod tests {
         redraw(cx);
         redraw(cx);
         assert_eq!(video.listening(), 0, "its player and decoder are gone");
+    }
+
+    #[gpui_kit::test]
+    fn a_quoted_video_or_gif_shows_its_badge(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (outer, backend) = mock_post();
+        let poster = twitty_model::ImageRef {
+            url: "https://pbs.twimg.com/media/q.jpg".parse().unwrap(),
+            size: Some((1280, 720)),
+        };
+        let quote = |media: Media| {
+            let mut quoted = outer.clone();
+            quoted.media = vec![media];
+            let mut post = outer.clone();
+            post.media.clear();
+            post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted)) });
+            FeedItem::Post(post)
+        };
+        let video = Media::Video {
+            poster: poster.clone(),
+            variants: Vec::new(),
+            duration: Some(std::time::Duration::from_secs(83)),
+            alt: None,
+        };
+        let gif = Media::Gif { poster, stream: None, alt: None };
+        for (media, badge) in [(video, "media-badge-▶"), (gif, "media-badge-GIF")] {
+            let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&backend)));
+            let item = quote(media);
+            let (_view, cx) = cx.add_window_view(|_, _| OnePost { item, hub });
+            cx.run_until_parked();
+            let card = cx.debug_bounds("quote-media-0").expect("the quoted media");
+            let shown = cx.debug_bounds(badge).unwrap_or_else(|| panic!("{badge} is drawn"));
+            assert!(card.contains(&shown.center()), "over the quoted media");
+        }
     }
 
     /// A box like a media tile, holding one rounded image.

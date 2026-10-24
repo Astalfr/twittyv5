@@ -302,7 +302,7 @@ impl State {
             6 => (0..4).map(|k| photo(n, k, 900, 600)).collect(),
             7 => vec![Media::Video {
                 poster: image(&format!("https://picsum.photos/seed/v{n}/1280/720"), 1280, 720),
-                stream: None,
+                variants: Vec::new(),
                 duration: Some(std::time::Duration::from_secs(42)),
                 alt: None,
             }],

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use serde_json::Value;
-use twitty_model::{ImageRef, Media};
+use twitty_model::{ImageRef, Media, VideoVariant};
 use url::Url;
 
 use crate::wire::{array_at, at, str_at, u64_at};
@@ -24,11 +24,15 @@ fn one(m: &Value) -> Option<Media> {
         "photo" => Media::Image { image: preview, alt },
         "video" => Media::Video {
             poster: preview,
-            stream: best_mp4(m),
+            variants: variants(m),
             duration: u64_at(m, &["video_info", "duration_millis"]).map(Duration::from_millis),
             alt,
         },
-        "animated_gif" => Media::Gif { poster: preview, stream: best_mp4(m), alt },
+        "animated_gif" => Media::Gif {
+            poster: preview,
+            stream: variants(m).into_iter().next().map(|v| v.url),
+            alt,
+        },
         other => {
             tracing::debug!("unknown media type {other}, shown as image");
             Media::Image { image: preview, alt }
@@ -45,13 +49,28 @@ fn image(m: &Value) -> Option<ImageRef> {
     Some(ImageRef { url: Url::parse(&url).ok()?, size: w.zip(h) })
 }
 
-/// The highest-bitrate MP4 variant.
-fn best_mp4(m: &Value) -> Option<Url> {
-    array_at(m, &["video_info", "variants"])
+/// The MP4 variants, highest bitrate first (HLS playlists are left out).
+fn variants(m: &Value) -> Vec<VideoVariant> {
+    let mut variants: Vec<VideoVariant> = array_at(m, &["video_info", "variants"])
         .iter()
         .filter(|v| str_at(v, &["content_type"]) == Some("video/mp4"))
-        .max_by_key(|v| u64_at(v, &["bitrate"]).unwrap_or(0))
-        .and_then(|v| Url::parse(str_at(v, &["url"])?).ok())
+        .filter_map(|v| {
+            let url = Url::parse(str_at(v, &["url"])?).ok()?;
+            let bitrate = u64_at(v, &["bitrate"]).and_then(|b| u32::try_from(b).ok());
+            Some(VideoVariant { size: size_in_path(&url), url, bitrate })
+        })
+        .collect();
+    variants.sort_by_key(|v| std::cmp::Reverse(v.bitrate.unwrap_or(0)));
+    variants.dedup_by(|a, b| a.url == b.url);
+    variants
+}
+
+/// The `WIDTHxHEIGHT` segment of an X video path (`/vid/avc1/1280x720/…`).
+fn size_in_path(url: &Url) -> Option<(u32, u32)> {
+    url.path_segments()?.find_map(|segment| {
+        let (w, h) = segment.split_once('x')?;
+        Some((w.parse().ok()?, h.parse().ok()?)).filter(|&(w, h): &(u32, u32)| w > 0 && h > 0)
+    })
 }
 
 #[cfg(test)]
@@ -68,8 +87,8 @@ mod tests {
              "original_info": {"width": 1920, "height": 1080},
              "video_info": {"duration_millis": 43119, "variants": [
                 {"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/x.m3u8"},
-                {"content_type": "video/mp4", "bitrate": 256000, "url": "https://video.twimg.com/low.mp4"},
-                {"content_type": "video/mp4", "bitrate": 2176000, "url": "https://video.twimg.com/high.mp4"}
+                {"content_type": "video/mp4", "bitrate": 256000, "url": "https://video.twimg.com/vid/avc1/480x270/low.mp4"},
+                {"content_type": "video/mp4", "bitrate": 2176000, "url": "https://video.twimg.com/vid/avc1/1280x720/high.mp4"}
              ]}},
             {"type": "animated_gif", "media_url_https": "https://pbs.twimg.com/tweet_video_thumb/C.jpg",
              "video_info": {"variants": [{"content_type": "video/mp4", "bitrate": 0, "url": "https://video.twimg.com/c.mp4"}]}}
@@ -80,10 +99,32 @@ mod tests {
         assert_eq!(image.url.as_str(), "https://pbs.twimg.com/media/A.jpg?name=medium");
         assert_eq!(image.size, Some((1200, 800)));
         assert_eq!(alt.as_deref(), Some("a cat"));
-        let Media::Video { stream, duration, .. } = &m[1] else { panic!("video") };
-        assert_eq!(stream.as_ref().unwrap().as_str(), "https://video.twimg.com/high.mp4");
+        let Media::Video { variants, duration, .. } = &m[1] else { panic!("video") };
+        let urls: Vec<&str> = variants.iter().map(|v| v.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "https://video.twimg.com/vid/avc1/1280x720/high.mp4",
+                "https://video.twimg.com/vid/avc1/480x270/low.mp4"
+            ],
+            "every MP4, best first, no playlist"
+        );
+        assert_eq!((variants[0].bitrate, variants[0].size), (Some(2_176_000), Some((1280, 720))));
+        assert_eq!(m[1].stream(), Some(&variants[0].url));
         assert_eq!(*duration, Some(Duration::from_millis(43119)));
         assert!(matches!(&m[2], Media::Gif { stream: Some(_), .. }));
+    }
+
+    #[test]
+    fn a_variant_without_a_size_in_its_path_has_none() {
+        let url = |s: &str| Url::parse(s).unwrap();
+        assert_eq!(
+            size_in_path(&url("https://video.twimg.com/vid/avc1/720x1280/a.mp4")),
+            Some((720, 1280))
+        );
+        assert_eq!(size_in_path(&url("https://video.twimg.com/vid/avc1/511d317/a.mp4")), None);
+        assert_eq!(size_in_path(&url("https://video.twimg.com/0x0/a.mp4")), None);
+        assert_eq!(size_in_path(&url("https://video.twimg.com/tweet_video/x.mp4")), None);
     }
 
     #[test]

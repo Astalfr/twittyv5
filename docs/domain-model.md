@@ -20,7 +20,7 @@ So Twitty has an **anti-corruption layer**:
 | `Post` | Author (`Arc<Profile>`), time, body (`RichText`), `Vec<Media>`, `Option<Embed>`, reply info, metrics, viewer state, canonical URL |
 | `RichText` | `text: String` + `spans: Vec<Span>`. Spans are **byte ranges into `text`**, sorted and non-overlapping. |
 | `SpanKind` | `Mention`, `Hashtag`, `Cashtag`, `Link { display, url }` |
-| `Media` | `Image`, `Video`, `Gif`, each with an `ImageRef` that carries size hints (so the list can reserve height) |
+| `Media` | `Image`, `Video`, `Gif`, each with an `ImageRef` that carries size hints (so the list can reserve height). A `Video` has its playable files as `VideoVariant`s (URL, bitrate, size), best first; `Media::stream` is the one to play by default |
 | `Embed` | `Quote(PostOrGone)`, `LinkCard`, `Poll` |
 | `FeedItem` | `Post`, `Repost { by, post }`, `Thread(Vec<Post>)`, `Notification`, `Unavailable`, `Unsupported { reason }` |
 | `FeedPage` | `items` + `newer`/`older` page tokens |
@@ -40,7 +40,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`, an
 3. **Long posts**: prefer `note_tweet` text and entities over the truncated `full_text`.
 4. **Entities**: X gives offsets in **Unicode code points** of the raw, HTML-escaped text (checked against 453 live entities on 2026-10-24: 98 only match as code points, none only as UTF-16). They are converted to byte ranges in the decoded string. Inverted, out-of-range or overlapping entities are dropped with a warning; the text itself is never lost.
 5. **Text clean-up**: decode HTML entities (`&amp;`, `&lt;`, …). Show `t.co` links as their `display_url`, with a `Link` span to the expanded URL. Drop the trailing media `t.co` link, and the leading `@mentions` of replies (both are outside `display_text_range`; reply info is shown separately).
-6. **Media**: images and posters use `media_url_https?name=medium`. Video and GIF streams are the highest-bitrate MP4 variant. Sizes come from `original_info`.
+6. **Media**: images and posters use `media_url_https?name=medium`. A video keeps every MP4 variant (HLS playlists are left out), highest bitrate first, with the size X puts in the path (`/vid/avc1/1280x720/…`) when there is one; a GIF's stream is its highest-bitrate MP4. Sizes come from `original_info`.
 6b. **Cards**: `summary`/`summary_large_image`/`player`, `unified_card` (a JSON document inside a binding) and `<id>:broadcast` become `Embed::Link`; `pollNchoice_*` becomes `Embed::Poll`. Unknown cards are ignored, not unsupported. A quote wins over a card.
 6c. **Skipped on purpose** (not `Unsupported`): promoted entries, prompts and covers, who-to-follow users, trends and topics. Conversation modules become `FeedItem::Thread` (or a single `Post`).
 7. **Unavailable posts** (`TweetTombstone`, `TweetUnavailable`, withheld, or a deleted quoted post) become `Unavailable { reason }` / `PostOrGone::Unavailable`.

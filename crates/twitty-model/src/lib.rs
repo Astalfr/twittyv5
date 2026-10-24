@@ -25,7 +25,7 @@ pub use backend::{
 pub use error::BackendError;
 pub use feed::{FeedItem, FeedPage, FeedSource, HomeMode, NotificationFilter, SearchSort, UserTab};
 pub use ids::{ListId, NotificationId, PageToken, PostId, UserId};
-pub use media::{AspectRatio, ImageRef, Media};
+pub use media::{AspectRatio, ImageRef, Media, VideoVariant};
 pub use notification::{Notification, NotificationKind};
 pub use post::{
     Embed, LinkCard, Metrics, Poll, PollOption, Post, PostOrGone, ReplyRef, UnavailableReason,
