@@ -4,6 +4,15 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: X's logged-out site moved to a Relay client; discovery reads both formats
+- **Finding**: `https://x.com/?lang=en` now loads `x-web` bundles (Vite + Relay). Operations are Relay persisted queries (`params:{id,name:"…Query",operationKind}`) without feature switches. No `responsive-web` bundle is referenced from the HTML or `sw.js`, so the community discovery methods find nothing there. The logged-in app still called `0toR0MxC06yY3Fc57GXBpA/HomeTimeline` (old-style path) on the same day.
+- **Decision**: Discovery extracts both the legacy and the Relay formats, follows `assets/*.js` chunks, and runs logged in when a session exists. It is best effort: the catalog falls back to the cache and then the embedded ids, and a 404 triggers one refresh + one retry.
+- **Open**: how the logged-in client names Relay operations in URLs, and whether Relay calls send `features`. To be settled by the first logged-in capture.
+
+### 2026-10-24: `bun_x` ids and feature defaults embedded as fallback
+- **Decision**: `data/operations.json` holds the observed `HomeTimeline` id plus ids from `bun_x`'s catalog (marked with their source). `data/default_features.json` comes from `bun_x` (Apache-2.0).
+- **Why**: A working starting point without a live session. Every entry records where it came from, so stale ones are easy to spot.
+
 ### 2026-10-24: Defer reactions to list scroll events
 - **Decision**: The column's `ListState` scroll handler only captures the visible range and calls `cx.defer` to update the column.
 - **Why**: GPUI invokes the handler while the `ListState` is mutably borrowed. Reading `logical_scroll_top()` inside it panicked on the first wheel scroll. The windowed tests in `ui/column.rs` reproduce this.

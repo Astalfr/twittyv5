@@ -14,9 +14,9 @@ cargo clippy --workspace --all-targets -- -D warnings # must be clean
 cargo test --workspace                                # must pass
 cargo insta review                                    # review changed snapshots (never blindly accept)
 cargo run -p twitty                                   # run the app
-# From M3 on (not implemented yet):
-# cargo run -p twitty-x --bin twitty-x-cli -- feed home   # dump a real feed as model JSON
-# cargo test -p twitty-x --test live -- --ignored         # live smoke tests (TWITTY_LIVE=1)
+cargo run -p twitty-x --bin twitty-x-cli -- ops      # X operation catalog (no session needed)
+cargo run -p twitty-x --bin twitty-x-cli -- --session session.json capture home   # raw response to dumps/
+cargo test -p twitty-x --test live -- --ignored        # opt-in live tests (see docs/x-api.md)
 ```
 
 Windows 11 + PowerShell is the main dev environment.
@@ -79,7 +79,8 @@ Full strategy: [docs/testing.md](docs/testing.md).
 - **Every change ships with tests, in the same change.** Bug fixes start with a failing test that reproduces the bug.
 - **`translate` changes**: add or update an anonymised fixture in `crates/twitty-x/tests/fixtures/` plus an `insta` snapshot of the *model* output. The model snapshot of an existing fixture must not change unless the change is intended and explained.
 - **Text/entity code** (UTF-16 offsets, spans, URL expansion) gets `proptest` property tests (spans in bounds, on char boundaries, not overlapping).
-- **Transport behaviour** (headers, cookie rotation, 429 backoff, stale queryId refresh) is tested with `wiremock`. Tests never hit the real network, except the `#[ignore]` live suite.
+- **Transport behaviour** (headers, cookie rotation, 429 backoff, stale queryId refresh) is tested with `wiremock` in `crates/twitty-x/tests/transport.rs`. Tests never hit the real network, except the `#[ignore]` live suite.
+- **Compare JSON as parsed values, never as strings.** Feature unification turns on serde_json's `preserve_order` in workspace builds, so key order differs between `-p` and `--workspace` runs.
 - **UI state logic** goes in `twitty::state` with plain unit tests. View wiring is tested with `#[gpui_kit::test]` + `MockBackend` + `Runtime::inline()` (see the tests in `ui/column.rs`).
 - **Persisted formats** have golden files for every past `schema_version`, and those files must keep loading.
 

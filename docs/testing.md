@@ -21,17 +21,21 @@ Never `#[ignore]`, weaken or delete a test to get a green run.
 | Translation snapshots | `twitty-x/tests/translate.rs` + `tests/fixtures/**` | `insta` (JSON/RON) | X JSON → `FeedPage` is exactly what we expect |
 | Wire robustness | `twitty-x/tests/wire_robustness.rs` | `proptest`, mutated fixtures | Missing or renamed fields and unknown typenames never panic, and become `Unsupported` |
 | Entity offsets | `twitty-x/src/translate/text.rs` tests | `proptest` | UTF-16 → byte conversion for emoji, ZWJ sequences, CJK, combining marks. Spans are in bounds, on char boundaries, sorted and non-overlapping. |
-| Transport | `twitty-x/tests/transport.rs` | `wiremock`, `tokio::test` | Required headers present · `x-csrf-token == ct0` · cookie rotation saved · 429 backoff · rate-limit gate · 404 → queryId refresh → retry once · secrets never in logs |
-| Discovery | `twitty-x/tests/discovery.rs` | captured HTML/JS samples | Bundle URL and `queryId`/`operationName`/features regexes · cache TTL · fallback order |
+| Transport | `twitty-x/tests/transport.rs` | `wiremock`, `tokio::test` | Required headers present · `x-csrf-token == ct0` · fresh txid per request · cookie rotation used next + hook · 429 reset + local gate per operation · 5xx retried, 401 not · 404 → discovery → retry once with discovered features · override skips discovery · POST body for mutations · cursor forwarded · secrets never in `Debug`/errors |
+| Discovery + catalog | `twitty-x/src/{discovery,catalog}.rs` unit tests | tiny synthetic JS/HTML strings | Legacy and Relay extractors (quotes, metadata, mutations), script/asset URL resolution, catalog layering, Relay `…Query` names, cache persistence + TTL, features from switches |
+| Live (opt-in) | `twitty-x/tests/live.rs` `#[ignore]` | real x.com | Extractors over downloaded bundles, logged-out discovery crawl, real HomeTimeline call |
 | Backend contract | `twitty-model/tests/contract.rs` (generic) | run against `MockBackend` and `XBackend`+wiremock | Both backends behave the same for paging, errors and actions |
 | Persistence | `twitty/tests/persistence.rs` + `tests/golden/` | golden files | Every past `schema_version` loads and migrates. Saving then loading gives the same data. |
 | App state | `twitty/src/state/**` `#[cfg(test)]` | std, `MockBackend` | `ColumnModel` paging/dedup/unseen/failures, `Interactions` toggles + rollback, `DeckFile` golden files + repair + atomic save, media grid geometry |
 | UI wiring | `twitty/src/ui/**` `#[gpui_kit::test]` | `TestAppContext`, `MockBackend`, `Runtime::inline()` | Column loads on creation, list rows match the model, newer posts at top vs. scrolled, failure + retry, Home tab switch, hub rollback + `ActionFailed` |
 | Live smoke | `twitty-x/tests/live.rs` `#[ignore]` | real X, `TWITTY_LIVE=1` | The current X still works: Viewer, Home, Search, TweetDetail translate with 0 `Unsupported`. Run by hand, never in CI. |
 
-## Current coverage (M2)
+## Current coverage (M3)
 
-74 tests:
+129 tests (+3 opt-in live tests):
+- 51 in `twitty-x`: 37 unit tests (session, errors, headers, cookies, rate limits, interpretation, catalog, discovery) and 14 mock-server integration tests.
+
+From M2:
 - 23 in `twitty-model`: rich-text invariants (including a property test), stable `FeedSource` JSON, row keys, mock paging and notifications.
 - 51 in `twitty`: state, formatting, runtime, themes, icons, and GPUI view tests. Two of these open a real test window and scroll Home and Notifications to the end with wheel events, which renders every row shape.
 

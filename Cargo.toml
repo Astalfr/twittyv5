@@ -40,6 +40,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # App plumbing.
+clap = { version = "4", features = ["derive"] }
 directories = "6"
 keyring = { version = "3", features = ["windows-native"] }
 

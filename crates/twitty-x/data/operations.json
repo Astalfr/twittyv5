@@ -1,0 +1,23 @@
+{
+  "note": "Fallback GraphQL operation catalog, used only when the runtime cache (refreshed from x.com) has no entry. Query ids rotate with X web releases, so entries here go stale. HomeTimeline was observed in live logged-in traffic on 2026-10-24. The other ids come from the bun_x crate's catalog (Apache-2.0, https://crates.io/crates/bun_x, extracted from main.60bedca26c9a9faaa.js) and are unverified.",
+  "operations": {
+    "HomeTimeline": { "query_id": "0toR0MxC06yY3Fc57GXBpA", "method": "GET", "source": "observed 2026-10-24" },
+    "HomeLatestTimeline": { "query_id": "OQPHTgwczzp9RMAPt6BH9A", "method": "GET", "source": "bun_x" },
+    "TweetDetail": { "query_id": "zoF7_t363wZyzylk-BLfZQ", "method": "GET", "source": "bun_x" },
+    "SearchTimeline": { "query_id": "auLkqtmHqYEpRvflfvLhyQ", "method": "GET", "source": "bun_x" },
+    "UserByScreenName": { "query_id": "KybxDj9RrADIITXlGG8kpw", "method": "GET", "source": "bun_x" },
+    "UserTweets": { "query_id": "jeAA-59Y9FL7FmjgBNIVPw", "method": "GET", "source": "bun_x" },
+    "UserTweetsAndReplies": { "query_id": "wI-ubAWfScnG6odLK4XgCg", "method": "GET", "source": "bun_x" },
+    "UserMedia": { "query_id": "TwLiEVUhRjjjKVc98IT0TQ", "method": "GET", "source": "bun_x" },
+    "Likes": { "query_id": "XHn_Tw60c6pi0n3DGhpwiA", "method": "GET", "source": "bun_x" },
+    "ListLatestTweetsTimeline": { "query_id": "K77PSxWq_St4HLusAV9nVg", "method": "GET", "source": "bun_x" },
+    "Viewer": { "query_id": "9t128XgFic52jPUEkJMf6w", "method": "GET", "source": "bun_x" },
+    "FavoriteTweet": { "query_id": "lI07N6Otwv1PhnEgXILM7A", "method": "POST", "source": "bun_x" },
+    "UnfavoriteTweet": { "query_id": "ZYKSe-w7KEslx3JhSIk5LA", "method": "POST", "source": "bun_x" },
+    "CreateRetweet": { "query_id": "mbRO74GrOvSfRcJnlMapnQ", "method": "POST", "source": "bun_x" },
+    "DeleteRetweet": { "query_id": "ZyZigVsNiFO6v1dEks1eWg", "method": "POST", "source": "bun_x" },
+    "CreateBookmark": { "query_id": "aoDbu3RHznuiSkQ9aNM67Q", "method": "POST", "source": "bun_x" },
+    "DeleteBookmark": { "query_id": "Wlmlj2-xzyS1GN3a6cj-mQ", "method": "POST", "source": "bun_x" },
+    "CreateTweet": { "query_id": "GYdIGqVWfZNho79bQ2XDoA", "method": "POST", "source": "bun_x" }
+  }
+}

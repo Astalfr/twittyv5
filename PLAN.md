@@ -2,7 +2,7 @@
 
 A native desktop client for X (Twitter), written in Rust with **GPUI** (via **GPUI Kit**). It talks to X's internal web GraphQL API (`https://x.com/i/api/graphql/<queryId>/<Operation>`) and looks like the new **X Pro / TweetDeck**: a multi-column deck.
 
-> Status: **M0–M2 done** (toolchain verified, domain model + mock backend, deck UI on demo data). Next: M3 (X transport).
+> Status: **M0–M2 done**, **M3 implemented** (X transport, catalog, discovery, CLI; mock-server tested) but **not yet verified with a live logged-in call**. Next: one live capture, then M4 (translation).
 >
 > Living documentation is in [docs/](docs/README.md) and contributor/agent rules are in [CLAUDE.md](CLAUDE.md). Every milestone below is done only when it meets the definition of done in [docs/testing.md](docs/testing.md).
 
