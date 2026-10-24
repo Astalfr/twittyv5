@@ -534,6 +534,9 @@ impl ColumnView {
                         if unseen == 1 { "" } else { "s" }
                     )))
                     .on_click(cx.listener(|this, _, _, cx| this.scroll_to_top(cx)));
+                // Occludes the post under it, which would otherwise take the
+                // same click and open its thread.
+                let pill = div().occlude().debug_selector(|| "new-posts-pill".into()).child(pill);
                 let tokens = theme.motion.clone();
                 // Drops in from the column's top edge when it first appears.
                 d.child(
@@ -632,7 +635,9 @@ impl Render for ColumnView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::hub::Navigate;
     use gpui_kit::{ScrollDelta, ScrollWheelEvent, TestAppContext, point};
+    use std::{cell::Cell, rc::Rc};
     use twitty_model::{HomeMode, mock::MockBackend};
 
     fn setup(cx: &mut TestAppContext) -> (MockBackend, Entity<ColumnView>) {
@@ -857,6 +862,37 @@ mod tests {
         cx.simulate_mouse_move(over_posts, None, gpui_kit::Modifiers::default());
         cx.run_until_parked();
         assert!(!column.read_with(cx, |c, _| c.header_hovered()), "hidden again over the posts");
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_new_posts_pill_does_not_reach_the_post_under_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let backend = MockBackend::new();
+        let shared: Arc<dyn Backend> = Arc::new(backend.clone());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let navigations = Rc::new(Cell::new(0));
+        let count = Rc::clone(&navigations);
+        cx.update(|cx| {
+            cx.subscribe(&hub, move |_, _: &Navigate, _| count.set(count.get() + 1)).detach();
+        });
+        let source = FeedSource::Home { mode: HomeMode::Following };
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            ColumnView::new(&ColumnConfig::new(ColumnId(1), source.clone()), shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+        column.update(cx, |c, _| c.at_top = false);
+        backend.push_new(&source, 2);
+        column.update(cx, |c, cx| c.load(LoadKind::Newer, cx));
+        cx.run_until_parked();
+
+        let pill = cx.debug_bounds("new-posts-pill").expect("the pill is drawn");
+        cx.simulate_click(pill.center(), gpui_kit::Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(column.read_with(cx, |c, _| c.model().unseen()), 0, "the pill scrolled up");
+        assert_eq!(navigations.get(), 0, "no thread opened under the pill");
     }
 
     /// Mounts a real window, draws it, and scrolls with wheel events until the
