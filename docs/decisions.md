@@ -108,10 +108,15 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: Commit scrubbed full responses (`twitty-x-cli anonymise`, random key per run, leak check), and snapshot a compact line-per-row summary of the model output instead of serialising model types.
 - **Why**: Real shapes catch drift that hand-written JSON misses. Summaries are readable in review and keep `twitty-model` free of test-only `Serialize` impls.
 
+### 2026-10-24: Repost uses the Relay mutation `retweetButtonRetweetMutation`
+- **Finding**: The legacy `CreateRetweet` id `mbRO74GrOvSfRcJnlMapnQ` returns HTTP 404, yet the logged-in bundles still declare it. A refresh found the same id, so reposting failed with `StaleQueryId`. On the same day `FavoriteTweet` and `DeleteRetweet` (legacy) still worked. The Relay `retweetButtonRetweetMutation` (`6uvqjlPaij9o7Ce15XW4sA`) works as `graphql/<id>/retweetButtonRetweetMutation` with `{"tweetId"}`. Probed with a nonexistent tweet id (error 144, no side effect).
+- **Decision**: `PostAction::Repost` calls the Relay mutation, which replaces `CreateRetweet` in `data/operations.json`. The other actions stay on their legacy operations while those still answer.
+- **Consequences**: Embedded names are discovery targets, so the Relay name is refreshed like any other. If another legacy mutation starts to 404 while its id is unchanged, look for its `…Mutation` counterpart in the query-id cache.
+
 ### 2026-10-24: X's logged-out site moved to a Relay client; discovery reads both formats
 - **Finding**: `https://x.com/?lang=en` now loads `x-web` bundles (Vite + Relay). Operations are Relay persisted queries (`params:{id,name:"…Query",operationKind}`) without feature switches. No `responsive-web` bundle is referenced from the HTML or `sw.js`, so the community discovery methods find nothing there. The logged-in app still called `0toR0MxC06yY3Fc57GXBpA/HomeTimeline` (old-style path) on the same day.
 - **Decision**: Discovery extracts both the legacy and the Relay formats, follows `assets/*.js` chunks, and runs logged in when a session exists. It is best effort: the catalog falls back to the cache and then the embedded ids, and a 404 triggers one refresh + one retry.
-- **Settled live (same day)**: the logged-in app is the legacy client and uses `<id>/<OperationName>` with `features`/`fieldToggles`. Its operations are mostly in lazily loaded chunks listed in inline webpack chunk maps, which discovery now follows. Still unknown (not needed): URL naming of Relay operations.
+- **Settled live (same day)**: the logged-in app is the legacy client and uses `<id>/<OperationName>` with `features`/`fieldToggles`. Its operations are mostly in lazily loaded chunks listed in inline webpack chunk maps, which discovery now follows. Relay operations are called the same way, as `<id>/<relayName>` (see the repost entry above).
 
 ### 2026-10-24: Embedded fallback ids come from our own live discovery
 - **Decision**: `data/operations.json` is generated from a logged-in `refresh-ids` run, including each operation's feature switches and field toggles. `data/default_features.json` (values for those switches) comes from `bun_x` (Apache-2.0).

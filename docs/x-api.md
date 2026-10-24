@@ -125,7 +125,7 @@ What the live runs showed:
 - **Logged out:** 204 Relay operations in 250 `x-web` scripts in ~1.5s.
 - **Logged in:** the legacy client. Its `main.js` declares ~100 operations; the rest (including `HomeTimeline`, `HomeLatestTimeline`, `Bookmarks`, `NotificationsTimeline`, `ListLatestTweetsTimeline`) are only in lazily loaded chunks reachable through the inline chunk maps. The logged-in chunks also contain Relay persisted queries. One run: 464 scripts, 585 legacy + 465 Relay declarations, ~6s.
 - 11 of the 18 ids `bun_x` published the day before were already stale (`HomeLatestTimeline`, `TweetDetail`, `SearchTimeline`, `UserByScreenName`, `UserTweets`, `UserTweetsAndReplies`, `UserMedia`, `Likes`, `ListLatestTweetsTimeline`, `Viewer`, `CreateTweet`); the like/repost/bookmark mutations were unchanged.
-- Twitty only calls legacy-named operations. How the logged-in client names Relay operations in URLs is still unknown and not needed yet.
+- Twitty mostly calls legacy-named operations. Relay operations work on the same endpoint as `graphql/<id>/<relayName>` with `{variables, features, queryId}` (verified live 2026-10-24 with `retweetButtonRetweetMutation`). Their variables are camelCase (`tweetId`), and a wrong name gets HTTP 422 `GRAPHQL_VALIDATION_FAILED`. A legacy id can die (404) while it still ships in the bundles. Rediscovery then finds the same dead id, so the fix is to move to the Relay operation by hand (see `docs/decisions.md`).
 
 ### Discovery algorithm
 
@@ -169,7 +169,7 @@ The real web client builds this from an animation key in the home page plus a ha
 | Action | Operation | Variables |
 |---|---|---|
 | Like / unlike | `FavoriteTweet` / `UnfavoriteTweet` | `{"tweet_id"}` |
-| Repost / undo | `CreateRetweet` / `DeleteRetweet` | `{"tweet_id", "dark_request": false}` / `{"source_tweet_id", "dark_request": false}` |
+| Repost / undo | `retweetButtonRetweetMutation` (Relay) / `DeleteRetweet` | `{"tweetId"}` / `{"source_tweet_id", "dark_request": false}` |
 | Bookmark / remove | `CreateBookmark` / `DeleteBookmark` | `{"tweet_id"}` |
 | Post / reply | `CreateTweet` | `{"tweet_text", "dark_request": false, "media": {"media_entities": [], "possibly_sensitive": false}, "semantic_annotation_ids": [], "disallowed_reply_options": null}` plus `reply: {"in_reply_to_tweet_id", "exclude_reply_user_ids": []}` for replies, `attachment_url: "https://x.com/i/status/<id>"` for quotes |
 
