@@ -5,10 +5,10 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use twitty_model::{
     Backend, BackendError, BoxFuture, Draft, FeedPage, FeedSource, PageRequest, Post, PostAction,
-    PostId, Profile, RateBudget, ThreadView,
+    PostId, Profile, RateBudget, RequestHealth, ThreadView,
 };
 
-use crate::{XClient, XError, requests, translate};
+use crate::{XClient, XError, health::Health, requests, translate};
 
 /// X's rate-limit window.
 const WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
@@ -23,11 +23,21 @@ const ALREADY_DONE: [i64; 2] = [139, 327];
 #[derive(Debug, Clone)]
 pub struct XBackend {
     client: Arc<XClient>,
+    health: Arc<Health>,
 }
 
 impl XBackend {
     pub fn new(client: Arc<XClient>) -> Self {
-        Self { client }
+        Self { client, health: Arc::new(Health::default()) }
+    }
+
+    /// Records the outcome of a request without rows.
+    fn track<T>(&self, name: &str, result: Result<T, BackendError>) -> Result<T, BackendError> {
+        match &result {
+            Ok(_) => self.health.ok(name),
+            Err(e) => self.health.error(name, e),
+        }
+        result
     }
 
     /// The underlying client (rate limits, session, catalog).
@@ -41,9 +51,25 @@ impl XBackend {
         page: PageRequest,
     ) -> Result<FeedPage, BackendError> {
         let (operation, variables) = requests::feed(source, &page);
-        let body = self.client.graphql(operation, variables).await?;
-        Ok(translate::feed_page(&body).page)
+        let body = match self.client.graphql(operation, variables).await {
+            Ok(body) => body,
+            Err(e) => {
+                self.health.error(operation, &e);
+                return Err(e.into());
+            }
+        };
+        let translated = translate::feed_page(&body);
+        if translated.page.items.is_empty() && wire_has_no_timeline(&body) {
+            self.health.warning(operation, "response has no timeline instructions".into());
+        }
+        self.health.page(operation, &translated.page.items, &translated.warnings);
+        Ok(translated.page)
     }
+}
+
+/// Whether `body` lacks any `instructions` array: a sign X moved the timeline.
+fn wire_has_no_timeline(body: &Value) -> bool {
+    crate::wire::find_instructions(body).is_none()
 }
 
 /// A mutation succeeded unless X sent errors with empty `data` (the transport
@@ -67,10 +93,14 @@ fn mutation_outcome(body: &Value) -> Result<(), BackendError> {
 impl Backend for XBackend {
     fn viewer(&self) -> BoxFuture<'_, Result<Profile, BackendError>> {
         Box::pin(async move {
-            let body =
-                self.client.graphql("Viewer", json!({"withCommunitiesMemberships": true})).await?;
-            translate::viewer(&body)
-                .ok_or_else(|| BackendError::Decode("no signed-in user in the response".into()))
+            let result = async {
+                let variables = json!({"withCommunitiesMemberships": true});
+                let body = self.client.graphql("Viewer", variables).await?;
+                translate::viewer(&body)
+                    .ok_or_else(|| BackendError::Decode("no signed-in user in the response".into()))
+            }
+            .await;
+            self.track("Viewer", result)
         })
     }
 
@@ -84,28 +114,37 @@ impl Backend for XBackend {
 
     fn thread<'a>(&'a self, id: &'a PostId) -> BoxFuture<'a, Result<ThreadView, BackendError>> {
         Box::pin(async move {
-            let variables = requests::tweet_detail_variables(id.as_str());
-            let body = self.client.graphql("TweetDetail", variables).await?;
-            translate::thread(&body, id).ok_or(BackendError::NotFound)
+            let result = async {
+                let variables = requests::tweet_detail_variables(id.as_str());
+                let body = self.client.graphql("TweetDetail", variables).await?;
+                translate::thread(&body, id).ok_or(BackendError::NotFound)
+            }
+            .await;
+            self.track("TweetDetail", result)
         })
     }
 
     fn profile<'a>(&'a self, handle: &'a str) -> BoxFuture<'a, Result<Profile, BackendError>> {
         Box::pin(async move {
-            let variables = requests::user_by_screen_name_variables(handle);
-            let body = self.client.graphql("UserByScreenName", variables).await?;
-            translate::user(&body).ok_or(BackendError::NotFound)
+            let result = async {
+                let variables = requests::user_by_screen_name_variables(handle);
+                let body = self.client.graphql("UserByScreenName", variables).await?;
+                translate::user(&body).ok_or(BackendError::NotFound)
+            }
+            .await;
+            self.track("UserByScreenName", result)
         })
     }
 
     fn act(&self, action: PostAction) -> BoxFuture<'_, Result<(), BackendError>> {
         Box::pin(async move {
             let (operation, variables) = requests::action(&action);
-            match self.client.graphql(operation, variables).await {
+            let result = match self.client.graphql(operation, variables).await {
                 Ok(body) => mutation_outcome(&body),
                 Err(XError::Api { code, .. }) if ALREADY_DONE.contains(&code) => Ok(()),
                 Err(e) => Err(e.into()),
-            }
+            };
+            self.track(operation, result)
         })
     }
 
@@ -118,10 +157,20 @@ impl Backend for XBackend {
 
     fn publish(&self, draft: Draft) -> BoxFuture<'_, Result<Post, BackendError>> {
         Box::pin(async move {
-            let body = self.client.graphql("CreateTweet", requests::create_tweet(&draft)).await?;
-            mutation_outcome(&body)?;
-            translate::created_post(&body)
-                .ok_or_else(|| BackendError::Decode("no post in the CreateTweet response".into()))
+            let result = async {
+                let body =
+                    self.client.graphql("CreateTweet", requests::create_tweet(&draft)).await?;
+                mutation_outcome(&body)?;
+                translate::created_post(&body).ok_or_else(|| {
+                    BackendError::Decode("no post in the CreateTweet response".into())
+                })
+            }
+            .await;
+            self.track("CreateTweet", result)
         })
+    }
+
+    fn health(&self) -> Vec<RequestHealth> {
+        self.health.snapshot()
     }
 }

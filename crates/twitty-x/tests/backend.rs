@@ -344,6 +344,55 @@ async fn rate_budget_uses_the_limit_x_reported() {
 }
 
 #[tokio::test]
+async fn health_counts_rows_errors_and_drift() {
+    let server = MockServer::start().await;
+    serve(&server, "HomeTimeline", fixture("home")).await;
+    // A timeline whose entries X renamed: one unknown item type.
+    serve(
+        &server,
+        "Bookmarks",
+        json!({"data": {"bookmark_timeline_v2": {"timeline": {"instructions": [
+            {"type": "TimelineAddEntries", "entries": [
+                {"entryId": "x-1", "content": {"entryType": "TimelineTimelineItem",
+                    "itemContent": {"__typename": "TimelineBrandNewThing"}}}
+            ]}
+        ]}}}}),
+    )
+    .await;
+    Mock::given(path_regex("/NotificationsTimeline$"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let b = backend(&server);
+    b.feed(&FeedSource::Home { mode: HomeMode::ForYou }, PageRequest::First).await.unwrap();
+    b.feed(&FeedSource::Bookmarks, PageRequest::First).await.unwrap();
+    let notifications = FeedSource::Notifications { filter: NotificationFilter::All };
+    assert!(b.feed(&notifications, PageRequest::First).await.is_err());
+
+    let health = b.health();
+    let get = |name: &str| health.iter().find(|h| h.name == name).cloned().unwrap();
+    let home = get("HomeTimeline");
+    assert_eq!((home.ok, home.rows, home.unsupported, home.errors), (1, 28, 0, 0));
+    let bookmarks = get("Bookmarks");
+    assert_eq!((bookmarks.unsupported, bookmarks.warnings), (1, 1));
+    assert!(bookmarks.last_warning.unwrap().contains("TimelineBrandNewThing"));
+    let notif = get("NotificationsTimeline");
+    assert_eq!(notif.errors, 1);
+    assert!(notif.last_error.unwrap().contains("500"));
+}
+
+#[tokio::test]
+async fn a_response_without_a_timeline_is_flagged() {
+    let server = MockServer::start().await;
+    serve(&server, "Bookmarks", json!({"data": {"something_else": {}}})).await;
+    let b = backend(&server);
+    let page = b.feed(&FeedSource::Bookmarks, PageRequest::First).await.unwrap();
+    assert!(page.items.is_empty());
+    let h = b.health().into_iter().find(|h| h.name == "Bookmarks").unwrap();
+    assert_eq!(h.warnings, 1);
+}
+
+#[tokio::test]
 async fn already_done_actions_succeed() {
     for body in [
         json!({"errors": [{"code": 139, "message": "You have already favorited this status."}]}),

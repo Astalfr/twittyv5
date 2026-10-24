@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod format;
+pub mod logging;
 pub mod runtime;
 pub mod state;
 pub mod ui;

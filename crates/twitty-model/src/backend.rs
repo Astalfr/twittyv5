@@ -59,6 +59,27 @@ pub struct RateBudget {
     pub window: std::time::Duration,
 }
 
+/// How one kind of request has gone since the app started, for the debug
+/// panel. Rising `unsupported` or `warnings` mean the provider changed its
+/// data and the adapter needs updating.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RequestHealth {
+    /// The provider's name for the request (e.g. an operation name).
+    pub name: String,
+    /// Successful responses.
+    pub ok: u64,
+    /// Rows received.
+    pub rows: u64,
+    /// Rows the adapter could not understand.
+    pub unsupported: u64,
+    /// Problems met while translating (includes unsupported rows).
+    pub warnings: u64,
+    pub last_warning: Option<String>,
+    /// Failed requests.
+    pub errors: u64,
+    pub last_error: Option<String>,
+}
+
 /// A post being composed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Draft {
@@ -98,5 +119,11 @@ pub trait Backend: Send + Sync + 'static {
     /// The app spaces out polling with it. `None` means unlimited.
     fn rate_budget(&self, _source: &FeedSource) -> Option<RateBudget> {
         None
+    }
+
+    /// Per-request health since startup, sorted by name. Empty when the
+    /// backend doesn't track it.
+    fn health(&self) -> Vec<RequestHealth> {
+        Vec::new()
     }
 }

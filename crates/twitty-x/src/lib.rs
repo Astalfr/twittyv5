@@ -20,6 +20,7 @@ pub mod catalog;
 mod client;
 pub mod discovery;
 mod error;
+mod health;
 mod requests;
 mod session;
 pub mod translate;

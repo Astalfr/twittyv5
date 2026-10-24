@@ -4,6 +4,19 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-24: Random transaction id kept (M10)
+- **Decision**: The planned port of X's real `x-client-transaction-id` algorithm is not done.
+- **Why**: X still accepts random ids (verified with every live request this session), the algorithm depends on fast-changing web bundles, and a wrong port is worse than none. Enforcement is detected: error 353 becomes `TransactionIdRequired`, visible in the UI, the log and Diagnostics.
+- **Consequences**: When 353 appears, follow the runbook in x-api.md.
+
+### 2026-10-24: No X Pro deck sync (M10)
+- **Decision**: Decks stay local (`decks.json`).
+- **Why**: X Pro's deck storage uses undocumented endpoints we haven't observed, and syncing would write to the account's X Pro layout. Local decks have no such risk.
+
+### 2026-10-24: Drift is measured per operation (M10)
+- **Decision**: `XBackend` counts, per GraphQL operation, rows it couldn't translate and warnings, and keeps the last reason; Settings → Diagnostics shows them.
+- **Why**: Translation fails soft, so a format change otherwise only shows as quietly missing rows.
+
 ### 2026-10-24: Polling may use a third of a feed's budget (M9)
 - **Decision**: `state::poll` spaces polling so all columns of one feed type together use at most a third of its rate limit (min 30s, max 30 min). `XBackend` reports X's observed limit and assumes 50 per 15 min before it knows.
 - **Why**: Scrolling, refreshes and first loads need the rest; X's limits differ a lot by operation (50 to 500 per 15 min), and several identical columns used to poll every 30s each.

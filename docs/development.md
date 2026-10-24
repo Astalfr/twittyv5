@@ -67,12 +67,15 @@ Icons come from GPUI Kit's Lucide catalog. Only the ones listed in `crates/twitt
 
 | Data | Location |
 |---|---|
-| Credentials (`auth_token`, `ct0`) | Windows Credential Manager, service `twitty` |
-| Decks, settings | `%APPDATA%\Twitty\config\` (`decks.json`) |
-| Query-ID cache, image cache, logs | `%LOCALAPPDATA%\Twitty\` |
+| Credentials (`auth_token`, `ct0`) | Windows Credential Manager, entry `Twitty` / `x-session` (versioned JSON) |
+| Decks, settings | `%APPDATA%\Twitty\config\` (`decks.json`, `settings.json`) |
+| Query-ID cache, client ids | `%LOCALAPPDATA%\Twitty\cache\` (`query-ids.json`, `client-ids.json`) |
+| Log | `%LOCALAPPDATA%\Twitty\data\logs\twitty.log` (+ `twitty.log.1`), rotated at startup past 5 MB |
+| Dev session (optional) | `session.json` at the repo root or in the config folder (gitignored) |
 
 ## Debugging tips
 
-- `TWITTY_DUMP_DIR=<dir>` makes `twitty-x` write every raw response it receives (with secrets redacted). This is useful for capturing fixtures of new shapes.
-- In debug builds, the debug panel shows per-operation rate-limit budgets and counts of `Unsupported` items and decode warnings.
+- Logs go to the console in debug builds and always to the log file (release builds have no console). `RUST_LOG` overrides the default `twitty=info,twitty_x=info`. Panics are logged before the default handler runs.
+- Settings → **Diagnostics** shows, per X operation since startup: responses, rows, rows Twitty couldn't read (`Unsupported`), errors, and the last warning/error. "Unreadable" rows are the signal that X changed its JSON.
+- To capture a raw response for a new shape, use `twitty-x-cli capture` (see [x-api.md](x-api.md#dev-cli)).
 - gpui-component's `inspector` feature (`gpui-kit/inspector`) gives a GPUI element inspector, similar to browser DevTools.

@@ -4,6 +4,8 @@ X doesn't document this API. Everything here comes from community clients and ou
 
 > Using X's internal API is against X's terms of service. Develop and run live tests with a **secondary account**.
 
+**M10:** `XBackend` keeps per-operation health counters (`Backend::health`), shown in Settings → Diagnostics; a response with no timeline at all counts as a warning. The transaction id is still random (see below): X accepts it, and a 353 would show up as an error in Diagnostics and the UI.
+
 **M8:** `XBackend::act` and `publish` send the web client's mutations (below). They are tested against a mock server only; the first real use is the user's.
 
 **M7:** every `FeedSource` is mapped to a live-verified operation (user replies, media and likes, and lists added on 2026-10-24). Media grids page through `TimelineAddToModule`.
@@ -262,7 +264,7 @@ Never commit a raw capture: it contains other people's posts and profile data. P
 |---|---|---|
 | 404 on a GraphQL op | Stale queryId | Should self-heal through discovery. If not, run `twitty-x-cli refresh-ids` and look at the report. If no operations were found, the bundle format changed: update the extractors in `discovery.rs` (and their unit tests), then update `data/operations.json`. |
 | 400 with "features cannot be null" / feature errors | New feature flag | Refresh ids (legacy bundles declare switches). If a flag is still missing, add it to `data/default_features.json`. |
-| Many `Unsupported` items or decode warnings | Schema drift | Capture a fixture, update `wire`/`translate`, and add a snapshot test. **The model must not change unless the new data needs a new model concept.** |
+| Many `Unsupported` items or decode warnings (Settings → Diagnostics shows them per operation, with the last reason; also in the log) | Schema drift | Capture a fixture, update `wire`/`translate`, and add a snapshot test. **The model must not change unless the new data needs a new model concept.** |
 | Error 353 | Transaction ID enforced | Implement the real `txid` algorithm (see above). |
 | 401, or error 32/89 | Session expired or revoked | The UI asks the user to log in again. Nothing to fix. |
 | 403 with an empty body on everything | Bearer or UA blocked | Re-extract the bearer from the bundles and update `CHROME_UA`. |

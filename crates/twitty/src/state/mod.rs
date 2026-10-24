@@ -5,6 +5,7 @@ pub mod add_column;
 pub mod column;
 pub mod compose;
 pub mod deck;
+pub mod diagnostics;
 pub mod interactions;
 pub mod login;
 pub mod media_layout;

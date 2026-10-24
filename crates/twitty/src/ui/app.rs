@@ -47,6 +47,8 @@ pub struct AppOptions {
     pub deck_path: Option<PathBuf>,
     /// Where to persist settings; `None` keeps them in memory only.
     pub settings_path: Option<PathBuf>,
+    /// The log file, shown in settings.
+    pub log_path: Option<PathBuf>,
     /// Whether columns poll for new posts.
     pub poll: bool,
     /// Where the backend's session came from; `None` means demo data.
@@ -745,7 +747,10 @@ impl TwittyApp {
             .and_then(std::path::Path::parent)
             .map(|p| p.display().to_string());
         v_flex()
-            .w(px(480.))
+            .id("settings-page")
+            .w(px(520.))
+            .max_h(px(840.))
+            .overflow_y_scroll()
             .gap_2()
             .p_6()
             .rounded_2xl()
@@ -775,6 +780,24 @@ impl TwittyApp {
                         .child(format!("Decks and settings are saved in {folder}")),
                 )
             })
+            .child(section("Diagnostics"))
+            .child(self.render_health(cx))
+            .when_some(self.options.log_path.clone(), |d, log| {
+                d.child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(div().flex_1().truncate().child(format!("Log: {}", log.display())))
+                        .child(
+                            Button::new("open-log")
+                                .xsmall()
+                                .label("Show")
+                                .on_click(move |_, _, cx| cx.reveal_path(&log)),
+                        ),
+                )
+            })
             .child(
                 h_flex().justify_end().child(
                     Button::new("settings-close")
@@ -782,6 +805,39 @@ impl TwittyApp {
                         .on_click(cx.listener(|this, _, _, cx| this.close_overlays(cx))),
                 ),
             )
+            .into_any_element()
+    }
+
+    /// One line per request type: responses, rows, rows Twitty couldn't read,
+    /// errors, and the last problem. Unreadable rows mean X changed its data.
+    fn render_health(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::state::diagnostics::{self, Verdict};
+        let theme = cx.theme().clone();
+        let health = self.backend.health();
+        let verdict = diagnostics::verdict(&health);
+        let color = match verdict {
+            Verdict::Drift { .. } => theme.warning,
+            Verdict::Nothing | Verdict::Healthy => theme.muted_foreground,
+        };
+        v_flex()
+            .gap_1()
+            .text_xs()
+            .child(div().text_sm().text_color(color).child(verdict.text()))
+            .children(health.into_iter().map(|h| {
+                let problem = h.last_error.clone().or_else(|| h.last_warning.clone());
+                let color = if diagnostics::flagged(&h) { theme.warning } else { theme.foreground };
+                v_flex()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_color(color)
+                            .child(div().w(px(170.)).truncate().child(h.name.clone()))
+                            .child(diagnostics::line(&h)),
+                    )
+                    .children(problem.map(|p| {
+                        div().pl_4().truncate().text_color(theme.muted_foreground).child(p)
+                    }))
+            }))
             .into_any_element()
     }
 

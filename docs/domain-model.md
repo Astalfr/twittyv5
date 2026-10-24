@@ -28,9 +28,10 @@ So Twitty has an **anti-corruption layer**:
 | `PostAction` | `Like`, `Unlike`, `Repost`, `Unrepost`, `Bookmark`, `Unbookmark`, … |
 | `Draft` | Text, reply target, quote target |
 | `RateBudget` | `limit` requests per `window`, as the provider reports for a feed |
+| `RequestHealth` | Per request type since startup: ok responses, rows, unsupported rows, warnings, errors, last warning/error (diagnostics) |
 | `BackendError` | `Unauthorized`, `RateLimited { reset_at }`, `NotFound`, `Upstream`, `Network`, `Decode` |
 
-The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`, and `rate_budget` with a `None` default) is the only way the app reaches a network.
+The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `act`, `publish`, and `rate_budget` / `health` with empty defaults) is the only way the app reaches a network.
 
 ## Translation rules (`twitty-x::translate`)
 

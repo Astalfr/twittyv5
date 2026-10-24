@@ -2,7 +2,7 @@
 
 A native desktop client for X (Twitter), written in Rust with **GPUI** (via **GPUI Kit**). It talks to X's internal web GraphQL API (`https://x.com/i/api/graphql/<queryId>/<Operation>`) and looks like the new **X Pro / TweetDeck**: a multi-column deck.
 
-> Status: **M0–M8 done**. Writes (like/repost/bookmark/reply/post), thread panel, compose with X's length counter, profile hover card, open in browser. M9 done: polling within rate limits, keyboard shortcuts, image viewer, settings page. Next: M10 (hardening).
+> Status: **M0–M8 done**. Writes (like/repost/bookmark/reply/post), thread panel, compose with X's length counter, profile hover card, open in browser. M9 done: polling within rate limits, keyboard shortcuts, image viewer, settings page. M10 done: drift detection (Settings → Diagnostics), log file, logged panics. Deferred by decision: real transaction id (not required by X yet) and X Pro deck sync (see docs/decisions.md).
 >
 > Living documentation is in [docs/](docs/README.md) and contributor/agent rules are in [CLAUDE.md](CLAUDE.md). Every milestone below is done only when it meets the definition of done in [docs/testing.md](docs/testing.md).
 

@@ -12,6 +12,7 @@ use std::{
 
 use anyhow::Context as _;
 use gpui_kit::{AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
+use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use twitty_model::{Backend, FeedSource, HomeMode, mock::MockBackend};
 use twitty_x::{Session, SessionError, XBackend, XClient, transport::RotateHook};
 
@@ -20,6 +21,7 @@ use twitty::{
         AccountServices, ConnectError, Connector, CredentialStore, Credentials, KeyringStore,
         SessionSource,
     },
+    logging,
     runtime::Runtime,
     state::{
         deck::{self, DeckFile},
@@ -32,12 +34,29 @@ use twitty::{
 };
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    let log_path = logging::default_path();
+    let log_file = log_path.as_deref().map(|p| logging::open(p, logging::MAX_BYTES));
+    let file_layer = match &log_file {
+        Some(Ok(file)) => Some(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(file.try_clone()?)),
+        ),
+        _ => None,
+    };
+    tracing_subscriber::registry()
+        .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "twitty=info,twitty_x=info".into()),
         )
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(file_layer)
         .init();
+    logging::log_panics();
+    if let Some(Err(e)) = &log_file {
+        tracing::warn!("could not open the log file: {e}");
+    }
+    tracing::info!("Twitty {} starting", env!("CARGO_PKG_VERSION"));
 
     let runtime = Runtime::tokio().context("starting network runtime")?;
     let http =
@@ -90,6 +109,7 @@ fn main() -> anyhow::Result<()> {
     let options = AppOptions {
         deck_path,
         settings_path,
+        log_path,
         poll: true,
         session,
         account: Some(AccountServices { connect, store }),
