@@ -1,5 +1,9 @@
 //! Twitty: a native X client with an X Pro style deck.
 
+// Release builds are GUI apps: no console window on Windows. Debug builds keep
+// the console so logs are visible.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context as _;

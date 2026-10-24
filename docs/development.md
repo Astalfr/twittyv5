@@ -22,6 +22,21 @@
 | Coverage | `cargo llvm-cov --workspace --html` |
 | Dependency audit | `cargo deny check` |
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main`/`master`, on pull requests and on demand (`workflow_dispatch`). Both jobs run on `windows-latest`:
+
+| Job | Steps |
+|---|---|
+| `check` | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked` |
+| `build` | `cargo build --release --locked -p twitty`, then uploads `target/release/twitty.exe` as the artifact `twitty-windows-x64-<sha>` (kept 30 days) |
+
+- The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` caches debug and release builds separately.
+- `--locked` fails the build if `Cargo.lock` is out of date, so commit the lockfile with every dependency change.
+- GPUI tests use GPUI's test platform, so CI needs no real display.
+- Download the `.exe` from the run's **Artifacts** section on GitHub.
+- Release builds use the Windows GUI subsystem (no console window). Debug builds keep the console for logs.
+
 ## Workspace conventions
 
 - Shared versions and lints live in the root `Cargo.toml` (`[workspace.dependencies]`, `[workspace.lints]`). Crates use `dep.workspace = true` and `lints.workspace = true`.

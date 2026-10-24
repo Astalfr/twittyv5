@@ -96,5 +96,7 @@ Don't weaken, `#[ignore]` or delete a test to make it pass. Fix the root cause.
 
 ## Git
 
+- CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests with `--locked`, and builds the release `.exe`. Keep it green.
+
 - Small, focused commits in imperative mood ("Add search column"). Run fmt, clippy and tests before every commit.
 - Never commit secrets, real session files, or un-anonymised fixtures (they contain real users' data).
