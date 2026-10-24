@@ -43,6 +43,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 keyring = { version = "3", features = ["windows-native"] }
+# Compiles the exe's icon resource (build script only; GPUI already uses it).
+embed-resource = "3"
 
 # Testing.
 insta = { version = "1", features = ["json"] }

@@ -7722,6 +7722,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "directories",
+ "embed-resource",
  "gpui-kit",
  "gpui-pre-reqwest-client",
  "keyring",

@@ -39,12 +39,18 @@ gpui_kit::assets::icon_assets!(
     ]
 );
 
+/// Path of the Twitty logo shown in the rail.
+pub const LOGO: &str = "brand/twitty.png";
+
 /// The app's asset source.
 #[derive(Debug, Clone, Copy)]
 pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path == LOGO {
+            return Ok(Some(Cow::Borrowed(include_bytes!("../../resources/twitty-logo.png"))));
+        }
         if let Some(bytes) = TwittyIcons.load(path)? {
             return Ok(Some(bytes));
         }
@@ -54,6 +60,9 @@ impl AssetSource for Assets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(TwittyIcons.list(path)?);
+        if LOGO.starts_with(path) {
+            paths.push(LOGO.into());
+        }
         paths.sort();
         paths.dedup();
         Ok(paths)
@@ -82,5 +91,12 @@ mod tests {
             let path = name.path();
             assert!(Assets.load(&path).unwrap().is_some(), "missing icon {path}");
         }
+    }
+
+    #[test]
+    fn the_logo_is_a_png() {
+        let bytes = Assets.load(LOGO).unwrap().expect("logo is embedded");
+        assert_eq!(bytes.get(1..4), Some(&b"PNG"[..]), "PNG signature");
+        assert!(Assets.list("brand/").unwrap().iter().any(|p| p.as_ref() == LOGO));
     }
 }

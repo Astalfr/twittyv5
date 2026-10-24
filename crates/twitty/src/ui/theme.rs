@@ -49,6 +49,19 @@ mod tests {
         assert_eq!(names, NAMES);
     }
 
+    #[test]
+    fn every_theme_has_a_visible_selection() {
+        let json: serde_json::Value = serde_json::from_str(THEMES).unwrap();
+        for theme in json["themes"].as_array().unwrap() {
+            let colors = &theme["colors"];
+            let name = theme["name"].as_str().unwrap();
+            let active = colors["list.active.background"].as_str().unwrap();
+            assert_ne!(Some(active), colors["list.hover.background"].as_str(), "{name}");
+            assert_ne!(Some(active), colors["list.background"].as_str(), "{name}");
+            assert!(colors["list.active.border"].is_string(), "{name}");
+        }
+    }
+
     #[gpui_kit::test]
     fn init_applies_theme_and_always_shows_scrollbars(cx: &mut gpui_kit::TestAppContext) {
         cx.update(|cx| {

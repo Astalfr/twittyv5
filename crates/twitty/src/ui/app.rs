@@ -80,6 +80,9 @@ pub struct TwittyApp {
     thread: Option<Entity<ThreadPanel>>,
     account_panel: bool,
     settings_panel: bool,
+    /// The latest settings write. Each save waits for the previous one, so the
+    /// file always ends up with the newest settings.
+    settings_save: Option<Task<()>>,
     /// The image viewer: a post and the index of the media shown.
     media: Option<(Arc<twitty_model::Post>, usize)>,
     /// Index of the column keyboard shortcuts act on.
@@ -131,6 +134,7 @@ impl TwittyApp {
             thread: None,
             account_panel: false,
             settings_panel: false,
+            settings_save: None,
             media: None,
             active_column: 0,
             focus: cx.focus_handle(),
@@ -755,12 +759,15 @@ impl TwittyApp {
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = self.options.settings_path.clone() {
             let settings = self.settings.clone();
-            cx.background_spawn(async move {
+            let previous = self.settings_save.take();
+            self.settings_save = Some(cx.background_spawn(async move {
+                if let Some(previous) = previous {
+                    previous.await;
+                }
                 if let Err(e) = settings.save(&path) {
                     tracing::error!("saving settings to {} failed: {e}", path.display());
                 }
-            })
-            .detach();
+            }));
         }
         cx.notify();
     }
@@ -1040,9 +1047,7 @@ impl TwittyApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(26.))
-                    .font_weight(FontWeight::BLACK)
-                    .child("𝕏"),
+                    .child(img(crate::ui::assets::LOGO).size(px(30.))),
             )
             .child(
                 rail_button("add-column", IconName::Plus, "Add column")

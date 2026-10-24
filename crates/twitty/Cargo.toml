@@ -24,6 +24,9 @@ keyring.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[build-dependencies]
+embed-resource.workspace = true
+
 [dev-dependencies]
 pretty_assertions.workspace = true
 proptest.workspace = true

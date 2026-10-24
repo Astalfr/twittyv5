@@ -21,7 +21,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 
 ```
 ┌──┬───────────────────┬───────────────────┬────────────
-│𝕏 │ ⌂ Home   Following⚙│ 🔔 Notifications ⚙│ 🔍 query  ⚙   ← sticky column headers
+│🐦│ ⌂ Home   Following⚙│ 🔔 Notifications ⚙│ 🔍 query  ⚙   ← sticky column headers
 │⌂ ├───────────────────┼───────────────────┼────────────
 │🔍│ ◯ Name @h · 2m  ⋯ │                   │
 │🔔│ body text …        │                   │
@@ -35,7 +35,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 
 | Element | Spec |
 |---|---|
-| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: logo, **+ Add column**. Bottom: account button, settings, Compose (accent). |
+| Rail | ~68px wide, with icon buttons and tooltips. Top to bottom: Twitty logo (`ui::assets::LOGO`), **+ Add column**. Bottom: account button, settings, Compose (accent). |
 | Deck bar | 36px strip above the columns: one tab per deck (active one underlined, with × when more than one deck exists) and **+** for a new empty deck ("Deck N"). Switching rebuilds the columns of that deck; the hub (likes etc.) is kept. |
 | Add column | Overlay dialog: a button per kind (Home, Notifications, Search, User, List, Post, Bookmarks). Kinds without input are added at once; others take a query, `@handle`/profile link, list link/id or post link/id (parsed in `state::add_column`). Handles are resolved with `Backend::profile` ("Looking up…"), unknown ones show an error. |
 | Column tabs | Under the header, from `state::sources::tabs`: Home For you/Following · Notifications All/Verified/Mentions · Search Top/Latest/Media · User Posts/Replies/Media/Likes. A tab switches the column's source and is saved in the deck. |
@@ -48,7 +48,7 @@ Colours are from memory of x.com's palette: **check them against x.com's live CS
 | Feedback | "↑ N new posts" pill when scrolled down · skeleton rows while loading · inline error with Retry (a full refresh after a session error, see `ColumnModel::retry_kind`) · footer row: spinner, Retry, "You're all caught up", or "Nothing to show here yet" for an empty feed · a rate-limited load shows "rate limited until <time>" and the column waits for that time |
 | Image viewer | Clicking a media tile opens it full-window with `n / count · @handle`, ‹ › (and ←/→) for multi-image posts (wrapping), alt text, and **Play on x.com** for videos and GIFs. Esc, × or a click on the backdrop closes it (buttons and the image stop their clicks); the backdrop is the shared overlay backdrop (see Backdrop). The image box is computed from the window size (`media_layout::viewer_box`, with fixed-height header and footer and the alt text clamped to two lines) so nothing is pushed off screen; the `img` has no explicit size, so GPUI uses the decoded bitmap's size capped by that box: images shrink to fit but are never scaled up past their own resolution. |
 | Settings | Rail ⚙ opens a page: theme (Lights out / Dim / Light), "Check for new posts automatically", the keyboard shortcuts, and where data is saved. Saved to `settings.json` right away. |
-| Active column | The column keyboard shortcuts act on has a tinted header; its selected row has the `list_active` background. |
+| Active column | The column keyboard shortcuts act on has a tinted header; its selected row has the `list.active.background` tint (the primary blue at ~12–19% opacity, per theme) and a 3px `list.active.border` accent bar on the left, which stays visible while the row's hover background covers the tint. |
 | Backdrop | Every overlay (image viewer, dialogs, settings, account panel) and the thread panel sits on the theme's `overlay` colour at 70% opacity (`BACKDROP_ALPHA` in `ui/app.rs`). |
 | Thread | Clicking a post (or a quoted post) opens `ThreadPanel`, as a 600px sheet over the right side of the deck, on the backdrop: ancestors and the focused post as one connected thread, then replies (`state::thread::rows`). Clicking a post inside it switches the panel; × or a click on the backdrop closes it. The backdrop is occluding and takes the whole click, so it doesn't also open the post, image or link under it. While an overlay (image viewer, compose) is open over the panel, the panel's backdrop isn't drawn, so the overlay's darkens everything once. A reply published from compose reloads the panel showing its parent. |
 | Links | Mentions, hashtags, cashtags and links use the theme's `link` colour; the one under the mouse is underlined (`post::span_at` maps the hovered byte to a span; the hover is kept in `window.use_keyed_state` and cleared when the mouse leaves the text). A click opens it on x.com / in the browser. |
