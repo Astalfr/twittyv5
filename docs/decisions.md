@@ -4,6 +4,11 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-25: Twitty builds its own Windows toasts
+- **Decision**: New-tweet notifications are Windows toasts built by `notifier::WindowsToasts` (WinRT through the `windows` crate), not GPUI's `show_system_notification`. Each is titled "{column} - {name} @{handle}" after the newest row and shows that account's avatar (`appLogoOverride`, cropped round). The avatar is downloaded once into the cache folder, named after a hash of its URL.
+- **Why**: GPUI's `SystemNotification` only has a title, a text and buttons, and the pinned `gpui-pre` can't be patched. Windows won't load web images in toasts for an app without a package, so the picture has to be a local file. Hashing the URL keeps user ids out of file names and picks up a new avatar, whose URL changes.
+- **Consequences**: Twitty registers the app id itself, as GPUI does lazily, and adds the `IconUri` GPUI leaves out, so toasts carry the Twitty logo (a copy of `twitty-logo.png` in the cache folder). Toast text goes in through the XML DOM, never string formatting. Only Windows gets pictures; elsewhere (and in tests by default) toasts still go through GPUI. Cached avatars are never pruned, but they are small and only kept for accounts that triggered a toast. Clicking a toast does nothing yet.
+
 ### 2026-10-24: Self-update from GitHub Releases, unsigned
 - **Decision**: An installed copy checks the repository's latest GitHub Release (public API, no token) and, on the user's click, downloads its Inno Setup installer, checks it against GitHub's SHA-256 `digest`, runs it silently and quits; the installer restarts Twitty. CI publishes a release for each `v*` tag, only after tests and build pass. Nothing installs without a click.
 - **Why**: The repository is public, so releases need no credentials, and the installer already handles upgrades (same `AppId`, previous folder and install mode, closing a running copy). GitHub's own digest avoids a checksum file of our own. Only copies installed by the installer update, so a `cargo run` build never replaces itself.
@@ -267,7 +272,7 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 ### 2026-10-24: Long tweets fold by character count
 - **Decision**: Outside the thread panel, a tweet whose shown text (translation included) is over 320 characters is cut after about 280 and gets a **Show more** link (`state::long_text`). The model has no "long tweet" flag; the cut is decided from the text alone.
 - **Why**: Twitter Blue's note tweets can run to thousands of characters and fill a whole column. Cutting the `RichText` (rather than clamping lines in the view) keeps the decision in plain, tested Rust and lets the cut avoid splitting a link or mention. The 40-character margin over 280 keeps classic tweets, whose links display longer than Twitter counts them, from ever being folded.
-- **Consequences**: A classic tweet in a script Twitter counts double (CJK) is at most 140 characters, so it never folds; a long tweet with many short lines can still be tall when folded. The choice to unfold lasts for the session and is shared by every column.
+- **Consequences**: A classic tweet in a script Twitter counts double (CJK) is at most 140 characters, so it never folds; a long tweet with many short lines can still be tall when folded. The choice to unfold lasts for the session and is shared by every column. A quoted tweet's text is cut too (it used to be shown whole, so a quoted note tweet filled the column), but its **Show more** opens the quoted tweet instead of unfolding in place: the whole card already opens it, and unfolding inside a card would be a second click target.
 
 ### 2026-10-24: CI caches survive failures and timeouts
 - **Decision**: Both CI jobs use `rust-cache` with `cache-on-failure: true` and `save-if` on `main`. They give the compile steps step-level timeouts below the job timeout, build without debug info, disable Defender real-time scanning, and only cancel in-progress runs for pull requests.

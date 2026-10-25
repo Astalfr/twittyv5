@@ -34,10 +34,12 @@ tracing-subscriber.workspace = true
 unicode-segmentation.workspace = true
 unicode-properties.workspace = true
 
+# The sign-in window (see `browser_login`) and the toasts for new tweets (`notifier`).
 [target.'cfg(windows)'.dependencies]
-# The sign-in window (see `browser_login`).
 wry.workspace = true
 tao.workspace = true
+windows.workspace = true
+windows-registry.workspace = true
 
 [build-dependencies]
 embed-resource.workspace = true

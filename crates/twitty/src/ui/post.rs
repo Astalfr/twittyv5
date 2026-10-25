@@ -999,6 +999,11 @@ fn quote_card(
         media_grid(id, &q.media, inner, q, rcx, &theme, window, cx).into_any_element()
     });
     let shown = translation::shown(q, hub.read(cx).showing_original(&q.id));
+    // A long quoted text is cut like a tweet's, but "Show more" opens the
+    // quoted tweet (like the rest of the card) instead of unfolding in place.
+    let cut = long_text::cut(shown.body);
+    let more = cut.is_some();
+    let body = cut.map_or_else(|| shown.body.text().to_owned(), |short| short.text().to_owned());
     let card_hub = hub.clone();
     let quoted = q.id.clone();
     v_flex()
@@ -1055,8 +1060,18 @@ fn quote_card(
                     div()
                         .debug_selector(move || format!("quote-body-{}", id.1))
                         .text_color(theme.foreground)
-                        .child(shown.body.text().to_owned()),
+                        .child(body),
                 )
+                .when(more, |d| {
+                    d.child(
+                        div()
+                            .debug_selector(move || format!("quote-more-{}", id.1))
+                            .self_start()
+                            .text_color(theme.link)
+                            .hover(|s| s.underline())
+                            .child(long_text::SHOW_MORE),
+                    )
+                })
                 .when(q.community_note.is_some(), |d| {
                     d.child(note_marker(("quote-note-marker", id.1), &theme))
                 })
@@ -2064,6 +2079,45 @@ mod tests {
         cx.simulate_click(less.center(), gpui_kit::Modifiers::default());
         cx.run_until_parked();
         assert!(!hub.read_with(cx, |hub, _| hub.is_unfolded(&id)), "folded again");
+    }
+
+    #[gpui_kit::test]
+    fn a_long_quote_is_cut_and_show_more_opens_it(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let quoting = |text: String| {
+            let (mut post, _) = mock_post();
+            post.community_note = None;
+            let mut quoted = long_post();
+            quoted.body = RichText::plain(text);
+            post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted)) });
+            post
+        };
+        let long = "A long paragraph of words. ".repeat(14);
+        let id = long_post().id;
+
+        let longer = one_post(quoting(long.repeat(3)), cx)
+            .debug_bounds("quote-body-0")
+            .expect("the longer quote's text");
+        let vcx = one_post(quoting(long.clone()), cx);
+        let body = vcx.debug_bounds("quote-body-0").expect("the quote's text");
+        let card = vcx.debug_bounds("quote-0").expect("the quote card");
+        let more = vcx.debug_bounds("quote-more-0").expect("Show more under the quote");
+        assert!(more.top() >= body.bottom() && card.contains(&more.center()));
+        assert_eq!(body.size.height, longer.size.height, "both cut at the same length");
+
+        let seen = navigations(cx, FeedItem::Post(quoting(long)), "quote-more-0");
+        assert_eq!(seen, vec![Navigate::Thread(id)], "opens the quoted tweet");
+    }
+
+    #[gpui_kit::test]
+    fn a_short_quote_has_no_show_more(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, _) = mock_post();
+        let (quoted, _) = mock_post();
+        post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted)) });
+        let cx = one_post(post, cx);
+        assert!(cx.debug_bounds("quote-body-0").is_some());
+        assert!(cx.debug_bounds("quote-more-0").is_none());
     }
 
     #[gpui_kit::test]

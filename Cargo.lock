@@ -8727,6 +8727,8 @@ dependencies = [
  "twitty-x",
  "unicode-properties",
  "unicode-segmentation",
+ "windows 0.62.2",
+ "windows-registry 0.6.1",
  "wiremock",
  "wry",
 ]
