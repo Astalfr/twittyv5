@@ -865,10 +865,7 @@ mod tests {
             format!("Friends - {} @{}", newest.author.display_name, newest.author.handle),
             "the column's name, then the newest tweet's author"
         );
-        assert_eq!(
-            shown[0].body.as_ref(),
-            format!("{}\n+1 more tweet", alerts::shorten(newest.body.text()))
-        );
+        assert_eq!(shown[0].body.as_ref(), format!("{}\n+1 more tweet", alerts::text(&newest)));
 
         // A refresh is not news.
         column.update(cx, |c, cx| c.load(LoadKind::Refresh, cx));

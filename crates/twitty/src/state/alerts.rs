@@ -96,13 +96,20 @@ fn describe(item: &FeedItem) -> Option<(Option<Arc<Profile>>, Vec<String>)> {
 }
 
 fn tweet(post: &Post) -> (Option<Arc<Profile>>, Vec<String>) {
-    (Some(Arc::clone(&post.author)), vec![shorten(post.body.text())])
+    (Some(Arc::clone(&post.author)), vec![text(post)])
+}
+
+/// What `post` says, as the notification shows it: its translation when the
+/// provider sent one, cut to one line.
+pub fn text(post: &Post) -> String {
+    let body = post.translation.as_ref().map_or(&post.body, |t| &t.body);
+    shorten(body.text())
 }
 
 /// An activity notification: its newest actor, what they did, and the start
 /// of the tweet it is about.
 fn notification(n: &Notification) -> (Option<Arc<Profile>>, Vec<String>) {
-    let target = n.target.as_ref().map(|post| shorten(post.body.text()));
+    let target = n.target.as_deref().map(text);
     let Some(actor) = n.actors.first() else {
         // A notice from Twitter itself: its summary is all there is.
         return (None, [Some(shorten(n.text.text())), target].into_iter().flatten().collect());
@@ -220,8 +227,26 @@ mod tests {
             a.title("Friends"),
             format!("Friends - {} @{}", post.author.display_name, post.author.handle)
         );
-        assert_eq!(a.body(), shorten(post.body.text()));
+        assert_eq!(a.body(), text(&post));
         assert_eq!(a.avatar(), post.author.avatar.as_ref());
+    }
+
+    #[test]
+    fn a_translated_tweet_shows_its_translation() {
+        let mut post = posts().remove(0);
+        post.body = RichText::plain("Bonjour tout le monde");
+        post.translation = Some(twitty_model::Translation {
+            body: RichText::plain("Hello   everyone"),
+            from: Some("fr".into()),
+            to: Some("en".into()),
+        });
+        assert_eq!(one(FeedItem::Post(post.clone())).lines, ["Hello everyone"]);
+
+        // Also the tweet an activity notification is about.
+        let mut n = notification_of(NotificationKind::Like);
+        n.actors.truncate(1);
+        n.target = Some(Box::new(post));
+        assert_eq!(one(FeedItem::Notification(n)).lines, ["liked your tweet", "Hello everyone"]);
     }
 
     #[test]
@@ -244,7 +269,7 @@ mod tests {
         let by = Arc::clone(&posts[0].author);
         let a = one(FeedItem::Repost { by: Arc::clone(&by), post: post.clone() });
         assert_eq!(a.from, Some(Arc::clone(&post.author)));
-        assert_eq!(a.lines, [format!("{} retweeted", by.display_name), shorten(post.body.text())]);
+        assert_eq!(a.lines, [format!("{} retweeted", by.display_name), text(&post)]);
     }
 
     #[test]
@@ -253,7 +278,7 @@ mod tests {
         let last = posts.last().unwrap().clone();
         let a = one(FeedItem::Thread(posts));
         assert_eq!(a.from, Some(Arc::clone(&last.author)));
-        assert_eq!(a.lines, [shorten(last.body.text())]);
+        assert_eq!(a.lines, [text(&last)]);
     }
 
     #[test]
@@ -264,7 +289,7 @@ mod tests {
         ] {
             let mut n = notification_of(kind);
             n.actors.truncate(1);
-            let target = shorten(n.target.as_ref().unwrap().body.text());
+            let target = text(n.target.as_ref().unwrap());
             let a = one(FeedItem::Notification(n.clone()));
             assert_eq!(a.from, Some(Arc::clone(&n.actors[0])), "{kind:?}");
             assert_eq!(a.lines, [what.to_owned(), target], "{kind:?}");
@@ -275,7 +300,7 @@ mod tests {
     fn quotes_and_replies_say_what_twitter_says() {
         let mut n = notification_of(NotificationKind::Quote);
         n.text = RichText::plain("Alice replied to your tweet");
-        let target = shorten(n.target.as_ref().unwrap().body.text());
+        let target = text(n.target.as_ref().unwrap());
         let a = one(FeedItem::Notification(n.clone()));
         assert_eq!(a.from, Some(Arc::clone(&n.actors[0])));
         assert_eq!(a.lines, ["Alice replied to your tweet".to_owned(), target]);
