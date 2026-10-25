@@ -3,7 +3,7 @@
 
 use std::{ops::Range, sync::Arc};
 
-use twitty_model::{FeedItem, FeedSource, Post, Profile, UserTab};
+use twitty_model::{FeedItem, FeedSource, Post, Profile, UserId, UserTab};
 
 /// A tab of the profile sheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,10 +125,30 @@ pub fn website_label(p: &Profile) -> Option<String> {
     Some(rest.strip_suffix('/').unwrap_or(rest).to_owned())
 }
 
+/// Whether `viewer` can't see `p`'s tweets: the account is protected and
+/// the viewer is neither one of its followers nor the account itself. The
+/// sheet then shows a notice instead of loading the tabs.
+pub fn tweets_hidden(p: &Profile, viewer: Option<&UserId>) -> bool {
+    p.badges.protected && !p.viewer.following && viewer != Some(&p.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use twitty_model::{FeedPage, PageRequest, UserId, mock::MockBackend};
+    use twitty_model::{FeedPage, PageRequest, mock::MockBackend};
+
+    #[test]
+    fn a_protected_account_hides_its_tweets_from_non_followers_only() {
+        let mut p = Profile::new(UserId::new("1"), "a", "A");
+        let other = UserId::new("2");
+        assert!(!tweets_hidden(&p, Some(&other)), "public");
+        p.badges.protected = true;
+        assert!(tweets_hidden(&p, Some(&other)));
+        assert!(tweets_hidden(&p, None), "signed-out viewer");
+        assert!(!tweets_hidden(&p, Some(&p.id.clone())), "the viewer's own account");
+        p.viewer.following = true;
+        assert!(!tweets_hidden(&p, Some(&other)), "an approved follower");
+    }
 
     #[test]
     fn website_labels_drop_the_scheme_www_and_trailing_slash() {

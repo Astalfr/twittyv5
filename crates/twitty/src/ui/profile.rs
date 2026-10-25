@@ -24,7 +24,10 @@ use crate::{
     ui::{
         emoji,
         hub::{InteractionsHub, Navigate},
-        post::{RowCtx, avatar, fmt_duration, render_item, rich_text, verified_badge, video_badge},
+        post::{
+            RowCtx, avatar, fmt_duration, protected_badge, render_item, rich_text, verified_badge,
+            video_badge,
+        },
         remote_image,
         thread::PANEL_WIDTH,
     },
@@ -125,7 +128,9 @@ impl ProfilePanel {
             _follow: None,
         };
         this.refresh_profile(cx);
-        this.load(tab, LoadKind::Refresh, cx);
+        if !this.tweets_hidden() {
+            this.load(tab, LoadKind::Refresh, cx);
+        }
         this
     }
 
@@ -175,9 +180,17 @@ impl ProfilePanel {
                     this.update(cx, |this, cx| {
                         if fresh.id == this.profile.id {
                             this.follow.refreshed(&fresh);
+                            let was_hidden = this.tweets_hidden();
                             this.profile = Arc::new(fresh);
-                            // The header's height may change.
-                            this.list.splice(0..1, 1);
+                            if was_hidden && !this.tweets_hidden() {
+                                // The viewer turns out to be a follower.
+                                let tab = this.tab;
+                                this.list.reset(profile::row_count(tab, this.content(tab)));
+                                this.load(tab, LoadKind::Refresh, cx);
+                            } else {
+                                // The header's height may change.
+                                this.list.splice(0..1, 1);
+                            }
                             cx.notify();
                         }
                     })
@@ -187,6 +200,11 @@ impl ProfilePanel {
                 Err(e) => tracing::warn!("profile refresh failed: {e}"),
             }
         }));
+    }
+
+    /// Whether the account is protected from the viewer, so the tabs aren't loaded.
+    fn tweets_hidden(&self) -> bool {
+        profile::tweets_hidden(&self.profile, self.viewer.as_ref())
     }
 
     pub fn follow(&self) -> &Follow {
@@ -237,7 +255,7 @@ impl ProfilePanel {
         }
         self.tab = tab;
         self.list.reset(profile::row_count(tab, self.content(tab)));
-        if !self.model(tab).loaded_once() {
+        if !self.model(tab).loaded_once() && !self.tweets_hidden() {
             self.load(tab, LoadKind::Refresh, cx);
         }
         cx.notify();
@@ -401,7 +419,10 @@ impl ProfilePanel {
                                         .font_weight(FontWeight::EXTRA_BOLD)
                                         .child(emoji::text(p.display_name.clone())),
                                 )
-                                .children(p.badges.verified.map(|v| verified_badge(v, &theme))),
+                                .children(p.badges.verified.map(|v| verified_badge(v, &theme)))
+                                .when(p.badges.protected, |d| {
+                                    d.child(protected_badge("profile-protected".into(), &theme))
+                                }),
                         )
                         .child(
                             h_flex()
@@ -575,6 +596,9 @@ impl ProfilePanel {
     fn render_footer(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let tab = self.tab;
+        if self.tweets_hidden() {
+            return self.render_protected_notice(&theme).into_any_element();
+        }
         let model = self.model(tab);
         let body: AnyElement = match model.status() {
             Status::Loading(_) => Spinner::new().into_any_element(),
@@ -602,6 +626,30 @@ impl ProfilePanel {
             Status::Idle => div().into_any_element(),
         };
         h_flex().w_full().justify_center().py_6().child(body).into_any_element()
+    }
+
+    /// Twitter's message in place of a protected account's tweets.
+    fn render_protected_notice(&self, theme: &Theme) -> impl IntoElement {
+        v_flex()
+            .debug_selector(|| "profile-protected-notice".into())
+            .w_full()
+            .px_8()
+            .py_8()
+            .gap_2()
+            .items_center()
+            .child(Icon::new(IconName::Lock).size(px(28.)).text_color(theme.muted_foreground))
+            .child(
+                div()
+                    .text_lg()
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .child("These tweets are protected"),
+            )
+            .child(
+                div().text_sm().text_center().text_color(theme.muted_foreground).child(format!(
+                    "Only approved followers can see @{}'s tweets.                      To request access, click Follow.",
+                    self.profile.handle
+                )),
+            )
     }
 }
 
@@ -822,6 +870,38 @@ mod tests {
         fan.viewer.followed_by = true;
         let cx = header(fan, cx);
         assert!(cx.debug_bounds("profile-follows-you").is_some());
+    }
+
+    fn locked() -> Profile {
+        let mut p = someone();
+        p.badges.protected = true;
+        p
+    }
+
+    #[gpui_kit::test]
+    fn a_protected_account_shows_a_lock_and_hides_its_tweets(cx: &mut TestAppContext) {
+        let (panel, cx) = open(locked(), Some(UserId::new("viewer")), MockBackend::new(), cx);
+        assert!(cx.debug_bounds("profile-protected").is_some(), "the lock by the name");
+        assert!(cx.debug_bounds("profile-protected-notice").is_some(), "the notice");
+        let loaded = panel.read_with(cx, |p, _| p.model(ProfileTab::Tweets).loaded_once());
+        assert!(!loaded, "the tweets aren't requested");
+    }
+
+    #[gpui_kit::test]
+    fn a_protected_account_shows_its_tweets_to_followers(cx: &mut TestAppContext) {
+        let mut friend = locked();
+        friend.viewer.following = true;
+        let (panel, cx) = open(friend, Some(UserId::new("viewer")), MockBackend::new(), cx);
+        assert!(cx.debug_bounds("profile-protected").is_some(), "still locked");
+        assert!(cx.debug_bounds("profile-protected-notice").is_none());
+        assert!(panel.read_with(cx, |p, _| !p.model(ProfileTab::Tweets).items().is_empty()));
+    }
+
+    #[gpui_kit::test]
+    fn a_public_account_has_no_lock_or_notice(cx: &mut TestAppContext) {
+        let cx = header(someone(), cx);
+        assert!(cx.debug_bounds("profile-protected").is_none());
+        assert!(cx.debug_bounds("profile-protected-notice").is_none());
     }
 
     #[gpui_kit::test]

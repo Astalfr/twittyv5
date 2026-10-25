@@ -17,7 +17,7 @@ use crate::{
     state::user_search::{self, UserSearch},
     ui::button::TextButton,
     ui::emoji,
-    ui::post::{avatar, verified_badge},
+    ui::post::{avatar, protected_badge, verified_badge},
 };
 
 /// Diameter of a result's avatar.
@@ -151,8 +151,9 @@ impl Render for UserSearchView {
                         .truncate()
                         .child(emoji::text(profile.display_name.clone())),
                 )
-                .when_some(profile.badges.verified, |d, kind| {
-                    d.child(verified_badge(kind, &theme))
+                .when_some(profile.badges.verified, |d, kind| d.child(verified_badge(kind, &theme)))
+                .when(profile.badges.protected, |d| {
+                    d.child(protected_badge(format!("user-result-protected-{ix}"), &theme))
                 });
             let handle = format!(
                 "@{} · {} followers",
