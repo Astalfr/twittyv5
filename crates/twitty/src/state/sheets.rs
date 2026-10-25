@@ -78,6 +78,11 @@ impl<T> SheetStack<T> {
         self.sheets.last()
     }
 
+    /// Every open sheet, the bottom one first.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.sheets.iter()
+    }
+
     /// How many sheets are open.
     pub fn len(&self) -> usize {
         self.sheets.len()
@@ -139,6 +144,7 @@ mod tests {
         assert_eq!(s.push(2), None);
         assert_eq!(s.top(), Some(&2));
         assert_eq!(s.len(), 3);
+        assert_eq!(s.iter().copied().collect::<Vec<_>>(), vec![0, 1, 2]);
         assert_eq!(s.last_change(), Change::Pushed);
     }
 

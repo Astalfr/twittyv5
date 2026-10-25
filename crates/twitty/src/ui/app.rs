@@ -1732,8 +1732,12 @@ impl TwittyApp {
             for (_, column) in &self.columns {
                 column.update(cx, |c, cx| c.remeasure(cx));
             }
-            if let Some(panel) = self.profile_panel() {
-                panel.update(cx, |p, cx| p.remeasure(cx));
+            // Every sheet, the lower ones too: they redraw only when notified.
+            for open in self.sheets.iter() {
+                match &open.sheet {
+                    Sheet::Profile(panel) => panel.update(cx, |p, cx| p.remeasure(cx)),
+                    Sheet::Thread(panel) => panel.update(cx, |_, cx| cx.notify()),
+                }
             }
         }
         if save {
@@ -2805,7 +2809,22 @@ impl TwittyApp {
                     .right(px(to))
                     .h_full()
                     .occlude()
-                    .child(open.sheet.view())
+                    // A scroll in the top sheet redraws its ancestors, so every
+                    // sheet would be laid out again each frame. Lower sheets
+                    // take no input: they reuse their last frame until they
+                    // change themselves.
+                    .child(if depth == 0 {
+                        open.sheet.view().into_any_element()
+                    } else {
+                        open.sheet
+                            .view()
+                            .cached(
+                                gpui_kit::StyleRefinement::default()
+                                    .w(px(crate::ui::thread::PANEL_WIDTH))
+                                    .h_full(),
+                            )
+                            .into_any_element()
+                    })
                     .when(depth > 0, |d| {
                         d.child(
                             div()
@@ -3748,6 +3767,38 @@ mod tests {
         cx.simulate_click(OUTSIDE, Modifiers::default());
         cx.run_until_parked();
         assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
+    }
+
+    #[gpui_kit::test]
+    fn scrolling_the_top_sheet_does_not_redraw_the_ones_under_it(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        stack_threads(&app, &["1"], cx);
+        let lower = app.read_with(cx, |app, _| app.thread_panel().cloned()).unwrap();
+        open_panel(&app, "2", cx);
+        let top = app.read_with(cx, |app, _| app.thread_panel().cloned()).unwrap();
+        let renders = |cx: &mut VisualTestContext| {
+            (lower.read_with(cx, |p, _| p.renders()), top.read_with(cx, |p, _| p.renders()))
+        };
+        let (lower_before, top_before) = renders(cx);
+        // What a scroll does: the top panel notifies, its ancestors redraw.
+        for _ in 0..3 {
+            top.update(cx, |_, cx| cx.notify());
+            cx.run_until_parked();
+        }
+        let (lower_after, top_after) = renders(cx);
+        assert!(top_after > top_before, "the top sheet redrew");
+        assert_eq!(lower_after, lower_before, "the sheet under it reused its frame");
+
+        // A change in the lower sheet itself still shows.
+        lower.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        let (lower_now, _) = renders(cx);
+        assert!(lower_now > lower_before);
+
+        // So does a new media height, which only a global carries.
+        app.update(cx, |app, cx| app.set_media_max_height(Some(MaxHeight::new(200.)), false, cx));
+        cx.run_until_parked();
+        assert!(renders(cx).0 > lower_now, "the lower sheet redrew with the new height");
     }
 
     #[gpui_kit::test]
