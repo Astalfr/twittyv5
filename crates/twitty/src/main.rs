@@ -24,6 +24,8 @@ use twitty::{
         AccountServices, ConnectError, Connector, CredentialStore, Credentials, KeyringStore,
         SessionSource,
     },
+    browser_login::{self, BrowserSignIn, HelperProcess},
+    dirs::AppDirs,
     logging,
     runtime::Runtime,
     sound::{Sound, SystemSound},
@@ -46,6 +48,11 @@ use twitty::notifier::{Notifications, WindowsToasts};
 const APP_ID: &str = "Twitty.Twitty";
 
 fn main() -> anyhow::Result<()> {
+    // The sign-in window runs in its own process, before any of the app's
+    // logging, runtime or windows exist.
+    if std::env::args().nth(1).as_deref() == Some(browser_login::HELPER_FLAG) {
+        return browser_login::run_helper();
+    }
     let log_path = logging::default_path();
     let log_file = log_path.as_deref().map(|p| logging::open(p, logging::MAX_BYTES));
     let file_layer = match &log_file {
@@ -86,8 +93,7 @@ fn main() -> anyhow::Result<()> {
                 SessionOrigin::File(path) => Some(file_rotation(path.clone())),
                 SessionOrigin::Env => None,
             };
-            let client =
-                XClient::production(session, on_rotate).context("creating Twitter client")?;
+            let client = x_client(session, on_rotate).context("creating Twitter client")?;
             let source = match origin {
                 SessionOrigin::Keyring => SessionSource::Keyring,
                 other => SessionSource::External(other.to_string()),
@@ -125,7 +131,7 @@ fn main() -> anyhow::Result<()> {
         log_path,
         poll: true,
         session,
-        account: Some(AccountServices { connect, store }),
+        account: Some(AccountServices { connect, store, browser: browser_sign_in() }),
         updates: update_services(),
     };
 
@@ -184,8 +190,7 @@ fn main() -> anyhow::Result<()> {
 
 /// Where downloads that can be thrown away go.
 fn cache_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "", "Twitty")
-        .map_or_else(std::env::temp_dir, |d| d.cache_dir().to_path_buf())
+    AppDirs::current().map_or_else(std::env::temp_dir, |d| d.cache)
 }
 
 /// Self-update from GitHub Releases, for a copy installed by the installer
@@ -214,12 +219,31 @@ fn update_services() -> Option<UpdateServices> {
     }
 }
 
+/// The x.com sign-in window, run by this same executable.
+fn browser_sign_in() -> Option<Arc<dyn BrowserSignIn>> {
+    if !cfg!(windows) {
+        return None;
+    }
+    match std::env::current_exe() {
+        Ok(exe) => Some(Arc::new(HelperProcess::new(exe))),
+        Err(e) => {
+            tracing::error!("no sign-in window: {e}");
+            None
+        }
+    }
+}
+
+/// A Twitter client with its caches in this build's cache folder.
+fn x_client(session: Session, on_rotate: Option<RotateHook>) -> Result<XClient, twitty_x::XError> {
+    XClient::production_in(AppDirs::current().map(|d| d.cache), session, on_rotate)
+}
+
 /// Builds Twitter backends for the sign-in dialog. Their rotated cookies go to the keyring.
 fn x_connector(store: Arc<dyn CredentialStore>) -> Connector {
     Arc::new(move |c: &Credentials| {
         let session = Session::new(c.auth_token.as_str(), c.ct0.as_str())
             .map_err(|e| ConnectError::Malformed(e.to_string()))?;
-        let client = XClient::production(session, Some(keyring_rotation(Arc::clone(&store))))
+        let client = x_client(session, Some(keyring_rotation(Arc::clone(&store))))
             .map_err(|e| ConnectError::Setup(e.to_string()))?;
         Ok(Arc::new(XBackend::new(Arc::new(client))) as Arc<dyn Backend>)
     })
@@ -247,8 +271,7 @@ impl std::fmt::Display for SessionOrigin {
 /// config directory, then `session.json` in the working directory (handy with
 /// `cargo run`). The sign-in dialog stores sessions in the keyring instead.
 fn session_files() -> Vec<PathBuf> {
-    let config = directories::ProjectDirs::from("", "", "Twitty")
-        .map(|d| d.config_dir().join("session.json"));
+    let config = AppDirs::current().map(|d| d.config.join("session.json"));
     config.into_iter().chain([PathBuf::from("session.json")]).collect()
 }
 

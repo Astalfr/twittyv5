@@ -43,6 +43,12 @@ windows = { version = "0.62", features = [
 # toasts. The version GPUI already builds.
 windows-registry = "0.6"
 
+# The x.com sign-in window (`twitty --login-helper`): a WebView2 page in a tao
+# window, from which the session cookies are read. wry uses the same `windows`
+# 0.62 as GPUI. Windows only; the default features are the Linux backends.
+wry = { version = "0.57", default-features = false }
+tao = { version = "0.37", default-features = false, features = ["rwh_06"] }
+
 # Async / HTTP for the X adapter.
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "gzip", "brotli", "query"] }

@@ -3,6 +3,7 @@
 
 use std::{
     collections::HashSet,
+    path::PathBuf,
     sync::{Arc, Mutex, PoisonError},
 };
 
@@ -44,9 +45,19 @@ impl XClient {
     /// client ids under the user's cache directory, live discovery enabled.
     /// `on_rotate` receives the session whenever Twitter rotates a cookie.
     pub fn production(session: Session, on_rotate: Option<RotateHook>) -> Result<Self, XError> {
-        let catalog = Arc::new(Catalog::new(Catalog::default_cache_path()));
-        let ids_path = directories::ProjectDirs::from("", "", "Twitty")
-            .map(|d| d.cache_dir().join("client-ids.json"));
+        Self::production_in(Catalog::default_cache_dir(), session, on_rotate)
+    }
+
+    /// [`production`](Self::production), with the caches in `cache_dir`
+    /// (`query-ids.json`, `client-ids.json`). `None` keeps nothing on disk.
+    pub fn production_in(
+        cache_dir: Option<PathBuf>,
+        session: Session,
+        on_rotate: Option<RotateHook>,
+    ) -> Result<Self, XError> {
+        let catalog =
+            Arc::new(Catalog::new(cache_dir.as_ref().map(|d| d.join(Catalog::CACHE_FILE))));
+        let ids_path = cache_dir.map(|d| d.join("client-ids.json"));
         let ids = ids_path.as_deref().map_or_else(ClientIds::random, ClientIds::load_or_create);
         let base = url::Url::parse(Transport::API_BASE)
             .map_err(|e| XError::Decode(format!("API base: {e}")))?;

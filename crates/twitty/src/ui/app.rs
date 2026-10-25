@@ -2874,6 +2874,7 @@ mod tests {
                 Ok(Arc::new(backend.clone()))
             }),
             store: Arc::new(store.clone()),
+            browser: None,
         }
     }
 

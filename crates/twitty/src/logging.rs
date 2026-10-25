@@ -1,10 +1,11 @@
 //! The log file. Release builds have no console, so this is where their logs
-//! (and panics) go: `%LOCALAPPDATA%\Twitty\data\logs\twitty.log`, rotated once to
-//! `twitty.log.1` past [`MAX_BYTES`].
+//! (and panics) go: `logs\twitty.log` in the data folder (see [`AppDirs`]),
+//! rotated once to `twitty.log.1` past [`MAX_BYTES`].
 //!
 //! Logs never contain secrets: credentials are redacted at the type level
 //! (`Secret`, `Credentials`), see CLAUDE.md.
 
+use crate::dirs::AppDirs;
 use std::{
     fs::{self, File, OpenOptions},
     io,
@@ -16,8 +17,7 @@ pub const MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 /// Default location of the log file.
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "Twitty")
-        .map(|d| d.data_local_dir().join("logs").join("twitty.log"))
+    AppDirs::current().map(|d| d.data.join("logs").join("twitty.log"))
 }
 
 /// Opens the log for appending. A log over `max_bytes` first replaces the

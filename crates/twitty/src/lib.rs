@@ -3,6 +3,8 @@
 
 pub mod account;
 pub mod audio;
+pub mod browser_login;
+pub mod dirs;
 pub mod format;
 pub mod logging;
 pub mod notifier;

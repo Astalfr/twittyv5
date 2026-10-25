@@ -13,6 +13,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use twitty_model::Backend;
 
+use crate::browser_login::BrowserSignIn;
+
 /// Version of the keyring payload.
 pub const CREDENTIALS_SCHEMA_VERSION: u32 = 1;
 
@@ -81,6 +83,11 @@ pub trait CredentialStore: Send + Sync {
     fn delete(&self) -> Result<(), StoreError>;
 }
 
+/// Keyring user of release builds' session entry.
+const X_SESSION: &str = "x-session";
+/// Keyring user of debug builds' session entry.
+const X_SESSION_DEV: &str = "x-session-dev";
+
 /// Windows Credential Manager (or the platform keyring elsewhere).
 #[derive(Debug, Clone)]
 pub struct KeyringStore {
@@ -89,9 +96,12 @@ pub struct KeyringStore {
 }
 
 impl KeyringStore {
-    /// The entry Twitty uses for its Twitter session.
+    /// The entry Twitty uses for its Twitter session. Debug builds have their
+    /// own, so signing in or out during development never touches the
+    /// installed app's session (like `dirs::AppDirs`).
     pub fn x_session() -> Self {
-        Self { service: "Twitty".into(), user: "x-session".into() }
+        let user = if cfg!(debug_assertions) { X_SESSION_DEV } else { X_SESSION };
+        Self { service: "Twitty".into(), user: user.into() }
     }
 
     fn entry(&self) -> Result<keyring::Entry, StoreError> {
@@ -194,6 +204,8 @@ pub enum SessionSource {
 pub struct AccountServices {
     pub connect: Connector,
     pub store: Arc<dyn CredentialStore>,
+    /// The x.com sign-in window, where there is one (Windows).
+    pub browser: Option<Arc<dyn BrowserSignIn>>,
 }
 
 impl fmt::Debug for AccountServices {
@@ -241,6 +253,14 @@ mod tests {
         let e = store_error(keyring::Error::BadEncoding(b"tok-123".to_vec()));
         assert_eq!(e, StoreError::Corrupt);
         assert!(!format!("{e} {e:?}").contains("tok-123"));
+    }
+
+    #[test]
+    fn debug_builds_keep_their_own_session_entry() {
+        // Tests are debug builds; no keyring is touched here.
+        let store = KeyringStore::x_session();
+        assert_eq!((store.service.as_str(), store.user.as_str()), ("Twitty", X_SESSION_DEV));
+        assert_ne!(X_SESSION_DEV, X_SESSION);
     }
 
     #[test]

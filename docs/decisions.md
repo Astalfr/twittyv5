@@ -190,9 +190,21 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 - **Decision**: Use GPUI's `list` element (measured, variable height) for columns.
 - **Why**: Tweet heights vary. `uniform_list` and `v_virtual_list` need heights up front.
 
-### 2026-10-24: Login by pasting cookies (v1)
+### 2026-10-24: Login by pasting cookies (v1) (superseded, see "Sign in through a WebView2 window")
 - **Decision**: The user pastes `auth_token` + `ct0`. They're stored in Windows Credential Manager.
 - **Why**: `gpui-webview` doesn't support Windows, and building the Twitter login flow ourselves is fragile and risky.
+
+### 2026-10-25: Sign in through a WebView2 window
+- **Decision**: **Sign in on x.com** opens the real x.com login page in a WebView2 window (`wry` + `tao`), running in a child process (`twitty --login-helper`). The app reads `auth_token` and `ct0` from the window's cookie store and gets them back as one JSON line on the child's stdout. Pasting cookies stays as the fallback.
+- **Why**:
+  - Reimplementing Twitter's login flow (username/password through `onboarding/task.json`) means chasing `castle_token` fingerprints, Arkose captchas, 2FA variants and "unusual activity" checks. It also gets accounts locked, and it would have to handle the password.
+  - The real page handles all of that, and Twitty never sees the password.
+  - `wry` talks to WebView2 directly, so GPUI's lack of a Windows webview doesn't matter. It uses the same `windows` 0.62 as GPUI.
+  - A child process keeps tao's event loop off GPUI's main thread.
+  - The page runs InPrivate, so the only copy of the session is the keyring's.
+- **Limits**:
+  - Google and Apple sign-in don't work in embedded browsers.
+  - The window itself is only checked by hand. The cookie-settling logic, the reply protocol and the dialog are unit- and view-tested with a fake window.
 
 ### 2026-10-24: Random `x-client-transaction-id` for now (superseded, see "Real `x-client-transaction-id`")
 - **Decision**: Send a random 32-hex value per request, as `bun_x` does.
