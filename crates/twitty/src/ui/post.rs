@@ -83,9 +83,12 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
         FeedItem::Post(post) => {
             row.child(post_row(post, None, Chain::Alone, rcx, 0, window, cx)).into_any_element()
         }
-        FeedItem::Repost { by, post } => {
-            row.child(post_row(post, Some(by), Chain::Alone, rcx, 0, window, cx)).into_any_element()
-        }
+        FeedItem::Pinned(post) => row
+            .child(post_row(post, Some(Label::Pinned), Chain::Alone, rcx, 0, window, cx))
+            .into_any_element(),
+        FeedItem::Repost { by, post } => row
+            .child(post_row(post, Some(Label::Repost(by)), Chain::Alone, rcx, 0, window, cx))
+            .into_any_element(),
         FeedItem::Thread(posts) => row
             .children(
                 posts
@@ -385,9 +388,18 @@ fn thread_line(end: LineEnd, color: Hsla) -> Div {
     }
 }
 
+/// The line above a tweet saying why it is in the feed.
+#[derive(Debug, Clone, Copy)]
+enum Label<'a> {
+    /// "Name retweeted"; clicking the name opens their profile.
+    Repost(&'a Arc<Profile>),
+    /// The profile's owner pinned it.
+    Pinned,
+}
+
 fn post_row(
     post: &Post,
-    reposted_by: Option<&Arc<Profile>>,
+    label: Option<Label<'_>>,
     chain: Chain,
     rcx: &RowCtx,
     sub: usize,
@@ -512,7 +524,7 @@ fn post_row(
     // The row stretches the avatar column to its full height, so a thread's
     // line runs from the row's top edge into the avatar and from the avatar
     // to the row's bottom edge, meeting the next tweet's line without a break.
-    let top = if reposted_by.is_some() { 0.0 } else { ROW_TOP };
+    let top = if label.is_some() { 0.0 } else { ROW_TOP };
     let avatar_col = v_flex()
         .items_center()
         .flex_none()
@@ -543,31 +555,34 @@ fn post_row(
         .debug_selector(move || format!("post-row-{key}"))
         .w_full()
         .px(px(PAD_X))
-        .when(reposted_by.is_some(), |d| d.pt(px(ROW_TOP)))
+        .when(label.is_some(), |d| d.pt(px(ROW_TOP)))
         .cursor_pointer()
         .hover(|s| s.bg(theme.list_hover))
         .on_click(move |_, _, cx| {
             hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id.clone()), cx));
         })
-        .when_some(reposted_by, |d, by| {
-            d.child(
-                h_flex()
-                    .gap_2()
-                    .pl(px(AVATAR - 16.0))
-                    .pb_1()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme.muted_foreground)
-                    .child(Icon::new(IconName::Repeat2).size(px(14.)))
-                    .child(
-                        div()
-                            .id(("reposter", key))
-                            .debug_selector(|| format!("post-reposter-{key}"))
-                            .hover(|s| s.underline())
-                            .on_click(open_profile(by, &rcx.hub))
-                            .child(emoji::text(format!("{} retweeted", by.display_name))),
-                    ),
-            )
+        .when_some(label, |d, label| {
+            let line = h_flex()
+                .gap_2()
+                .pl(px(AVATAR - 16.0))
+                .pb_1()
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .text_color(theme.muted_foreground);
+            d.child(match label {
+                Label::Repost(by) => line.child(Icon::new(IconName::Repeat2).size(px(14.))).child(
+                    div()
+                        .id(("reposter", key))
+                        .debug_selector(|| format!("post-reposter-{key}"))
+                        .hover(|s| s.underline())
+                        .on_click(open_profile(by, &rcx.hub))
+                        .child(emoji::text(format!("{} retweeted", by.display_name))),
+                ),
+                Label::Pinned => line
+                    .debug_selector(|| format!("post-pinned-{key}"))
+                    .child(Icon::new(IconName::Pin).size(px(14.)))
+                    .child("Pinned"),
+            })
         })
         .child(h_flex().items_stretch().gap(px(GAP)).child(avatar_col).child(content))
         .context_menu(move |menu, _, _| {
@@ -1533,6 +1548,23 @@ mod tests {
         let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
         assert!(time.size.width > px(10.), "the time keeps its width: {time:?}");
         assert!(time.right() <= px(310.), "the time is inside the row: {time:?}");
+    }
+
+    #[gpui_kit::test]
+    fn a_pinned_tweet_says_so_above_its_row(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (post, backend) = mock_post();
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let item = FeedItem::Pinned(post.clone());
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item, hub: hub.clone() });
+        cx.run_until_parked();
+        let label = cx.debug_bounds("post-pinned-0").expect("the label is rendered");
+        let name = cx.debug_bounds("post-name-0").expect("the tweet is rendered");
+        assert!(label.bottom() <= name.top(), "above the tweet: {label:?} {name:?}");
+
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("post-pinned-0").is_none(), "only pins are labelled");
     }
 
     #[gpui_kit::test]

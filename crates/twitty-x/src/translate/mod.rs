@@ -96,6 +96,13 @@ pub fn feed_page(root: &Value) -> Translated {
                 page.older = Some(PageToken::new(value));
             }
             Entry::Item { id, content } => page.items.extend(item(id, content, &mut ctx)),
+            // A pinned tombstone stays a tombstone.
+            Entry::Pinned { id, content } => {
+                page.items.extend(item(id, content, &mut ctx).map(|row| match row {
+                    FeedItem::Post(post) => FeedItem::Pinned(post),
+                    other => other,
+                }))
+            }
             Entry::Module { id, display_type, items } => {
                 page.items.extend(module(id, display_type, items, &mut ctx));
             }
@@ -247,6 +254,26 @@ fn module(entry: &str, display_type: &str, items: &[Value], ctx: &mut Ctx) -> Ve
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_pinned_tweet_is_marked_and_a_pinned_tombstone_stays_one() {
+        let pin = |result| {
+            json!({"type": "TimelinePinEntry", "entry": {"entryId": "tweet-1", "content": {
+                "entryType": "TimelineTimelineItem",
+                "itemContent": {"__typename": "TimelineTweet", "tweet_results": {"result": result}}
+            }}})
+        };
+        let page = |result| {
+            feed_page(&json!({"data": {"instructions": [pin(result)]}})).page.items.remove(0)
+        };
+        let gone = page(json!({"__typename": "TweetUnavailable", "reason": "Protected"}));
+        assert!(matches!(gone, FeedItem::Unavailable { .. }), "{gone:?}");
+
+        let fixture = include_str!("../../tests/fixtures/usertweets-nasa.json");
+        let items = feed_page(&serde_json::from_str(fixture).unwrap()).page.items;
+        assert!(matches!(items[0], FeedItem::Pinned(_)), "{:?}", items[0]);
+        assert!(!items[1..].iter().any(|i| matches!(i, FeedItem::Pinned(_))));
+    }
 
     #[test]
     fn follow_status_reads_requests_and_ignores_a_stale_following() {

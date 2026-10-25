@@ -47,6 +47,8 @@ gpui_kit::assets::icon_assets!(
         Trash,
         // The profile's location and website.
         MapPin,
+        // A pinned tweet's label.
+        Pin,
         Link,
         // Deck icons (`ui::deck_settings::icon`).
         LayoutGrid,
@@ -157,6 +159,7 @@ mod tests {
             IconName::Pencil,
             IconName::Trash,
             IconName::MapPin,
+            IconName::Pin,
             IconName::Link,
             // The title bar's window buttons.
             IconName::WindowMinimize,

@@ -2,7 +2,7 @@
 //!
 //! Every feed is a fixed list of generated tweets, served newest first in
 //! pages of [`MockBackend::PAGE_SIZE`]. Tests can push new tweets to the top,
-//! inject failures, and observe actions.
+//! pin a tweet, inject failures, and observe actions.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -34,6 +34,9 @@ struct State {
     authors: Vec<Arc<Profile>>,
     /// Feed contents, newest first.
     feeds: HashMap<FeedSource, Vec<FeedItem>>,
+    /// Pinned tweets, served above the first page of their feed only (as
+    /// Twitter does), so new tweets never push them down.
+    pins: HashMap<FeedSource, Post>,
     next_id: u64,
     failures: VecDeque<BackendError>,
     actions: Vec<PostAction>,
@@ -62,6 +65,7 @@ impl MockBackend {
             state: Arc::new(Mutex::new(State {
                 authors: sample_authors(),
                 feeds: HashMap::new(),
+                pins: HashMap::new(),
                 next_id: 1,
                 failures: VecDeque::new(),
                 actions: Vec::new(),
@@ -96,6 +100,22 @@ impl MockBackend {
             feed.splice(0..0, fresh);
         }
         ids
+    }
+
+    /// Pins a new, month-old tweet to the top of `source`, returning its id.
+    /// On a known author's feed, the tweet is theirs.
+    pub fn pin_new(&self, source: &FeedSource) -> PostId {
+        let mut st = self.lock();
+        let at = st.base - Duration::days(30);
+        let mut post = st.make_post(at);
+        if let FeedSource::User { id, .. } = source
+            && let Some(user) = st.authors.iter().find(|a| &a.id == id)
+        {
+            post.author = Arc::clone(user);
+        }
+        let id = post.id.clone();
+        st.pins.insert(source.clone(), post);
+        id
     }
 
     /// Replaces the lists the viewer owns or follows.
@@ -144,7 +164,7 @@ impl MockBackend {
                 0..end
             }
         };
-        let items: Vec<FeedItem> =
+        let mut items: Vec<FeedItem> =
             feed[range.clone()].iter().cloned().map(|i| apply_viewer(i, &viewer)).collect();
 
         // Newer cursor points at the newest item we know of; older at the last served.
@@ -158,12 +178,17 @@ impl MockBackend {
             _ if range.end < feed.len() => items.last().map(|l| encode(&l.key())),
             _ => None,
         };
+        // Added after the cursors, which point at timeline rows.
+        if let (PageRequest::First, Some(pin)) = (&page, st.pins.get(source)) {
+            items.insert(0, apply_viewer(FeedItem::Pinned(pin.clone()), &viewer));
+        }
         Ok(FeedPage { items, newer, older })
     }
 
     fn find_post(&self, id: &PostId) -> Option<Post> {
         let st = self.lock();
-        st.feeds.values().flatten().flat_map(|item| item.posts()).find(|p| &p.id == id).cloned()
+        let mut posts = st.feeds.values().flatten().flat_map(|item| item.posts());
+        posts.find(|p| &p.id == id).or_else(|| st.pins.values().find(|p| &p.id == id)).cloned()
     }
 }
 
@@ -184,6 +209,7 @@ fn apply_viewer(item: FeedItem, viewer: &HashMap<PostId, ViewerPostState>) -> Fe
     };
     match item {
         FeedItem::Post(p) => FeedItem::Post(fix(p)),
+        FeedItem::Pinned(p) => FeedItem::Pinned(fix(p)),
         FeedItem::Repost { by, post } => FeedItem::Repost { by, post: fix(post) },
         FeedItem::Thread(ps) => FeedItem::Thread(ps.into_iter().map(fix).collect()),
         other => other,
@@ -782,6 +808,22 @@ mod tests {
         // Asking again with the new cursor yields nothing.
         let again = block_on(b.feed(&home(), PageRequest::Newer(newer.newer.unwrap()))).unwrap();
         assert!(again.items.is_empty());
+    }
+
+    #[test]
+    fn pins_lead_the_first_page_only() {
+        let b = MockBackend::new();
+        let pin = b.pin_new(&home());
+        let first = block_on(b.feed(&home(), PageRequest::First)).unwrap();
+        assert!(matches!(&first.items[0], FeedItem::Pinned(p) if p.id == pin));
+        assert_eq!(first.items.len(), MockBackend::PAGE_SIZE + 1);
+        b.push_new(&home(), 2);
+        let newer =
+            block_on(b.feed(&home(), PageRequest::Newer(first.newer.clone().unwrap()))).unwrap();
+        assert_eq!(newer.items.len(), 2, "the pin isn't new");
+        let older = block_on(b.feed(&home(), PageRequest::Older(first.older.unwrap()))).unwrap();
+        assert!(!older.items.iter().any(|i| matches!(i, FeedItem::Pinned(_))));
+        assert_eq!(block_on(b.thread(&pin)).unwrap().focus.id, pin, "the pin opens its thread");
     }
 
     #[test]
