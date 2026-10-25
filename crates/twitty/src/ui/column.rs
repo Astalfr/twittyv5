@@ -124,7 +124,10 @@ impl ColumnView {
         let mut this = Self {
             id: config.id,
             settings: config.settings.clone(),
-            model: ColumnModel::new(config.source.clone()),
+            model: ColumnModel::with_filters(
+                config.source.clone(),
+                config.settings.filters.clone(),
+            ),
             header_hovered: false,
             list,
             backend,
@@ -174,14 +177,29 @@ impl ColumnView {
         cx.notify();
     }
 
-    /// Applies edited settings (name, width, alerts).
+    /// Applies edited settings (name, width, alerts, filters).
     pub fn set_settings(&mut self, settings: ColumnSettings, cx: &mut Context<Self>) {
         if settings.width != self.settings.width {
             // Row heights depend on the width (wrapping, media size).
             self.list.remeasure();
         }
+        if let ListChange::Reset { count } = self.model.set_filters(settings.filters.clone()) {
+            self.arrivals.clear();
+            // +1 for the footer row.
+            self.list.reset(count + 1);
+            self.at_top = true;
+            self.fill(cx);
+        }
         self.settings = settings;
         cx.notify();
+    }
+
+    /// Loads older rows when the filters hid all the last ones, since no
+    /// scroll may come to ask for them.
+    fn fill(&mut self, cx: &mut Context<Self>) {
+        if self.model.wants_more() || (self.model.all_hidden() && self.model.has_older()) {
+            self.load(LoadKind::Older, cx);
+        }
     }
 
     pub fn header_hovered(&self) -> bool {
@@ -230,6 +248,13 @@ impl ColumnView {
                     self.model.mark_seen();
                 }
             }
+        }
+        if kind != LoadKind::Newer && self.model.wants_more() {
+            // Deferred: `load` replaces `load_task`, which is running this.
+            let weak = cx.entity().downgrade();
+            cx.defer(move |cx| {
+                weak.update(cx, |this, cx| this.load(LoadKind::Older, cx)).ok();
+            });
         }
         cx.notify();
     }
@@ -381,6 +406,27 @@ impl ColumnView {
                     )
                     .into_any_element()
             }
+            // The column stopped loading by itself (`ColumnModel::wants_more`).
+            _ if self.model.all_hidden() => v_flex()
+                .debug_selector(|| "column-all-hidden".into())
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .text_sm()
+                        .child("No tweets match this column's filters"),
+                )
+                .when(self.model.has_older(), |d| {
+                    d.child(
+                        Button::new("load-older")
+                            .debug_selector(|| "load-older".into())
+                            .text_button(Size::Small)
+                            .label("Load older tweets")
+                            .on_click(cx.listener(|this, _, _, cx| this.load(LoadKind::Older, cx))),
+                    )
+                })
+                .into_any_element(),
             _ if self.model.loaded_once() && !self.model.has_older() => div()
                 .text_color(theme.muted_foreground)
                 .text_sm()
@@ -842,6 +888,67 @@ mod tests {
         );
     }
 
+    fn set_filters(
+        column: &Entity<ColumnView>,
+        filters: crate::state::filters::ColumnFilters,
+        cx: &mut TestAppContext,
+    ) {
+        column.update(cx, |c, cx| {
+            let settings = ColumnSettings { filters, ..c.settings().clone() };
+            c.set_settings(settings, cx)
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn filters_apply_to_the_loaded_rows_live(cx: &mut TestAppContext) {
+        use crate::state::filters::{ColumnFilters, TweetKind};
+        let (_, column) = setup(cx);
+        cx.run_until_parked();
+        set_filters(&column, ColumnFilters::hiding(&[TweetKind::Retweets]), cx);
+        column.read_with(cx, |c, _| {
+            let shown = c.model().items().len();
+            assert!(shown < MockBackend::PAGE_SIZE, "the retweet is hidden");
+            assert!(
+                !c.model()
+                    .items()
+                    .iter()
+                    .any(|i| matches!(i, twitty_model::FeedItem::Repost { .. }))
+            );
+            assert_eq!(c.list.item_count(), shown + 1, "rows + footer");
+        });
+        set_filters(&column, ColumnFilters::default(), cx);
+        column.read_with(cx, |c, _| {
+            assert_eq!(c.list.item_count(), MockBackend::PAGE_SIZE + 1, "every row is back");
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_column_whose_rows_are_all_hidden_loads_older_ones_itself(cx: &mut TestAppContext) {
+        use crate::state::filters::{ColumnFilters, TweetKind};
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&backend)));
+        // A media tab: every tweet has pictures or a video.
+        let source = FeedSource::User {
+            id: twitty_model::UserId::new("1000"),
+            handle: "ferris".into(),
+            tab: twitty_model::UserTab::Media,
+        };
+        let mut config = ColumnConfig::new(ColumnId(1), source);
+        config.settings.filters = ColumnFilters::hiding(&[TweetKind::Images, TweetKind::Videos]);
+        let column = cx.new(|cx| ColumnView::new(&config, backend, hub, false, cx));
+        cx.run_until_parked();
+        column.read_with(cx, |c, _| {
+            assert!(c.model().all_hidden());
+            assert!(!c.model().has_older(), "loaded page after page, without a scroll");
+            assert_eq!(c.list.item_count(), 1, "only the footer");
+        });
+    }
+
     fn set_alerts(
         column: &Entity<ColumnView>,
         alerts: crate::state::deck::ColumnAlerts,
@@ -1020,6 +1127,133 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(column.read_with(cx, |c, _| c.model().unseen()), 0, "the pill scrolled up");
         assert_eq!(navigations.get(), 0, "no thread opened under the pill");
+    }
+
+    #[gpui_kit::test]
+    fn a_column_that_gave_up_says_why_and_offers_more(cx: &mut TestAppContext) {
+        use crate::state::{
+            column::MAX_HIDDEN_PAGES,
+            filters::{ColumnFilters, TweetKind},
+        };
+        use twitty_model::{FeedItem, FeedPage, ImageRef, Media, PageToken, PostId};
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let shared: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let source = FeedSource::Home { mode: HomeMode::Following };
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            ColumnView::new(&ColumnConfig::new(ColumnId(1), source.clone()), shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+        column.update(cx, |c, cx| {
+            let post = c.model().items()[0].posts()[0].clone();
+            let filters = ColumnFilters::hiding(&[TweetKind::Images]);
+            c.model = ColumnModel::with_filters(source.clone(), filters);
+            // Pages of pictures only, each with more below.
+            for n in 0..=MAX_HIDDEN_PAGES {
+                let kind = if n == 0 { LoadKind::Refresh } else { LoadKind::Older };
+                let mut picture = post.clone();
+                picture.id = PostId::new(format!("hidden-{n}"));
+                let image = ImageRef { url: post.url.clone(), size: None, crops: vec![] };
+                picture.media = vec![Media::Image { image, alt: None }];
+                c.model.begin(kind, chrono::Utc::now());
+                let page = FeedPage {
+                    items: vec![FeedItem::Post(picture)],
+                    newer: None,
+                    older: Some(PageToken::new("older")),
+                };
+                c.model.finish(kind, Ok(page));
+            }
+            c.list.reset(1);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        column.read_with(cx, |c, _| {
+            assert!(c.model().all_hidden() && c.model().has_older());
+            assert!(!c.model().wants_more(), "gave up");
+        });
+        assert!(cx.debug_bounds("column-all-hidden").is_some(), "the footer says why");
+        assert!(cx.debug_bounds("load-older").is_some(), "and offers to go on");
+    }
+
+    /// Shows the live Following capture `home--latest-retweets` (Twitter's JSON,
+    /// translated by `twitty-x`) in a column drawn in a window.
+    fn live_following_column(
+        cx: &mut TestAppContext,
+    ) -> (Entity<ColumnView>, &mut gpui_kit::VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../twitty-x/tests/fixtures/home--latest-retweets.json"
+        );
+        let raw = std::fs::read_to_string(path).unwrap();
+        let page = twitty_x::translate::feed_page(&serde_json::from_str(&raw).unwrap()).page;
+        let shared: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let source = FeedSource::Home { mode: HomeMode::Following };
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            ColumnView::new(&ColumnConfig::new(ColumnId(1), source.clone()), shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+        column.update(cx, |c, cx| {
+            c.model = ColumnModel::new(source);
+            c.model.begin(LoadKind::Refresh, chrono::Utc::now());
+            if let ListChange::Reset { count } = c.model.finish(LoadKind::Refresh, Ok(page)) {
+                c.list.reset(count + 1);
+            }
+            cx.notify();
+        });
+        cx.run_until_parked();
+        (column, cx)
+    }
+
+    /// The rows whose "<name> retweeted" line is drawn, scrolling to each row.
+    fn rows_drawn_as_retweets(
+        column: &Entity<ColumnView>,
+        cx: &mut gpui_kit::VisualTestContext,
+    ) -> Vec<usize> {
+        let rows = column.read_with(cx, |c, _| c.model().items().len());
+        (0..rows)
+            .filter(|&ix| {
+                column.update(cx, |c, cx| {
+                    c.list.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });
+                    cx.notify();
+                });
+                cx.run_until_parked();
+                // A row's elements are keyed `row * 16 + tweet`. `debug_bounds`
+                // wants a `&'static str`; leaking a few test strings is fine.
+                cx.debug_bounds(Box::leak(format!("post-reposter-{}", ix * 16).into_boxed_str()))
+                    .is_some()
+            })
+            .collect()
+    }
+
+    #[gpui_kit::test]
+    fn live_retweets_show_in_a_column_until_filtered_out(cx: &mut TestAppContext) {
+        use crate::state::filters::{ColumnFilters, TweetKind};
+        use twitty_model::FeedItem;
+        let (column, cx) = live_following_column(cx);
+        let retweets: Vec<usize> = column.read_with(cx, |c, _| {
+            let items = c.model().items();
+            (0..items.len()).filter(|&ix| matches!(items[ix], FeedItem::Repost { .. })).collect()
+        });
+        assert_eq!(retweets.len(), 10, "the capture's retweets all reach the column");
+        assert_eq!(rows_drawn_as_retweets(&column, cx), retweets, "each one is drawn as a retweet");
+
+        column.update(cx, |c, cx| {
+            let filters = ColumnFilters::hiding(&[TweetKind::Retweets]);
+            let settings = ColumnSettings { filters, ..c.settings().clone() };
+            c.set_settings(settings, cx);
+        });
+        cx.run_until_parked();
+        let rows = column.read_with(cx, |c, _| c.model().items().len());
+        assert_eq!(rows, 46, "56 rows minus the 10 retweets");
+        assert!(rows_drawn_as_retweets(&column, cx).is_empty(), "no retweet is drawn");
     }
 
     /// Scrolls a Home (Following) column down, clicks the header element

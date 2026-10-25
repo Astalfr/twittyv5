@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "decks": [
+    {
+      "name": "Main",
+      "columns": [
+        {
+          "id": 1,
+          "source": { "type": "home", "mode": "following" },
+          "width": 350,
+          "filters": { "advanced": true, "hidden": ["replies", "retweets"] }
+        },
+        {
+          "id": 2,
+          "source": { "type": "search", "query": "rust", "sort": "latest" },
+          "filters": { "hidden": ["text_only", "a_kind_from_a_newer_app"] }
+        },
+        { "id": 3, "source": { "type": "bookmarks" }, "filters": {} }
+      ]
+    }
+  ],
+  "active": 0,
+  "next_column_id": 4
+}

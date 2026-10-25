@@ -33,11 +33,12 @@ depends on nothing else of ours.
 
 | Module | Contents |
 |---|---|
-| `state::column` | `ColumnModel`: paging, cursors, de-duplication, unseen count, `ListChange` instructions for the view |
+| `state::column` | `ColumnModel`: paging, cursors, de-duplication, unseen count, `ListChange` instructions for the view. It keeps every loaded row and shows those the column's filters let through; all its indexes count shown rows |
+| `state::filters` | `ColumnFilters`: which kinds of tweets a column shows (`TweetKind`: text only, images, videos, replies, quotes, retweets) and how a row is classified |
 | `state::interactions` | Optimistic like/repost/bookmark overrides with rollback |
 | `state::repost` | What the retweet dialog offers (retweet or undo) from the viewer's effective state |
 | `state::follow` | The profile sheet's Follow button: optimistic follow/unfollow, rollback with the reason, protected accounts' requests, late profile refreshes ignored after a click |
-| `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move, `ColumnSettings` (name, width, alerts) |
+| `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move, `ColumnSettings` (name, width, alerts, filters) |
 | `state::alerts` | Which loads announce new rows, and the notification: who it's from (title and picture) and its lines |
 | `state::media_layout` | Geometry of the 1–4 media grid, and which part of an image a tile shows (`crop_for`) |
 | `state::profile` | Profile sheet: Tweets / Media tabs and their sources, media gallery tiles, list row mapping and splices |

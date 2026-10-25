@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::dirs::AppDirs;
+use crate::{dirs::AppDirs, state::filters::ColumnFilters};
 use serde::{Deserialize, Serialize};
 use twitty_model::{FeedSource, HomeMode, NotificationFilter, SearchSort};
 
@@ -16,7 +16,8 @@ use twitty_model::{FeedSource, HomeMode, NotificationFilter, SearchSort};
 ///
 /// - v1: widths were presets (`"narrow"`, `"medium"`, `"wide"`).
 /// - v2: widths are pixels; columns gained a name and alert settings.
-///   Decks later gained an optional icon (added without a version bump).
+///   Decks later gained an optional icon, and columns optional tweet filters
+///   (both added without a version bump: missing means the default).
 pub const SCHEMA_VERSION: u32 = 2;
 
 /// Stable identifier of a column within a deck file.
@@ -142,6 +143,9 @@ pub struct ColumnSettings {
     pub width: ColumnWidth,
     #[serde(default)]
     pub alerts: ColumnAlerts,
+    /// Which tweets the column shows.
+    #[serde(default, skip_serializing_if = "ColumnFilters::is_default")]
+    pub filters: ColumnFilters,
 }
 
 impl ColumnSettings {
@@ -527,6 +531,7 @@ pub fn default_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::filters::TweetKind;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -587,6 +592,7 @@ mod tests {
         assert_eq!(cols[2].settings.width, ColumnWidth::default());
         assert!(cols.iter().all(|c| c.settings.name.is_none()));
         assert!(cols.iter().all(|c| c.settings.alerts == ColumnAlerts::default()));
+        assert!(cols.iter().all(|c| c.settings.filters.is_default()), "v1 columns show all");
         assert_eq!(file.active().icon, DeckIcon::default(), "v1 decks get the default icon");
     }
 
@@ -614,6 +620,7 @@ mod tests {
         assert_eq!(cols[2].settings, ColumnSettings::default(), "every field is optional");
         assert_eq!(cols[2].settings.title(&cols[2].source), "Notifications");
         assert_eq!(file.active().icon, DeckIcon::default(), "v2 decks get the default icon");
+        assert!(cols.iter().all(|c| c.settings.filters.is_default()), "v2 columns show all");
 
         // Saving writes the same shape back.
         let saved: serde_json::Value = serde_json::from_str(&file.to_json().unwrap()).unwrap();
@@ -637,6 +644,30 @@ mod tests {
         for ix in 0..3 {
             assert_eq!(saved["decks"][ix]["icon"], golden["decks"][ix]["icon"], "deck {ix}");
         }
+    }
+
+    #[test]
+    fn golden_v2_with_filters_loads() {
+        let json = include_str!("../../tests/golden/decks_v2_filters.json");
+        let file = DeckFile::from_json(json).unwrap();
+        let cols = &file.active().columns;
+        assert_eq!(
+            cols[0].settings.filters,
+            ColumnFilters::hiding(&[TweetKind::Replies, TweetKind::Retweets])
+        );
+        let kept = &cols[1].settings.filters;
+        assert!(!kept.advanced && !kept.is_active(), "off: every tweet shows");
+        let hidden: Vec<_> = TweetKind::ALL.into_iter().filter(|k| !kept.shows_kind(*k)).collect();
+        assert_eq!(hidden, [TweetKind::TextOnly], "kept for later; unknown kinds dropped");
+        assert!(cols[2].settings.filters.is_default());
+
+        // Saving writes the same shape back, and nothing for default filters.
+        let saved: serde_json::Value = serde_json::from_str(&file.to_json().unwrap()).unwrap();
+        let golden: serde_json::Value = serde_json::from_str(json).unwrap();
+        let columns = &saved["decks"][0]["columns"];
+        assert_eq!(columns[0]["filters"], golden["decks"][0]["columns"][0]["filters"]);
+        assert_eq!(columns[1]["filters"], serde_json::json!({"hidden": ["text_only"]}));
+        assert!(columns[2].get("filters").is_none());
     }
 
     #[test]
