@@ -67,18 +67,16 @@ fn avatar_size(url: &str) -> String {
     url.replacen("_normal.", "_bigger.", 1)
 }
 
+/// The bio, with its links from Twitter and its mentions, hashtags and
+/// cashtags found here: Twitter only marks up the links.
 fn bio(user: &Value) -> RichText {
-    if let Some(desc) = str_at(user, &["profile_bio", "description"]) {
-        let ents = at(user, &["profile_bio", "entities", "description"]).map(text::entities);
-        return text::rich_text(desc, ents.unwrap_or_default(), None);
-    }
-    match str_at(user, &["legacy", "description"]) {
-        Some(desc) => {
-            let ents = at(user, &["legacy", "entities", "description"]).map(text::entities);
-            text::rich_text(desc, ents.unwrap_or_default(), None)
-        }
-        None => RichText::default(),
-    }
+    let read = |base: &str| {
+        let desc = str_at(user, &[base, "description"])?;
+        let ents = at(user, &[base, "entities", "description"]).map(text::entities);
+        let ents = text::with_typed_entities(desc, ents.unwrap_or_default());
+        Some(text::rich_text(desc, ents, None))
+    };
+    read("profile_bio").or_else(|| read("legacy")).unwrap_or_default()
 }
 
 fn website(user: &Value) -> Option<Url> {
@@ -112,6 +110,7 @@ fn verified(user: &Value) -> Option<VerifiedKind> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use twitty_model::SpanKind;
 
     fn new_layout() -> Value {
         json!({
@@ -146,6 +145,7 @@ mod tests {
             "https://pbs.twimg.com/profile_images/1/abc_bigger.jpg"
         );
         assert_eq!(p.bio.text(), "Explore nasa.gov");
+        assert_eq!(p.bio.spans().len(), 1, "the link");
         assert_eq!(p.location.as_deref(), Some("Pale Blue Dot"));
         assert_eq!(p.website.unwrap().as_str(), "https://www.nasa.gov/");
         assert_eq!(p.badges.verified, Some(VerifiedKind::Government));
@@ -170,6 +170,37 @@ mod tests {
         assert!(p.badges.protected);
         assert_eq!(p.location, None, "empty location is none");
         assert_eq!(p.bio.text(), "bio");
+    }
+
+    /// Twitter only marks up a bio's links; the rest is found in the text.
+    #[test]
+    fn bio_mentions_hashtags_and_cashtags_are_found() {
+        let u = json!({"rest_id": "1", "core": {"screen_name": "a", "name": "A"},
+            "profile_bio": {"description": "Team @rustlang #RustLang $TSLA https://t.co/x mail me@ex.io",
+                "entities": {"description": {"urls": [{"url": "https://t.co/x", "expanded_url": "https://rust-lang.org",
+                    "display_url": "rust-lang.org", "indices": [31, 45]}]}}}});
+        let bio = profile(&u).unwrap().bio;
+        let spans: Vec<_> =
+            bio.spans().iter().map(|s| (&bio.text()[s.range.clone()], &s.kind)).collect();
+        assert_eq!(spans.len(), 4, "{spans:?}");
+        assert!(
+            matches!(spans[0], ("@rustlang", SpanKind::Mention(u)) if u.handle == "rustlang" && u.id.is_none())
+        );
+        assert!(
+            matches!(spans[1], ("#RustLang", SpanKind::Hashtag { tag }) if tag.as_str() == "RustLang")
+        );
+        assert!(
+            matches!(spans[2], ("$TSLA", SpanKind::Cashtag { symbol }) if symbol.as_str() == "TSLA")
+        );
+        assert!(matches!(spans[3], ("rust-lang.org", SpanKind::Link { .. })));
+    }
+
+    #[test]
+    fn legacy_bio_finds_mentions_too() {
+        let u = json!({"rest_id": "1",
+            "legacy": {"screen_name": "old", "name": "Old", "description": "by @ferris"}});
+        let bio = profile(&u).unwrap().bio;
+        assert_eq!(&bio.text()[bio.spans()[0].range.clone()], "@ferris");
     }
 
     #[test]

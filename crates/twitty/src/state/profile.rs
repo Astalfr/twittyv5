@@ -115,10 +115,32 @@ pub fn splice(tab: ProfileTab, kept: usize, old: usize, new: usize) -> (Range<us
     (first..row_count(tab, old), row_count(tab, new) - first)
 }
 
+/// The profile's website as Twitter shows it: without the scheme, `www.`
+/// and a trailing `/`.
+pub fn website_label(p: &Profile) -> Option<String> {
+    let url = p.website.as_ref()?;
+    let rest = url.as_str().split_once("://").map_or(url.as_str(), |(_, rest)| rest);
+    let rest = rest.strip_prefix("www.").unwrap_or(rest);
+    Some(rest.strip_suffix('/').unwrap_or(rest).to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use twitty_model::{FeedPage, PageRequest, UserId, mock::MockBackend};
+
+    #[test]
+    fn website_labels_drop_the_scheme_www_and_trailing_slash() {
+        let label = |url: &str| {
+            let mut p = Profile::new(UserId::new("1"), "a", "A");
+            p.website = Some(url.parse().unwrap());
+            website_label(&p).unwrap()
+        };
+        assert_eq!(label("https://www.nasa.gov/"), "nasa.gov");
+        assert_eq!(label("http://rust-lang.org/learn"), "rust-lang.org/learn");
+        assert_eq!(label("https://a.io/b/"), "a.io/b");
+        assert_eq!(website_label(&Profile::new(UserId::new("1"), "a", "A")), None);
+    }
 
     fn mock_items(source: &FeedSource) -> Vec<FeedItem> {
         use twitty_model::Backend;
