@@ -1178,6 +1178,84 @@ mod tests {
         assert!(cx.debug_bounds("load-older").is_some(), "and offers to go on");
     }
 
+    /// Shows the live Following capture `home--latest-retweets` (Twitter's JSON,
+    /// translated by `twitty-x`) in a column drawn in a window.
+    fn live_following_column(
+        cx: &mut TestAppContext,
+    ) -> (Entity<ColumnView>, &mut gpui_kit::VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../twitty-x/tests/fixtures/home--latest-retweets.json"
+        );
+        let raw = std::fs::read_to_string(path).unwrap();
+        let page = twitty_x::translate::feed_page(&serde_json::from_str(&raw).unwrap()).page;
+        let shared: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let source = FeedSource::Home { mode: HomeMode::Following };
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            ColumnView::new(&ColumnConfig::new(ColumnId(1), source.clone()), shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+        column.update(cx, |c, cx| {
+            c.model = ColumnModel::new(source);
+            c.model.begin(LoadKind::Refresh, chrono::Utc::now());
+            if let ListChange::Reset { count } = c.model.finish(LoadKind::Refresh, Ok(page)) {
+                c.list.reset(count + 1);
+            }
+            cx.notify();
+        });
+        cx.run_until_parked();
+        (column, cx)
+    }
+
+    /// The rows whose "<name> retweeted" line is drawn, scrolling to each row.
+    fn rows_drawn_as_retweets(
+        column: &Entity<ColumnView>,
+        cx: &mut gpui_kit::VisualTestContext,
+    ) -> Vec<usize> {
+        let rows = column.read_with(cx, |c, _| c.model().items().len());
+        (0..rows)
+            .filter(|&ix| {
+                column.update(cx, |c, cx| {
+                    c.list.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });
+                    cx.notify();
+                });
+                cx.run_until_parked();
+                // A row's elements are keyed `row * 16 + tweet`. `debug_bounds`
+                // wants a `&'static str`; leaking a few test strings is fine.
+                cx.debug_bounds(Box::leak(format!("post-reposter-{}", ix * 16).into_boxed_str()))
+                    .is_some()
+            })
+            .collect()
+    }
+
+    #[gpui_kit::test]
+    fn live_retweets_show_in_a_column_until_filtered_out(cx: &mut TestAppContext) {
+        use crate::state::filters::{ColumnFilters, TweetKind};
+        use twitty_model::FeedItem;
+        let (column, cx) = live_following_column(cx);
+        let retweets: Vec<usize> = column.read_with(cx, |c, _| {
+            let items = c.model().items();
+            (0..items.len()).filter(|&ix| matches!(items[ix], FeedItem::Repost { .. })).collect()
+        });
+        assert_eq!(retweets.len(), 10, "the capture's retweets all reach the column");
+        assert_eq!(rows_drawn_as_retweets(&column, cx), retweets, "each one is drawn as a retweet");
+
+        column.update(cx, |c, cx| {
+            let filters = ColumnFilters::hiding(&[TweetKind::Retweets]);
+            let settings = ColumnSettings { filters, ..c.settings().clone() };
+            c.set_settings(settings, cx);
+        });
+        cx.run_until_parked();
+        let rows = column.read_with(cx, |c, _| c.model().items().len());
+        assert_eq!(rows, 46, "56 rows minus the 10 retweets");
+        assert!(rows_drawn_as_retweets(&column, cx).is_empty(), "no retweet is drawn");
+    }
+
     /// Scrolls a Home (Following) column down, clicks the header element
     /// `selector`, and checks the column is back at the top on the same feed.
     fn click_scrolls_back_to_the_top(cx: &mut TestAppContext, selector: &'static str) {
