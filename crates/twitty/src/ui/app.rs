@@ -803,8 +803,8 @@ impl TwittyApp {
             self.leave(LeavingOverlay::Media(post, index), cx);
         } else if self.has_dialog() {
             self.close_overlays(cx);
-        } else if let Some(top) = self.sheets.pop() {
-            self.leave_sheets(vec![top], cx);
+        } else if !self.sheets.is_empty() {
+            self.close_top_sheet(cx);
         } else {
             self.reset_keyboard(cx);
         }
@@ -831,11 +831,12 @@ impl TwittyApp {
         cx.notify();
     }
 
-    /// Closes every sheet (a click beside the top one, on a lower sheet's
-    /// edge or the backdrop).
-    fn close_all_sheets(&mut self, cx: &mut Context<Self>) {
-        let all = self.sheets.clear();
-        self.leave_sheets(all, cx);
+    /// Closes the top sheet (Esc, or a click beside it: on a lower sheet's
+    /// edge or the backdrop), showing the one under it.
+    fn close_top_sheet(&mut self, cx: &mut Context<Self>) {
+        if let Some(top) = self.sheets.pop() {
+            self.leave_sheets(vec![top], cx);
+        }
     }
 
     /// Keeps `closed` (sheets that just came off the top of the stack, the
@@ -2612,7 +2613,7 @@ impl Render for TwittyApp {
                             .bg(backdrop)
                             .on_any_mouse_down(cx.listener(|this, _, _, cx| {
                                 cx.stop_propagation();
-                                this.close_all_sheets(cx);
+                                this.close_top_sheet(cx);
                             }));
                         if sheet_fresh {
                             d.child(
@@ -2772,7 +2773,8 @@ impl TwittyApp {
     /// from the right edge when it opens, so its hitbox is about where it
     /// ends up from the first frame; the ones under it slide to their place,
     /// a little further left at each level. A press on a lower sheet's edge
-    /// closes them all, like one on the backdrop, and nothing inside it reacts.
+    /// closes the top one, like one on the backdrop, and nothing inside it
+    /// reacts.
     fn render_sheets(
         &self,
         enter: impl Fn() -> Animation,
@@ -2804,7 +2806,7 @@ impl TwittyApp {
                                 .bg(shade)
                                 .on_any_mouse_down(cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
-                                    this.close_all_sheets(cx);
+                                    this.close_top_sheet(cx);
                                 })),
                         )
                     });
@@ -3664,7 +3666,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn lower_sheets_show_their_edge_and_a_press_there_closes_them_all(cx: &mut TestAppContext) {
+    fn lower_sheets_show_their_edge_and_a_press_there_closes_the_top(cx: &mut TestAppContext) {
         use crate::state::sheets::{MAX_PEEKS, PEEK};
         let (app, cx) = keyboard_app(cx);
         stack_threads(&app, &["1", "2", "3", "4", "5", "6", "7", "8"], cx);
@@ -3688,12 +3690,12 @@ mod tests {
         let strip = point(two.left() + px(PEEK / 2.), px(300.));
         cx.simulate_click(strip, Modifiers::default());
         cx.run_until_parked();
-        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0, "all of them closed");
-        assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()), "nothing inside reacted");
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 7, "only the top one closed");
+        assert_eq!(panel_root(&app, cx).as_deref(), Some("7"), "nothing inside it reacted");
     }
 
     #[gpui_kit::test]
-    fn close_shuts_its_own_sheet_and_a_click_beside_shuts_them_all(cx: &mut TestAppContext) {
+    fn close_and_a_click_beside_shut_only_the_top_sheet(cx: &mut TestAppContext) {
         let (app, cx) = keyboard_app(cx);
         stack_threads(&app, &["1", "2"], cx);
         let top = app.read_with(cx, |app, _| app.thread_panel().cloned()).unwrap();
@@ -3705,11 +3707,12 @@ mod tests {
         open_panel(&app, "3", cx);
         cx.simulate_click(OUTSIDE, Modifiers::default());
         cx.run_until_parked();
-        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
+        assert_eq!(panel_root(&app, cx).as_deref(), Some("2"), "a click beside closes the top");
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 2);
     }
 
     #[gpui_kit::test]
-    fn a_click_beside_a_profile_and_its_thread_closes_both(cx: &mut TestAppContext) {
+    fn a_click_beside_a_thread_over_a_profile_goes_back_to_the_profile(cx: &mut TestAppContext) {
         let (app, cx) = keyboard_app(cx);
         let (_, panel) = open_profile(&app, cx);
         let id = panel.read_with(cx, |p, _| {
@@ -3728,7 +3731,11 @@ mod tests {
         cx.run_until_parked();
         cx.update(|window, _| window.refresh());
         cx.run_until_parked();
-        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0, "every sheet closed");
+        assert_eq!(app.read_with(cx, |app, _| app.profile_panel().cloned()), Some(panel.clone()));
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 1);
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
     }
 
     #[gpui_kit::test]
@@ -3749,10 +3756,12 @@ mod tests {
         finish_exits(cx);
         assert!(!app.read_with(cx, |app, _| app.is_leaving()));
 
-        open_panel(&app, "2", cx);
+        // A click beside it closes the top one too, and the last one with
+        // its backdrop.
         cx.simulate_click(OUTSIDE, Modifiers::default());
         cx.run_until_parked();
-        assert_eq!(leaving(&app, cx), vec![1, 0], "all of them, each from its level");
+        assert_eq!(leaving(&app, cx), vec![0]);
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
         finish_exits(cx);
         assert!(!app.read_with(cx, |app, _| app.is_leaving()));
 
