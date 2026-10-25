@@ -36,6 +36,7 @@ use crate::{
         poll,
         repost::RepostChoice,
         settings::Settings,
+        sheets::{self, SheetStack},
         toasts::{Notice, Toasts},
         update::{Release, Status as UpdateStatus, Updates, Version},
     },
@@ -67,6 +68,8 @@ use crate::{
 /// Opacity of the theme's overlay colour behind the image viewer, dialogs and
 /// the thread panel.
 const BACKDROP_ALPHA: f32 = 0.7;
+/// The shade over a sheet under the top one, so the top one stands out.
+const LOWER_SHEET_ALPHA: f32 = 0.25;
 
 /// Height of the strip under the deck reserved for its horizontal scrollbar.
 const DECK_SCROLLBAR_GUTTER: f32 = 12.0;
@@ -128,6 +131,19 @@ impl Sheet {
             Sheet::Profile(panel) => panel.clone().into(),
         }
     }
+
+    fn entity_id(&self) -> gpui_kit::EntityId {
+        match self {
+            Sheet::Thread(panel) => panel.entity_id(),
+            Sheet::Profile(panel) => panel.entity_id(),
+        }
+    }
+}
+
+/// A sheet in the stack, with the subscription to its close event.
+struct OpenSheet {
+    sheet: Sheet,
+    _sub: Subscription,
 }
 
 /// Options decided at startup.
@@ -178,8 +194,9 @@ pub struct TwittyApp {
     compose: Option<Entity<ComposeView>>,
     repost: Option<Entity<RepostView>>,
     user_search: Option<Entity<UserSearchView>>,
-    /// The side sheet: a conversation or a profile.
-    sheet: Option<Sheet>,
+    /// The side sheets (conversations, profiles), stacked: the top one is
+    /// live, the ones under it show their left edge.
+    sheets: SheetStack<OpenSheet>,
     /// The lookup of a mentioned account, before its profile opens.
     mention_lookup: Option<Task<()>>,
     account_panel: bool,
@@ -197,9 +214,10 @@ pub struct TwittyApp {
     media_player: Option<Entity<VideoPlayer>>,
     /// The overlay animating out after it closed. Inert: it gets no input.
     leaving: Option<Leaving<LeavingOverlay>>,
-    /// The sheet animating out after it closed. Inert too.
-    leaving_sheet: Option<Leaving<Sheet>>,
-    /// When the sheet opened (not switched), so its backdrop fades in once.
+    /// The sheets animating out after they closed, each with its depth in the
+    /// stack when it closed, the deepest first. Inert too.
+    leaving_sheet: Option<Leaving<Vec<(Sheet, usize)>>>,
+    /// When the first sheet opened (not stacked), so the backdrop fades in once.
     sheet_opened: Option<Instant>,
     /// Index of the column keyboard shortcuts act on.
     active_column: usize,
@@ -213,7 +231,6 @@ pub struct TwittyApp {
     _compose_sub: Option<Subscription>,
     _repost_sub: Option<Subscription>,
     _user_search_sub: Option<Subscription>,
-    _sheet_sub: Option<Subscription>,
     _hub_subs: Vec<Subscription>,
     /// The update on offer, if any.
     updates: Updates,
@@ -288,7 +305,7 @@ impl TwittyApp {
             compose: None,
             repost: None,
             user_search: None,
-            sheet: None,
+            sheets: SheetStack::default(),
             mention_lookup: None,
             account_panel: false,
             settings_panel: false,
@@ -311,7 +328,6 @@ impl TwittyApp {
             _compose_sub: None,
             _repost_sub: None,
             _user_search_sub: None,
-            _sheet_sub: None,
             _hub_subs: Vec::new(),
             updates: Updates::new(Version::current()),
             _update_checks: None,
@@ -555,8 +571,8 @@ impl TwittyApp {
             }),
         ];
         // Panels show the old account's data.
-        self.sheet = None;
-        self._sheet_sub = None;
+        self.sheets.clear();
+        self.leaving_sheet = None;
         self.mention_lookup = None;
     }
 
@@ -599,18 +615,25 @@ impl TwittyApp {
         }));
     }
 
+    /// The thread panel, when it is the top sheet.
     pub fn thread_panel(&self) -> Option<&Entity<ThreadPanel>> {
-        match &self.sheet {
+        match self.sheets.top().map(|open| &open.sheet) {
             Some(Sheet::Thread(panel)) => Some(panel),
             _ => None,
         }
     }
 
+    /// The profile sheet, when it is the top sheet.
     pub fn profile_panel(&self) -> Option<&Entity<ProfilePanel>> {
-        match &self.sheet {
+        match self.sheets.top().map(|open| &open.sheet) {
             Some(Sheet::Profile(panel)) => Some(panel),
             _ => None,
         }
+    }
+
+    /// How many sheets are stacked.
+    pub fn sheet_count(&self) -> usize {
+        self.sheets.len()
     }
 
     pub fn compose(&self) -> Option<&Entity<ComposeView>> {
@@ -780,8 +803,8 @@ impl TwittyApp {
             self.leave(LeavingOverlay::Media(post, index), cx);
         } else if self.has_dialog() {
             self.close_overlays(cx);
-        } else if self.sheet.is_some() {
-            self.close_sheet(cx);
+        } else if !self.sheets.is_empty() {
+            self.close_top_sheet(cx);
         } else {
             self.reset_keyboard(cx);
         }
@@ -796,26 +819,64 @@ impl TwittyApp {
         self.set_active_column(0, cx);
     }
 
-    fn close_sheet(&mut self, cx: &mut Context<Self>) {
-        if let Some(sheet) = self.sheet.take()
-            && !cx.reduce_motion()
-        {
-            let clear = Self::after_exit(cx, |this| this.leaving_sheet = None);
-            self.leaving_sheet = Some(Leaving { what: sheet, _clear: clear });
+    /// Closes the sheet showing `entity` (its × was clicked).
+    fn close_sheet(&mut self, entity: gpui_kit::EntityId, cx: &mut Context<Self>) {
+        let was_top = self.sheets.top().is_some_and(|open| open.sheet.entity_id() == entity);
+        if let Some(open) = self.sheets.remove(|open| open.sheet.entity_id() == entity) {
+            // Only the top sheet is on screen whole; one under it just goes.
+            if was_top {
+                self.leave_sheets(vec![open], cx);
+            }
         }
-        self._sheet_sub = None;
+        cx.notify();
+    }
+
+    /// Closes the top sheet (Esc, or a click beside it: on a lower sheet's
+    /// edge or the backdrop), showing the one under it.
+    fn close_top_sheet(&mut self, cx: &mut Context<Self>) {
+        if let Some(top) = self.sheets.pop() {
+            self.leave_sheets(vec![top], cx);
+        }
+    }
+
+    /// Keeps `closed` (sheets that just came off the top of the stack, the
+    /// deepest first) drawn while they animate out.
+    /// Sheets still sliding out from an earlier close stay, over these: they
+    /// were above them.
+    fn leave_sheets(&mut self, closed: Vec<OpenSheet>, cx: &mut Context<Self>) {
+        let count = closed.len();
+        let mut leaving: Vec<_> = closed
+            .into_iter()
+            .enumerate()
+            .map(|(ix, open)| (open.sheet, count - 1 - ix))
+            .filter(|(_, depth)| *depth <= sheets::MAX_PEEKS)
+            .collect();
+        if let Some(earlier) = self.leaving_sheet.take() {
+            leaving.extend(earlier.what);
+        }
+        self.leaving_sheet = (!leaving.is_empty() && !cx.reduce_motion()).then(|| Leaving {
+            what: leaving,
+            _clear: Self::after_exit(cx, cx.theme().motion.duration_slow, |this| {
+                this.leaving_sheet = None
+            }),
+        });
         cx.notify();
     }
 
     /// Keeps `what` drawn while it animates out.
     fn leave(&mut self, what: LeavingOverlay, cx: &mut Context<Self>) {
-        self.leaving = (!cx.reduce_motion())
-            .then(|| Leaving { what, _clear: Self::after_exit(cx, |this| this.leaving = None) });
+        self.leaving = (!cx.reduce_motion()).then(|| {
+            let wait = cx.theme().motion.duration_fast;
+            Leaving { what, _clear: Self::after_exit(cx, wait, |this| this.leaving = None) }
+        });
     }
 
-    /// Runs `clear` once an exit animation is over.
-    fn after_exit(cx: &mut Context<Self>, clear: fn(&mut Self)) -> Task<()> {
-        let wait = cx.theme().motion.duration_fast;
+    /// Runs `clear` once an exit animation of `wait` is over.
+    fn after_exit(
+        cx: &mut Context<Self>,
+        wait: std::time::Duration,
+        clear: fn(&mut Self),
+    ) -> Task<()> {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(wait).await;
             this.update(cx, |this, cx| {
@@ -1022,16 +1083,25 @@ impl TwittyApp {
             .into_any_element()
     }
 
-    /// Shows the conversation around `id` in the side panel.
+    /// Shows the conversation around `id` in a sheet over the others, unless
+    /// it is already the top one.
     pub fn open_thread(&mut self, id: twitty_model::PostId, cx: &mut Context<Self>) {
+        if let Some(panel) = self.thread_panel()
+            && *panel.read(cx).root() == id
+        {
+            return;
+        }
         let backend = Arc::clone(&self.backend);
         let hub = self.hub.clone();
         let panel = cx.new(|cx| ThreadPanel::new(id, backend, hub, cx));
-        let sub = cx.subscribe(&panel, |this, _, _: &CloseThread, cx| this.close_sheet(cx));
+        let sub = cx.subscribe(&panel, |this, panel, _: &CloseThread, cx| {
+            this.close_sheet(panel.entity_id(), cx)
+        });
         self.show_sheet(Sheet::Thread(panel), sub, cx);
     }
 
-    /// Shows `profile` in the side panel, unless it is already there.
+    /// Shows `profile` in a sheet over the others, unless it is already the
+    /// top one.
     pub fn open_profile(&mut self, profile: Arc<Profile>, cx: &mut Context<Self>) {
         if let Some(panel) = self.profile_panel()
             && panel.read(cx).profile().id == profile.id
@@ -1042,7 +1112,9 @@ impl TwittyApp {
         let hub = self.hub.clone();
         let viewer = self.viewer.as_ref().map(|v| v.id.clone());
         let panel = cx.new(|cx| ProfilePanel::new(profile, viewer, backend, hub, cx));
-        let sub = cx.subscribe(&panel, |this, _, _: &CloseProfile, cx| this.close_sheet(cx));
+        let sub = cx.subscribe(&panel, |this, panel, _: &CloseProfile, cx| {
+            this.close_sheet(panel.entity_id(), cx)
+        });
         self.show_sheet(Sheet::Profile(panel), sub, cx);
     }
 
@@ -1071,14 +1143,13 @@ impl TwittyApp {
         }));
     }
 
-    /// Puts `sheet` in the side panel, replacing what it showed.
+    /// Puts `sheet` on top of the stack.
     fn show_sheet(&mut self, sheet: Sheet, sub: Subscription, cx: &mut Context<Self>) {
-        if self.sheet.is_none() {
+        if self.sheets.is_empty() {
             self.sheet_opened = Some(Instant::now());
         }
         self.leaving_sheet = None;
-        self._sheet_sub = Some(sub);
-        self.sheet = Some(sheet);
+        self.sheets.push(OpenSheet { sheet, _sub: sub });
         cx.notify();
     }
 
@@ -1661,8 +1732,12 @@ impl TwittyApp {
             for (_, column) in &self.columns {
                 column.update(cx, |c, cx| c.remeasure(cx));
             }
-            if let Some(panel) = self.profile_panel() {
-                panel.update(cx, |p, cx| p.remeasure(cx));
+            // Every sheet, the lower ones too: they redraw only when notified.
+            for open in self.sheets.iter() {
+                match &open.sheet {
+                    Sheet::Profile(panel) => panel.update(cx, |p, cx| p.remeasure(cx)),
+                    Sheet::Thread(panel) => panel.update(cx, |_, cx| cx.notify()),
+                }
             }
         }
         if save {
@@ -2417,10 +2492,8 @@ impl Render for TwittyApp {
             None
         };
         let has_overlay = overlay.is_some();
-        let sheet_open = self.sheet.is_some();
+        let sheet_open = !self.sheets.is_empty();
         let leaving = if has_overlay { None } else { self.render_leaving(backdrop, window, cx) };
-        let leaving_sheet =
-            if sheet_open { None } else { self.leaving_sheet.as_ref().map(|l| l.what.view()) };
         // The sheet's backdrop fades in when it opens, not each time
         // an overlay over it closes.
         let sheet_fresh =
@@ -2431,14 +2504,19 @@ impl Render for TwittyApp {
             Animation::new(tokens.duration_normal)
                 .with_easing(move |t| easing.sample(t).clamp(0., 1.))
         };
-        let exit = {
+        // Sheets close slower than dialogs, slowing down as they go, so a
+        // 600px panel doesn't vanish at full speed. The sheet under one that
+        // closes glides back in step with it.
+        let sheet_close = {
             let tokens = theme.motion.clone();
             move || {
-                let easing = tokens.easing_exit.clone();
-                Animation::new(tokens.duration_fast)
+                let easing = tokens.easing_enter.clone();
+                Animation::new(tokens.duration_slow)
                     .with_easing(move |t| easing.sample(t).clamp(0., 1.))
             }
         };
+        let sheet_layers = self.render_sheets(enter.clone(), sheet_close.clone(), cx);
+        let leaving_sheets = self.render_leaving_sheets(sheet_close.clone());
         let demo = self.options.session.is_none();
         let can_sign_in = self.options.account.is_some();
         // At the top of the deck area, so the rail and the title bar still meet.
@@ -2534,72 +2612,50 @@ impl Render for TwittyApp {
                             .children(update_banner)
                             .child(div().flex_1().min_h_0().flex().child(body)),
                     )
-                    .when_some(self.sheet.as_ref().map(Sheet::view), |d, panel| {
-                        // A sheet over the deck's right side. Its backdrop takes
-                        // the whole click that closes it, so nothing under it
-                        // (a tweet, an image, a link) reacts. With an overlay
-                        // open, that overlay's backdrop darkens everything.
-                        d.when(!has_overlay, |d| {
-                            let shade = div()
-                                .id("thread-backdrop")
+                    // The sheets over the deck's right side. Their backdrop
+                    // takes the whole click that closes them, so nothing under
+                    // it (a tweet, an image, a link) reacts. With an overlay
+                    // open, that overlay's backdrop darkens everything.
+                    .when(sheet_open && !has_overlay, |d| {
+                        let shade = div()
+                            .id("thread-backdrop")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .occlude()
+                            .bg(backdrop)
+                            .on_any_mouse_down(cx.listener(|this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.close_top_sheet(cx);
+                            }));
+                        if sheet_fresh {
+                            d.child(
+                                shade.with_animation("thread-backdrop-in", enter(), |d, t| {
+                                    d.opacity(t)
+                                }),
+                            )
+                        } else {
+                            d.child(shade)
+                        }
+                    })
+                    .children(sheet_layers)
+                    // Sheets that closed, sliding out: no handlers, and a cover
+                    // so nothing inside them reacts.
+                    .when(!sheet_open && !has_overlay && !leaving_sheets.is_empty(), |d| {
+                        d.child(
+                            div()
                                 .absolute()
                                 .top_0()
                                 .left_0()
                                 .size_full()
-                                .occlude()
                                 .bg(backdrop)
-                                .on_any_mouse_down(cx.listener(|this, _, _, cx| {
-                                    cx.stop_propagation();
-                                    this.close_sheet(cx);
-                                }));
-                            if sheet_fresh {
-                                d.child(shade.with_animation(
-                                    "thread-backdrop-in",
-                                    enter(),
-                                    |d, t| d.opacity(t),
-                                ))
-                            } else {
-                                d.child(shade)
-                            }
-                        })
-                        // Slides in a short way from the right edge, so its hitbox
-                        // is about where it ends up from the first frame.
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .right_0()
-                                .h_full()
-                                .occlude()
-                                .child(panel)
-                                .with_animation("thread-in", enter(), |d, t| {
-                                    d.right(px(-motion::PANEL_TRAVEL * (1. - t))).opacity(t)
+                                .with_animation("thread-backdrop-out", sheet_close(), |d, t| {
+                                    d.opacity(1. - t)
                                 }),
                         )
                     })
-                    .when_some(leaving_sheet, |d, panel| {
-                        // The closed panel sliding out: no handlers, and a cover
-                        // so nothing inside it reacts.
-                        d.when(!has_overlay, |d| {
-                            d.child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .left_0()
-                                    .size_full()
-                                    .bg(backdrop)
-                                    .with_animation("thread-backdrop-out", exit(), |d, t| {
-                                        d.opacity(1. - t)
-                                    }),
-                            )
-                        })
-                        .child(
-                            inert(div().absolute().top_0().right_0().h_full().child(panel))
-                                .with_animation("thread-out", exit(), |d, t| {
-                                    d.right(px(-motion::PANEL_TRAVEL * t)).opacity(1. - t)
-                                }),
-                        )
-                    }),
+                    .children(leaving_sheets),
             )
             .when_some(overlay, |d, (name, card, overlay)| {
                 // The image viewer fills the window, so it only fades; cards
@@ -2727,6 +2783,105 @@ fn inert(el: gpui_kit::Div) -> gpui_kit::Div {
 }
 
 impl TwittyApp {
+    /// The open sheets, the deepest first. The top one slides in a short way
+    /// from the right edge when it opens, so its hitbox is about where it
+    /// ends up from the first frame; the ones under it slide to their place,
+    /// a little further left at each level. A press on a lower sheet's edge
+    /// closes the top one, like one on the backdrop, and nothing inside it
+    /// reacts.
+    fn render_sheets(
+        &self,
+        enter: impl Fn() -> Animation,
+        close: impl Fn() -> Animation,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let shade = cx.theme().overlay.alpha(LOWER_SHEET_ALPHA);
+        let closing = matches!(self.sheets.last_change(), sheets::Change::Popped(_));
+        self.sheets
+            .visible()
+            .map(|(depth, open)| {
+                let to = sheets::offset(depth);
+                let from = self.sheets.moved_from(depth).map(sheets::offset);
+                let layer = div()
+                    .debug_selector(move || format!("sheet-{depth}"))
+                    .absolute()
+                    .top_0()
+                    .right(px(to))
+                    .h_full()
+                    .occlude()
+                    // A scroll in the top sheet redraws its ancestors, so every
+                    // sheet would be laid out again each frame. Lower sheets
+                    // take no input: they reuse their last frame until they
+                    // change themselves.
+                    .child(if depth == 0 {
+                        open.sheet.view().into_any_element()
+                    } else {
+                        open.sheet
+                            .view()
+                            .cached(
+                                gpui_kit::StyleRefinement::default()
+                                    .w(px(crate::ui::thread::PANEL_WIDTH))
+                                    .h_full(),
+                            )
+                            .into_any_element()
+                    })
+                    .when(depth > 0, |d| {
+                        d.child(
+                            div()
+                                .debug_selector(move || format!("sheet-edge-{depth}"))
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full()
+                                .occlude()
+                                .bg(shade)
+                                .on_any_mouse_down(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.close_top_sheet(cx);
+                                })),
+                        )
+                    });
+                // A new id at each level, so a sheet animates each time it moves.
+                let id = ElementId::Name(
+                    format!("sheet-{}-{depth}", open.sheet.entity_id().as_u64()).into(),
+                );
+                match from {
+                    None => layer
+                        .with_animation(id, enter(), move |d, t| {
+                            d.right(px(to - motion::PANEL_TRAVEL * (1. - t))).opacity(t)
+                        })
+                        .into_any_element(),
+                    Some(from) => layer
+                        .with_animation(id, if closing { close() } else { enter() }, move |d, t| {
+                            d.right(px(from + (to - from) * t))
+                        })
+                        .into_any_element(),
+                }
+            })
+            .collect()
+    }
+
+    /// The sheets that just closed, sliding out from where they were.
+    fn render_leaving_sheets(&self, close: impl Fn() -> Animation) -> Vec<AnyElement> {
+        let Some(leaving) = &self.leaving_sheet else {
+            return Vec::new();
+        };
+        leaving
+            .what
+            .iter()
+            .map(|(sheet, depth)| {
+                let at = sheets::offset(*depth);
+                let id =
+                    ElementId::Name(format!("sheet-out-{}", sheet.entity_id().as_u64()).into());
+                inert(div().absolute().top_0().right(px(at)).h_full().child(sheet.view()))
+                    .with_animation(id, close(), move |d, t| {
+                        d.right(px(at - motion::PANEL_TRAVEL * t)).opacity(1. - t)
+                    })
+                    .into_any_element()
+            })
+            .collect()
+    }
+
     /// The overlay that just closed, fading out. It has no key context, no
     /// handlers and no occluding backdrop: clicks go to what's under it,
     /// except on its card, which is covered.
@@ -2767,7 +2922,7 @@ impl TwittyApp {
                 .into_any_element()
         };
         // Over the thread panel, its own backdrop is back already.
-        let shade = self.sheet.is_none().then(|| {
+        let shade = self.sheets.is_empty().then(|| {
             div().absolute().top_0().left_0().size_full().bg(backdrop).with_animation(
                 anim_id("backdrop-out", name),
                 exit(),
@@ -3476,7 +3631,119 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn a_post_in_the_profile_opens_its_thread_in_the_sheet(cx: &mut TestAppContext) {
+    fn a_post_in_the_profile_opens_its_thread_over_it(cx: &mut TestAppContext) {
+        use crate::state::profile::ProfileTab;
+        let (app, cx) = keyboard_app(cx);
+        let (_, panel) = open_profile(&app, cx);
+        click(cx, "profile-tab-Media");
+        let id = panel.read_with(cx, |p, _| {
+            let items = p.model(ProfileTab::Tweets).items();
+            items.iter().flat_map(|i| i.posts()).next().map(|p| p.id.clone()).unwrap()
+        });
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id.clone()), cx));
+        cx.run_until_parked();
+        assert!(app.read_with(cx, |app, _| app.profile_panel().is_none()), "the thread is on top");
+        assert_eq!(panel_root(&app, cx), Some(id.to_string()));
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 2);
+
+        // The tweet already on top doesn't stack a copy.
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id.clone()), cx));
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 2);
+
+        // Esc goes back to the same profile, on the tab it was on.
+        cx.simulate_keystrokes("escape");
+        assert_eq!(app.read_with(cx, |app, _| app.profile_panel().cloned()), Some(panel.clone()));
+        assert_eq!(panel.read_with(cx, |p, _| p.tab()), ProfileTab::Media);
+        cx.simulate_keystrokes("escape");
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
+    }
+
+    #[gpui_kit::test]
+    fn a_sheet_under_another_keeps_its_scroll_position(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let (_, panel) = open_profile(&app, cx);
+        let viewport = cx.update(|window, _| window.viewport_size());
+        for _ in 0..5 {
+            cx.simulate_event(ScrollWheelEvent {
+                position: point(viewport.width - px(300.), px(400.)),
+                delta: ScrollDelta::Lines(point(0.0, -10.0)),
+                ..Default::default()
+            });
+            cx.run_until_parked();
+        }
+        let scrolled = panel.read_with(cx, |p, _| p.scroll_top());
+        assert!(scrolled.0 > 0, "the profile scrolled: {scrolled:?}");
+
+        open_panel(&app, "1", cx);
+        cx.simulate_keystrokes("escape");
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.profile_panel().cloned()), Some(panel.clone()));
+        assert_eq!(panel.read_with(cx, |p, _| p.scroll_top()), scrolled);
+    }
+
+    /// Stacks threads on `roots`, the last on top, with animations off so the
+    /// sheets are drawn where they end up.
+    fn stack_threads(app: &Entity<TwittyApp>, roots: &[&str], cx: &mut VisualTestContext) {
+        app.update(cx, |app, cx| {
+            app.add_deck("", DeckIcon::default(), cx);
+            app.set_animations(false, cx);
+        });
+        for root in roots {
+            open_panel(app, root, cx);
+        }
+    }
+
+    #[gpui_kit::test]
+    fn lower_sheets_show_their_edge_and_a_press_there_closes_the_top(cx: &mut TestAppContext) {
+        use crate::state::sheets::{MAX_PEEKS, PEEK};
+        let (app, cx) = keyboard_app(cx);
+        stack_threads(&app, &["1", "2", "3", "4", "5", "6", "7", "8"], cx);
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 8);
+        const NAMES: [&str; 7] =
+            ["sheet-0", "sheet-1", "sheet-2", "sheet-3", "sheet-4", "sheet-5", "sheet-6"];
+        assert!(MAX_PEEKS < NAMES.len());
+        let sheet = |cx: &mut VisualTestContext, depth: usize| cx.debug_bounds(NAMES[depth]);
+        let top = sheet(cx, 0).expect("top sheet drawn");
+        assert_eq!(top.size.width, px(crate::ui::thread::PANEL_WIDTH));
+        for depth in 1..=MAX_PEEKS {
+            let lower = sheet(cx, depth).expect("lower sheet drawn");
+            assert_eq!(top.right() - lower.right(), px(PEEK * depth as f32), "depth {depth}");
+            assert_eq!(lower.size.width, top.size.width);
+        }
+        assert!(sheet(cx, MAX_PEEKS + 1).is_none(), "deeper sheets are hidden behind");
+        assert_eq!(cx.debug_bounds("sheet-edge-0"), None, "the top sheet is live");
+
+        // The visible strip of the sheet two levels down.
+        let two = sheet(cx, 2).unwrap();
+        let strip = point(two.left() + px(PEEK / 2.), px(300.));
+        cx.simulate_click(strip, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 7, "only the top one closed");
+        assert_eq!(panel_root(&app, cx).as_deref(), Some("7"), "nothing inside it reacted");
+    }
+
+    #[gpui_kit::test]
+    fn close_and_a_click_beside_shut_only_the_top_sheet(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        stack_threads(&app, &["1", "2"], cx);
+        let top = app.read_with(cx, |app, _| app.thread_panel().cloned()).unwrap();
+        top.update(cx, |_, cx| cx.emit(CloseThread));
+        cx.run_until_parked();
+        assert_eq!(panel_root(&app, cx).as_deref(), Some("1"), "× shows the one under it");
+
+        open_panel(&app, "2", cx);
+        open_panel(&app, "3", cx);
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(panel_root(&app, cx).as_deref(), Some("2"), "a click beside closes the top");
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 2);
+    }
+
+    #[gpui_kit::test]
+    fn a_click_beside_a_thread_over_a_profile_goes_back_to_the_profile(cx: &mut TestAppContext) {
         let (app, cx) = keyboard_app(cx);
         let (_, panel) = open_profile(&app, cx);
         let id = panel.read_with(cx, |p, _| {
@@ -3484,10 +3751,109 @@ mod tests {
             items.iter().flat_map(|i| i.posts()).next().map(|p| p.id.clone()).unwrap()
         });
         let hub = app.read_with(cx, |app, _| app.hub.clone());
-        hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id.clone()), cx));
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id), cx));
         cx.run_until_parked();
-        assert!(app.read_with(cx, |app, _| app.profile_panel().is_none()));
-        assert_eq!(panel_root(&app, cx), Some(id.to_string()));
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 2);
+
+        // Over the deck's tweets, not an empty deck.
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.profile_panel().cloned()), Some(panel.clone()));
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 1);
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
+    }
+
+    #[gpui_kit::test]
+    fn scrolling_the_top_sheet_does_not_redraw_the_ones_under_it(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        stack_threads(&app, &["1"], cx);
+        let lower = app.read_with(cx, |app, _| app.thread_panel().cloned()).unwrap();
+        open_panel(&app, "2", cx);
+        let top = app.read_with(cx, |app, _| app.thread_panel().cloned()).unwrap();
+        let renders = |cx: &mut VisualTestContext| {
+            (lower.read_with(cx, |p, _| p.renders()), top.read_with(cx, |p, _| p.renders()))
+        };
+        let (lower_before, top_before) = renders(cx);
+        // What a scroll does: the top panel notifies, its ancestors redraw.
+        for _ in 0..3 {
+            top.update(cx, |_, cx| cx.notify());
+            cx.run_until_parked();
+        }
+        let (lower_after, top_after) = renders(cx);
+        assert!(top_after > top_before, "the top sheet redrew");
+        assert_eq!(lower_after, lower_before, "the sheet under it reused its frame");
+
+        // A change in the lower sheet itself still shows.
+        lower.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        let (lower_now, _) = renders(cx);
+        assert!(lower_now > lower_before);
+
+        // So does a new media height, which only a global carries.
+        app.update(cx, |app, cx| app.set_media_max_height(Some(MaxHeight::new(200.)), false, cx));
+        cx.run_until_parked();
+        assert!(renders(cx).0 > lower_now, "the lower sheet redrew with the new height");
+    }
+
+    #[gpui_kit::test]
+    fn closed_sheets_slide_out_from_their_place(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        app.update(cx, |app, cx| app.add_deck("", DeckIcon::default(), cx));
+        open_panel(&app, "1", cx);
+        open_panel(&app, "2", cx);
+        cx.simulate_keystrokes("escape");
+        let leaving = |app: &Entity<TwittyApp>, cx: &mut VisualTestContext| {
+            app.read_with(cx, |app, _| {
+                let leaving = app.leaving_sheet.as_ref().map(|l| l.what.as_slice()).unwrap_or(&[]);
+                leaving.iter().map(|(_, depth)| *depth).collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(leaving(&app, cx), vec![0], "the top one leaves");
+        assert_eq!(panel_root(&app, cx).as_deref(), Some("1"));
+        // Slower than a dialog's exit.
+        let motion = cx.update(|_, cx| cx.theme().motion.clone());
+        cx.executor().advance_clock(motion.duration_fast + std::time::Duration::from_millis(10));
+        cx.run_until_parked();
+        assert_eq!(leaving(&app, cx), vec![0], "still sliding out");
+        cx.executor().advance_clock(motion.duration_slow - motion.duration_fast);
+        cx.run_until_parked();
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()), "gone when its animation ends");
+        finish_exits(cx);
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()));
+
+        // A click beside it closes the top one too, and the last one with
+        // its backdrop.
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(leaving(&app, cx), vec![0]);
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
+        finish_exits(cx);
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()));
+
+        // Two quick Esc: the first sheet keeps sliding out, over the second.
+        open_panel(&app, "1", cx);
+        open_panel(&app, "2", cx);
+        cx.simulate_keystrokes("escape");
+        cx.simulate_keystrokes("escape");
+        let roots = app.read_with(cx, |app, cx| {
+            let leaving = app.leaving_sheet.as_ref().map(|l| l.what.as_slice()).unwrap_or(&[]);
+            leaving
+                .iter()
+                .map(|(sheet, _)| match sheet {
+                    Sheet::Thread(panel) => panel.read(cx).root().to_string(),
+                    Sheet::Profile(_) => "profile".into(),
+                })
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(roots, ["1", "2"], "the one closed last is drawn first");
+        finish_exits(cx);
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()));
     }
 
     /// A mock whose feeds allow 30 requests per 15 minutes.

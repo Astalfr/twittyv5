@@ -37,6 +37,9 @@ pub struct ThreadPanel {
     hub: Entity<InteractionsHub>,
     scroll: ScrollHandle,
     load: Option<Task<()>>,
+    /// How many times it was rendered, so tests can tell a cached frame.
+    #[cfg(test)]
+    renders: usize,
 }
 
 impl std::fmt::Debug for ThreadPanel {
@@ -59,6 +62,8 @@ impl ThreadPanel {
             hub,
             scroll: ScrollHandle::new(),
             load: None,
+            #[cfg(test)]
+            renders: 0,
         };
         this.reload(cx);
         this
@@ -70,6 +75,11 @@ impl ThreadPanel {
 
     pub fn state(&self) -> &ThreadState {
         &self.state
+    }
+
+    #[cfg(test)]
+    pub(crate) fn renders(&self) -> usize {
+        self.renders
     }
 
     /// Loads (again) the conversation.
@@ -98,6 +108,10 @@ impl ThreadPanel {
 
 impl Render for ThreadPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        {
+            self.renders += 1;
+        }
         let theme = cx.theme().clone();
         let body = match &self.state {
             ThreadState::Loading => {
