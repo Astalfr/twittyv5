@@ -58,6 +58,11 @@ pub(crate) enum Entry<'a> {
         id: &'a str,
         content: &'a Value,
     },
+    /// An item the profile's owner pinned (a `TimelinePinEntry`).
+    Pinned {
+        id: &'a str,
+        content: &'a Value,
+    },
     /// A group of items (conversations, carousels, who-to-follow…).
     Module {
         id: &'a str,
@@ -78,7 +83,10 @@ pub(crate) enum Entry<'a> {
 impl<'a> Entry<'a> {
     pub(crate) fn id(&self) -> &'a str {
         match self {
-            Entry::Item { id, .. } | Entry::Module { id, .. } | Entry::Other { id } => id,
+            Entry::Item { id, .. }
+            | Entry::Pinned { id, .. }
+            | Entry::Module { id, .. }
+            | Entry::Other { id } => id,
             Entry::Cursor { .. } => "cursor",
         }
     }
@@ -130,7 +138,12 @@ pub(crate) fn timeline(root: &Value) -> Vec<Entry<'_>> {
     let mut rest = Vec::new();
     for ins in instructions {
         match str_at(ins, &["type"]) {
-            Some("TimelinePinEntry") => pinned.extend(at(ins, &["entry"]).and_then(entry)),
+            Some("TimelinePinEntry") => {
+                pinned.extend(at(ins, &["entry"]).and_then(entry).map(|e| match e {
+                    Entry::Item { id, content } => Entry::Pinned { id, content },
+                    other => other,
+                }))
+            }
             Some("TimelineAddEntries") => {
                 rest.extend(array_at(ins, &["entries"]).iter().filter_map(entry))
             }
@@ -180,6 +193,8 @@ mod tests {
         let entries = timeline(&v);
         let ids: Vec<&str> = entries.iter().map(Entry::id).collect();
         assert_eq!(ids, ["tweet-9", "tweet-1", "cursor", "conv-1", "weird"]);
+        assert!(matches!(entries[0], Entry::Pinned { .. }));
+        assert!(matches!(entries[1], Entry::Item { .. }));
         assert!(matches!(entries[2], Entry::Cursor { kind: CursorKind::Bottom, value: "B" }));
         let Entry::Module { items, display_type, .. } = entries[3] else { panic!("module") };
         assert_eq!(display_type, "VerticalConversation");

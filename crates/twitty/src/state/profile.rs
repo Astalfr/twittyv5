@@ -45,7 +45,8 @@ pub struct Tile {
 }
 
 /// Every media of the tweets in `items`, newest tweet first, in each tweet's
-/// order. Retweets are left out: their media is someone else's.
+/// order. Retweets are left out: their media is someone else's. So are pins:
+/// a pinned tweet also has its own row in its place in time.
 pub fn tiles(items: &[FeedItem]) -> Vec<Tile> {
     let posts = items.iter().flat_map(|item| match item {
         FeedItem::Post(p) => vec![p],

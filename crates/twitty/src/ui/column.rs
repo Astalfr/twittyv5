@@ -217,15 +217,14 @@ impl ColumnView {
         }
         let change = self.model.finish(kind, result);
         self.announce(kind, &change, cx);
-        self.mark_arrivals(&change, cx);
+        self.mark_arrivals(kind, &change, cx);
         match change {
             ListChange::None => {}
             // +1 for the footer row.
             ListChange::Reset { count } => self.list.reset(count + 1),
             ListChange::Splice { range, count } => {
-                let prepend = range.start == 0;
                 self.list.splice(range, count);
-                if prepend && self.at_top {
+                if kind == LoadKind::Newer && self.at_top {
                     // Reading at the top: show the new rows right away.
                     self.list.scroll_to(ListOffset::default());
                     self.model.mark_seen();
@@ -255,7 +254,7 @@ impl ColumnView {
     }
 
     /// Remembers the rows `change` brings in, so they animate as they appear.
-    fn mark_arrivals(&mut self, change: &ListChange, cx: &Context<Self>) {
+    fn mark_arrivals(&mut self, kind: LoadKind, change: &ListChange, cx: &Context<Self>) {
         if matches!(change, ListChange::Reset { .. }) {
             self.arrivals.clear();
         }
@@ -263,7 +262,7 @@ impl ColumnView {
             return;
         }
         let now = Instant::now();
-        for (ix, entrance) in motion::entrances(change) {
+        for (ix, entrance) in motion::entrances(kind, change) {
             if let Some(item) = self.model.items().get(ix) {
                 self.arrivals.mark(item.key(), entrance, now, entrance.total());
             }
@@ -278,7 +277,8 @@ impl ColumnView {
     fn on_scroll(&mut self, visible: std::ops::Range<usize>, cx: &mut Context<Self>) {
         let top = self.list.logical_scroll_top();
         self.at_top = top.item_ix == 0 && top.offset_in_item <= px(1.);
-        if visible.start < self.model.unseen() {
+        let unseen = self.model.unseen_rows();
+        if !unseen.is_empty() && visible.start < unseen.end {
             // New rows above scrolled into view.
             self.model.mark_seen();
             cx.notify();
@@ -721,6 +721,31 @@ mod tests {
             assert_eq!(c.list.item_count(), MockBackend::PAGE_SIZE + 4);
             assert_eq!(c.model().unseen(), 0, "user was at the top");
         });
+    }
+
+    #[gpui_kit::test]
+    fn newer_posts_arrive_below_the_pin(cx: &mut TestAppContext) {
+        let (backend, column) = setup(cx);
+        let home = FeedSource::Home { mode: HomeMode::Following };
+        let pin = backend.pin_new(&home);
+        column.update(cx, |c, cx| c.load(LoadKind::Refresh, cx));
+        cx.run_until_parked();
+        let pushed = backend.push_new(&home, 2);
+        column.update(cx, |c, cx| c.load(LoadKind::Newer, cx));
+        cx.run_until_parked();
+        column.read_with(cx, |c, _| {
+            let items = c.model().items();
+            assert!(matches!(&items[0], twitty_model::FeedItem::Pinned(p) if p.id == pin));
+            assert_eq!(items[1].posts()[0].id, pushed[1], "the newest tweet right below");
+            assert_eq!(c.list.item_count(), MockBackend::PAGE_SIZE + 4, "pin + rows + footer");
+            assert_eq!(c.model().unseen(), 0, "user was at the top");
+        });
+
+        column.update(cx, |c, _| c.at_top = false);
+        backend.push_new(&home, 1);
+        column.update(cx, |c, cx| c.load(LoadKind::Newer, cx));
+        cx.run_until_parked();
+        column.read_with(cx, |c, _| assert_eq!(c.model().unseen_rows(), 1..2));
     }
 
     #[gpui_kit::test]

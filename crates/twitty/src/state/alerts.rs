@@ -47,16 +47,17 @@ impl Announcement {
 }
 
 /// The announcement for the rows a load of `kind` added, if it is one to
-/// announce: only newer rows prepended by polling (or a manual check). The
-/// first page, a refresh and older pages are not news.
+/// announce: only newer rows added by polling (or a manual check), which go
+/// at the top or right below the pinned tweets. The first page, a refresh
+/// and older pages are not news.
 ///
 /// `items` are the column's rows after the change.
 pub fn announce(kind: LoadKind, change: &ListChange, items: &[FeedItem]) -> Option<Announcement> {
-    let count = match (kind, change) {
-        (LoadKind::Newer, ListChange::Splice { range, count }) if range.start == 0 => *count,
+    let added = match (kind, change) {
+        (LoadKind::Newer, ListChange::Splice { range, count }) => range.start..range.start + count,
         _ => return None,
     };
-    let fresh = items.get(..count)?;
+    let fresh = items.get(added)?;
     let news: Vec<&FeedItem> = fresh.iter().filter(|item| is_news(item)).collect();
     let (newest, others) = news.split_first()?;
     let (from, mut lines) = describe(newest)?;
@@ -67,7 +68,7 @@ pub fn announce(kind: LoadKind, change: &ListChange, items: &[FeedItem]) -> Opti
     Some(Announcement { count: news.len(), from, lines })
 }
 
-/// Rows worth telling the user about (not tombstones or unreadable rows).
+/// Rows worth telling the user about (not pins, tombstones or unreadable rows).
 fn is_news(item: &FeedItem) -> bool {
     matches!(
         item,
@@ -81,7 +82,7 @@ fn is_news(item: &FeedItem) -> bool {
 /// Who `item` is from, and what it says.
 fn describe(item: &FeedItem) -> Option<(Option<Arc<Profile>>, Vec<String>)> {
     Some(match item {
-        FeedItem::Post(post) => tweet(post),
+        FeedItem::Post(post) | FeedItem::Pinned(post) => tweet(post),
         // Titled with the tweet's author, like the row shows the tweet.
         FeedItem::Repost { by, post } => {
             let (from, mut lines) = tweet(post);
@@ -373,6 +374,18 @@ mod tests {
         assert_eq!(announce(LoadKind::Newer, &ListChange::None, &items), None);
         assert_eq!(announce(LoadKind::Newer, &prepended(0), &items), None);
         assert_eq!(announce(LoadKind::Newer, &prepended(n + 1), &items), None, "out of range");
+    }
+
+    #[test]
+    fn newer_rows_below_a_pin_are_announced_without_it() {
+        let mut items = home();
+        let pin = FeedItem::Pinned(posts().remove(0));
+        items.insert(0, pin.clone());
+        let below = ListChange::Splice { range: 1..1, count: 2 };
+        let a = announce(LoadKind::Newer, &below, &items).unwrap();
+        assert_eq!(a.count, 2);
+        assert_eq!(Some(a), announce(LoadKind::Newer, &prepended(2), &items[1..]));
+        assert_eq!(announce(LoadKind::Newer, &prepended(1), &[pin]), None, "a pin isn't news");
     }
 
     #[test]

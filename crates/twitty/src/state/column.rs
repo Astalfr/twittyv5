@@ -13,7 +13,7 @@ pub enum LoadKind {
     Refresh,
     /// Append older rows at the bottom.
     Older,
-    /// Prepend newer rows at the top.
+    /// Prepend newer rows at the top, below any pinned rows.
     Newer,
 }
 
@@ -130,6 +130,17 @@ impl ColumnModel {
         self.unseen
     }
 
+    /// Where those unseen rows are: right below the pinned rows.
+    pub fn unseen_rows(&self) -> Range<usize> {
+        let start = self.pinned();
+        start..start + self.unseen
+    }
+
+    /// How many rows at the top are pinned tweets. Newer rows go below them.
+    pub fn pinned(&self) -> usize {
+        self.items.iter().take_while(|item| matches!(item, FeedItem::Pinned(_))).count()
+    }
+
     /// The user scrolled to the top: everything is seen.
     pub fn mark_seen(&mut self) {
         self.unseen = 0;
@@ -208,7 +219,7 @@ impl ColumnModel {
                 // An exhausted feed returns no cursor, or (Twitter) a fresh cursor
                 // with no rows; either way stop asking.
                 self.older = if page.items.is_empty() { None } else { page.older };
-                let fresh = self.dedup(page.items);
+                let fresh = self.dedup(unpinned(page.items));
                 if fresh.is_empty() {
                     return ListChange::None;
                 }
@@ -221,16 +232,17 @@ impl ColumnModel {
                 if page.newer.is_some() {
                     self.newer = page.newer;
                 }
-                let fresh = self.dedup(page.items);
+                let fresh = self.dedup(unpinned(page.items));
                 if fresh.is_empty() {
                     return ListChange::None;
                 }
                 let count = fresh.len();
+                let at = self.pinned();
                 self.unseen += count;
                 // Keep the same row selected when rows arrive above it.
-                self.selected = self.selected.map(|ix| ix + count);
-                self.items.splice(0..0, fresh);
-                ListChange::Splice { range: 0..0, count }
+                self.selected = self.selected.map(|ix| if ix >= at { ix + count } else { ix });
+                self.items.splice(at..at, fresh);
+                ListChange::Splice { range: at..at, count }
             }
         }
     }
@@ -247,11 +259,18 @@ impl ColumnModel {
     }
 }
 
+/// `items` without pinned tweets. Pins are only taken from a refresh, so they
+/// stay at the top: a pin seen while paging (a new pin, or Twitter sending it
+/// again) waits for the next refresh.
+fn unpinned(items: Vec<FeedItem>) -> Vec<FeedItem> {
+    items.into_iter().filter(|item| !matches!(item, FeedItem::Pinned(_))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use twitty_model::{Backend, HomeMode, mock::MockBackend};
+    use twitty_model::{Backend, HomeMode, PostId, mock::MockBackend};
 
     fn home() -> FeedSource {
         FeedSource::Home { mode: HomeMode::Following }
@@ -460,6 +479,87 @@ mod tests {
         let change = load(&mut m, &backend, LoadKind::Refresh).unwrap();
         assert_eq!(change, ListChange::Reset { count: MockBackend::PAGE_SIZE });
         assert_eq!(m.unseen(), 0);
+    }
+
+    fn pinned_home(backend: &MockBackend) -> (ColumnModel, PostId) {
+        let pin = backend.pin_new(&home());
+        let mut m = ColumnModel::new(home());
+        load(&mut m, backend, LoadKind::Refresh);
+        (m, pin)
+    }
+
+    fn is_pin(item: &FeedItem, pin: &PostId) -> bool {
+        matches!(item, FeedItem::Pinned(p) if &p.id == pin)
+    }
+
+    #[test]
+    fn newer_rows_go_below_the_pin() {
+        let backend = MockBackend::new();
+        let (mut m, pin) = pinned_home(&backend);
+        assert_eq!(m.pinned(), 1);
+        assert!(is_pin(&m.items()[0], &pin));
+        let pushed = backend.push_new(&home(), 2);
+        let change = load(&mut m, &backend, LoadKind::Newer).unwrap();
+        assert_eq!(change, ListChange::Splice { range: 1..1, count: 2 });
+        assert!(is_pin(&m.items()[0], &pin), "the pin stays on top");
+        let newest: Vec<_> =
+            m.items()[1..3].iter().flat_map(|i| i.posts()).map(|p| &p.id).collect();
+        assert_eq!(newest, [&pushed[1], &pushed[0]]);
+        assert_eq!(m.unseen_rows(), 1..3);
+    }
+
+    #[test]
+    fn a_selected_pin_stays_selected_when_newer_rows_arrive() {
+        let backend = MockBackend::new();
+        let (mut m, pin) = pinned_home(&backend);
+        assert_eq!(m.select(1), Some(0));
+        backend.push_new(&home(), 2);
+        load(&mut m, &backend, LoadKind::Newer);
+        assert_eq!(m.selected(), Some(0));
+        assert_eq!(m.selected_post().map(|p| p.id.clone()), Some(pin));
+        // A row below the pin moves down with it.
+        m.select(1);
+        let below = m.selected_post().map(|p| p.id.clone());
+        backend.push_new(&home(), 1);
+        load(&mut m, &backend, LoadKind::Newer);
+        assert_eq!(m.selected(), Some(2));
+        assert_eq!(m.selected_post().map(|p| p.id.clone()), below);
+    }
+
+    #[test]
+    fn pins_on_later_pages_wait_for_a_refresh() {
+        let backend = MockBackend::new();
+        let (mut m, pin) = pinned_home(&backend);
+        let other = backend.pin_new(&home());
+        let stray = |id: &PostId| {
+            let post = m.items()[1].posts()[0].clone();
+            FeedItem::Pinned(twitty_model::Post { id: id.clone(), ..post })
+        };
+        let (old, new) = (stray(&pin), stray(&other));
+        for kind in [LoadKind::Newer, LoadKind::Older] {
+            m.begin(kind, Utc::now());
+            let page = FeedPage { items: vec![old.clone(), new.clone()], newer: None, older: None };
+            assert_eq!(m.finish(kind, Ok(page)), ListChange::None, "{kind:?}");
+        }
+        assert_eq!(m.pinned(), 1);
+        load(&mut m, &backend, LoadKind::Refresh);
+        assert_eq!(m.pinned(), 1);
+        assert!(is_pin(&m.items()[0], &other), "the refresh brings the new pin");
+    }
+
+    #[test]
+    fn a_pin_keeps_its_timeline_row() {
+        let backend = MockBackend::new();
+        let (mut m, pin) = pinned_home(&backend);
+        let post = m.items()[0].posts()[0].clone();
+        m.begin(LoadKind::Older, Utc::now());
+        let page = FeedPage { items: vec![FeedItem::Post(post)], newer: None, older: None };
+        let change = m.finish(LoadKind::Older, Ok(page));
+        assert!(
+            matches!(change, ListChange::Splice { count: 1, .. }),
+            "not a duplicate of the pin"
+        );
+        assert!(matches!(m.items().last(), Some(FeedItem::Post(p)) if p.id == pin));
     }
 
     #[test]

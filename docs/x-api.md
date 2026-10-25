@@ -217,7 +217,7 @@ data.<root>                                  # e.g. home.home_timeline_urt, sear
   .timeline.instructions[]
      TimelineAddEntries   { entries[] }
      TimelineReplaceEntry { entry }          # usually refreshes cursors
-     TimelinePinEntry     { entry }
+     TimelinePinEntry     { entry }          # a profile's pinned tweet (seen on first pages) -> FeedItem::Pinned
      TimelineAddToModule  { moduleEntryId, moduleItems[] }   # later pages of a module (media grid)
      TimelineClearCache / TimelineTerminateTimeline / TimelineShowAlert ...
 entry.content.__typename / entryType

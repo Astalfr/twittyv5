@@ -8,6 +8,9 @@ use crate::{ListId, Notification, PageToken, Post, PostId, Profile, UnavailableR
 #[derive(Debug, Clone, PartialEq)]
 pub enum FeedItem {
     Post(Post),
+    /// A tweet the profile's owner pinned. A profile shows its pins first, and
+    /// the same tweet can come again later in its place in time.
+    Pinned(Post),
     /// `by` retweeted `post`.
     Repost {
         by: Arc<Profile>,
@@ -37,6 +40,8 @@ impl FeedItem {
     pub fn key(&self) -> String {
         match self {
             FeedItem::Post(p) => format!("post:{}", p.id),
+            // Not `post:`, so the tweet's own row in the timeline isn't dropped as a duplicate.
+            FeedItem::Pinned(p) => format!("pinned:{}", p.id),
             FeedItem::Repost { by, post } => format!("repost:{}:{}", by.id, post.id),
             FeedItem::Thread(posts) => match posts.last() {
                 Some(p) => format!("thread:{}", p.id),
@@ -51,7 +56,7 @@ impl FeedItem {
     /// Every tweet contained in this item, in display order.
     pub fn posts(&self) -> Vec<&Post> {
         match self {
-            FeedItem::Post(p) | FeedItem::Repost { post: p, .. } => vec![p],
+            FeedItem::Post(p) | FeedItem::Pinned(p) | FeedItem::Repost { post: p, .. } => vec![p],
             FeedItem::Thread(posts) => posts.iter().collect(),
             FeedItem::Notification(n) => n.target.as_deref().into_iter().collect(),
             FeedItem::Unavailable { .. } | FeedItem::Unsupported { .. } => Vec::new(),

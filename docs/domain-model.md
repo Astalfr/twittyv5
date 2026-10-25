@@ -24,7 +24,7 @@ So Twitty has an **anti-corruption layer**:
 | `SpanKind` | `Mention`, `Hashtag`, `Cashtag`, `Link { display, url }` |
 | `Media` | `Image`, `Video`, `Gif`, each with an `ImageRef` that carries size hints (so the list can reserve height) and suggested crops (`Region`s in pixels of the image, one per tile shape; empty when the source has none). A `Video` has its playable files as `VideoVariant`s (URL, bitrate, size), best first; `Media::stream` is the one to play by default |
 | `Embed` | `Quote(PostOrGone)`, `LinkCard`, `Poll` |
-| `FeedItem` | `Post`, `Repost { by, post }`, `Thread(Vec<Post>)`, `Notification`, `Unavailable`, `Unsupported { reason }` |
+| `FeedItem` | `Post`, `Pinned(Post)`, `Repost { by, post }`, `Thread(Vec<Post>)`, `Notification`, `Unavailable`, `Unsupported { reason }` |
 | `FeedPage` | `items` + `newer`/`older` page tokens |
 | `ListSummary` | A list the viewer owns or follows: `id` (`ListId`), `name`, `members`, `visibility` (`ListVisibility::Public` / `Private`) |
 | `FeedSource` | What a column shows: `Home`, `Notifications`, `Search`, `List`, `User`, `Bookmarks`, `Thread`. It's **persisted**. |
@@ -40,6 +40,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `search_users` (one 
 
 1. **Never panic and never fail a whole page.** An entry that can't be translated becomes `FeedItem::Unsupported { reason }`, plus a `tracing::warn!` that includes the entry ID and the missing path.
 2. **Retweets are unwrapped**: the retweet becomes `FeedItem::Repost { by, post }`, where `post` is the original tweet.
+2b. **Pinned tweets**: a tweet from a `TimelinePinEntry` instruction becomes `FeedItem::Pinned`, first on the page (`wire::timeline` tags it `Entry::Pinned`). A pinned tombstone stays `Unavailable`. Its row key is `pinned:<id>`, so the same tweet in its place in time (`post:<id>`) isn't dropped as a duplicate.
 3. **Long tweets**: prefer `note_tweet` text and entities over the truncated `full_text`.
 3b. **Translations**: Grok's `grok_translated_post_with_availability` becomes `Post::translation` (its own text and entities, same offset rules) when `is_available` and the text isn't blank; see [x-api.md](x-api.md#grok-translations-2026-10-24).
 3c. **Community Notes**: `birdwatch_pivot` becomes `Post::community_note` (the note's text with its links, and its page); a pivot without text or link is dropped with a warning, the tweet stays. See [x-api.md](x-api.md#community-notes-2026-10-24).

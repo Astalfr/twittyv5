@@ -55,7 +55,7 @@ With a session (see "Signing in" in [x-api.md](x-api.md)), `cargo run -p twitty`
   - quote of a deleted tweet, long `note_tweet`, Grok translation, Community Note (`birdwatch_pivot`) with a link
   - 1/2/3/4 photos, video, GIF, poll, link card
   - tombstone, withheld, `TweetWithVisibilityResults`
-  - pinned entry, promoted entry (dropped), top/bottom cursors, empty timeline
+  - pinned entry (`FeedItem::Pinned`, in `usertweets-*` and `userreplies-nasa`), promoted entry (dropped), top/bottom cursors, empty timeline
   - emoji/RTL/CJK text with entities.
 - When Twitter changes, **add** a new fixture (e.g. `retweet_2026-11.json`) and keep the old ones. Old shapes must keep translating if Twitter still sends them anywhere.
 

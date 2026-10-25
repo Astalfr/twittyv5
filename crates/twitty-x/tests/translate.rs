@@ -160,6 +160,7 @@ fn summary(page: &FeedPage) -> String {
     for item in &page.items {
         let line = match item {
             FeedItem::Post(p) => post_line(p, ""),
+            FeedItem::Pinned(p) => format!("pinned\n{}", post_line(p, "  ")),
             FeedItem::Repost { by, post } => {
                 format!("repost by @{}\n{}", by.handle, post_line(post, "  "))
             }

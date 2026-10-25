@@ -4,6 +4,11 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
 
 ---
 
+### 2026-10-25: Pinned tweets are their own row kind and stay on top
+- **Decision**: A profile's pinned tweet is `FeedItem::Pinned(Post)`, keyed `pinned:<id>`, labelled "Pinned" above the tweet. `ColumnModel` inserts newer rows below the leading pins and keeps pins only from a refresh (`Older`/`Newer` pages drop them).
+- **Why**: A variant (like `Repost`) keeps "why is this here" out of `Post`, and no persisted type changes. The separate key lets the tweet also appear in its place in time, as x.com does. Twitter sends the pin with the first page (whether later pages repeat it isn't verified live; they're dropped either way); prepending newer tweets at row 0 would push it down, and a pin arriving mid-list would break "pins are the leading rows".
+- **Consequences**: A changed pin shows up on the next refresh, not while polling. "New rows" are no longer always at row 0: alerts, the unseen pill and arrival animations read the splice range and the load kind instead. The profile media gallery leaves pins out (their media also comes with the tweet's own row).
+
 ### 2026-10-25: Twitty builds its own Windows toasts
 - **Decision**: New-tweet notifications are Windows toasts built by `notifier::WindowsToasts` (WinRT through the `windows` crate), not GPUI's `show_system_notification`. Each is titled "{column} - {name} @{handle}" after the newest row and shows that account's avatar (`appLogoOverride`, cropped round). The avatar is downloaded once into the cache folder, named after a hash of its URL.
 - **Why**: GPUI's `SystemNotification` only has a title, a text and buttons, and the pinned `gpui-pre` can't be patched. Windows won't load web images in toasts for an app without a package, so the picture has to be a local file. Hashing the URL keeps user ids out of file names and picks up a new avatar, whose URL changes.

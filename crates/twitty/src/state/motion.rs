@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::column::ListChange;
+use super::column::{ListChange, LoadKind};
 
 /// How long a row that just arrived takes to fade in.
 pub const ARRIVAL: Duration = Duration::from_millis(260);
@@ -75,19 +75,19 @@ impl Entrance {
     }
 }
 
-/// The rows (by index after the change) that enter with `change`, and how.
-/// Only the first page of a reset cascades: further rows are far off screen.
-pub fn entrances(change: &ListChange) -> Vec<(usize, Entrance)> {
+/// The rows (by index after the change) that enter with `change` from a
+/// load of `kind`, and how. Only the first page of a reset cascades: further
+/// rows are far off screen. Newer rows drop in wherever they go (below the
+/// pinned tweets, if any).
+pub fn entrances(kind: LoadKind, change: &ListChange) -> Vec<(usize, Entrance)> {
     match change {
         ListChange::None => Vec::new(),
         ListChange::Reset { count } => {
             Entrance::cascade((*count).min(STAGGER_ROWS * 2)).enumerate().collect()
         }
-        ListChange::Splice { range, count } if range.start == 0 => {
-            (0..*count).map(|ix| (ix, Entrance::Newer)).collect()
-        }
         ListChange::Splice { range, count } => {
-            (range.start..range.start + count).map(|ix| (ix, Entrance::Older)).collect()
+            let entrance = if kind == LoadKind::Newer { Entrance::Newer } else { Entrance::Older };
+            (range.start..range.start + count).map(|ix| (ix, entrance)).collect()
         }
     }
 }
@@ -228,15 +228,18 @@ mod tests {
 
     #[test]
     fn list_changes_pick_their_entrances() {
-        assert!(entrances(&ListChange::None).is_empty());
-        let newer = entrances(&ListChange::Splice { range: 0..0, count: 2 });
+        use LoadKind::{Newer, Older, Refresh};
+        assert!(entrances(Newer, &ListChange::None).is_empty());
+        let newer = entrances(Newer, &ListChange::Splice { range: 0..0, count: 2 });
         assert_eq!(newer, [(0, Entrance::Newer), (1, Entrance::Newer)]);
-        let older = entrances(&ListChange::Splice { range: 20..20, count: 2 });
+        let below_pin = entrances(Newer, &ListChange::Splice { range: 1..1, count: 1 });
+        assert_eq!(below_pin, [(1, Entrance::Newer)]);
+        let older = entrances(Older, &ListChange::Splice { range: 20..20, count: 2 });
         assert_eq!(older, [(20, Entrance::Older), (21, Entrance::Older)]);
-        let reset = entrances(&ListChange::Reset { count: 100 });
+        let reset = entrances(Refresh, &ListChange::Reset { count: 100 });
         assert_eq!(reset.len(), STAGGER_ROWS * 2, "only the first screenful");
         assert_eq!(reset[0], (0, Entrance::Cascade { delay: Duration::ZERO }));
-        assert!(entrances(&ListChange::Reset { count: 0 }).is_empty());
+        assert!(entrances(Refresh, &ListChange::Reset { count: 0 }).is_empty());
     }
 
     #[test]
