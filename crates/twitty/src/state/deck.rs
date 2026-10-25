@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::dirs::AppDirs;
 use serde::{Deserialize, Serialize};
 use twitty_model::{FeedSource, HomeMode, NotificationFilter, SearchSort};
 
@@ -518,9 +519,9 @@ fn migrate_v1(value: &mut serde_json::Value) {
     }
 }
 
-/// Default location: `%APPDATA%\Twitty\decks.json` on Windows.
+/// Default location: `decks.json` in the config folder (see [`AppDirs`]).
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "Twitty").map(|d| d.config_dir().join("decks.json"))
+    AppDirs::current().map(|d| d.config.join("decks.json"))
 }
 
 #[cfg(test)]

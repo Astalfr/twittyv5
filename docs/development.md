@@ -89,13 +89,24 @@ Icons come from GPUI Kit's Lucide catalog. Only the ones listed in `crates/twitt
 
 ## Local data
 
+The app's files live in three folders (`twitty::dirs::AppDirs`):
+
+| Folder | Release build | Debug build (`cargo run`, tests) |
+|---|---|---|
+| config | `%APPDATA%\Twitty\config\` | `dev-data\config\` at the repo root |
+| cache | `%LOCALAPPDATA%\Twitty\cache\` | `dev-data\cache\` |
+| data | `%LOCALAPPDATA%\Twitty\data\` | `dev-data\data\` |
+
+Development never touches the installed app's decks, settings, caches or logs. `dev-data/` is gitignored and safe to delete. The path is fixed at compile time, so a debug exe copied elsewhere still writes into its checkout. The session is kept apart too: debug builds use their own Credential Manager entry (`Twitty` / `x-session-dev`), so signing in or out with `cargo run` leaves the installed app's session alone. `twitty-x-cli` keeps using the per-user cache.
+
 | Data | Location |
 |---|---|
-| Credentials (`auth_token`, `ct0`) | Windows Credential Manager, entry `Twitty` / `x-session` (versioned JSON) |
-| Sign-in window's WebView2 profile | `%LOCALAPPDATA%\Twitty\cache\webview2` (InPrivate: no cookies are kept; safe to delete) |
-| Decks, settings | `%APPDATA%\Twitty\config\` (`decks.json`, `settings.json`) |
-| Query-ID cache, client ids | `%LOCALAPPDATA%\Twitty\cache\` (`query-ids.json`, `client-ids.json`) |
-| Log | `%LOCALAPPDATA%\Twitty\data\logs\twitty.log` (+ `twitty.log.1`), rotated at startup past 5 MB |
+| Credentials (`auth_token`, `ct0`) | Windows Credential Manager, entry `Twitty` / `x-session` (`x-session-dev` in debug builds; versioned JSON) |
+| Sign-in window's WebView2 profile | `cache\webview2` (InPrivate: no cookies are kept; safe to delete) |
+| Decks, settings | `config\` (`decks.json`, `settings.json`) |
+| Query-ID cache, client ids | `cache\` (`query-ids.json`, `client-ids.json`) |
+| Update downloads | `cache\updates\` (installed copies only) |
+| Log | `data\logs\twitty.log` (+ `twitty.log.1`), rotated at startup past 5 MB |
 | Dev session (optional) | `session.json` at the repo root or in the config folder (gitignored) |
 
 ## Debugging tips

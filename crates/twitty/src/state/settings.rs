@@ -10,7 +10,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::playback::Autoplay;
+use crate::{dirs::AppDirs, state::playback::Autoplay};
 
 /// Current version of the settings file.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -129,9 +129,9 @@ impl Settings {
     }
 }
 
-/// Default location: `%APPDATA%\Twitty\config\settings.json` on Windows.
+/// Default location: `settings.json` in the config folder (see [`AppDirs`]).
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "Twitty").map(|d| d.config_dir().join("settings.json"))
+    AppDirs::current().map(|d| d.config.join("settings.json"))
 }
 
 #[cfg(test)]

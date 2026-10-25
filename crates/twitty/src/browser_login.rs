@@ -170,8 +170,8 @@ pub fn run_helper() -> anyhow::Result<()> {
 
     // WebView2's profile folder defaults to one next to the exe, which isn't
     // writable under Program Files. InPrivate keeps the cookies out of it.
-    let data_dir = directories::ProjectDirs::from("", "", "Twitty")
-        .map_or_else(std::env::temp_dir, |d| d.cache_dir().to_path_buf())
+    let data_dir = crate::dirs::AppDirs::current()
+        .map_or_else(std::env::temp_dir, |d| d.cache)
         .join("webview2");
     let mut context = WebContext::new(Some(data_dir));
     let event_loop = EventLoop::new();

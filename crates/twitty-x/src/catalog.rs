@@ -105,10 +105,17 @@ impl Catalog {
         }
     }
 
+    /// Name of the runtime cache file in a cache directory.
+    pub const CACHE_FILE: &str = "query-ids.json";
+
+    /// Default cache directory: `%LOCALAPPDATA%\Twitty\cache` on Windows.
+    pub fn default_cache_dir() -> Option<PathBuf> {
+        directories::ProjectDirs::from("", "", "Twitty").map(|d| d.cache_dir().to_path_buf())
+    }
+
     /// Default cache location: `%LOCALAPPDATA%\Twitty\cache\query-ids.json` on Windows.
     pub fn default_cache_path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("", "", "Twitty")
-            .map(|d| d.cache_dir().join("query-ids.json"))
+        Self::default_cache_dir().map(|d| d.join(Self::CACHE_FILE))
     }
 
     /// Names of the operations in the embedded catalog (the ones Twitty uses).

@@ -24,7 +24,7 @@ Twitter doesn't document this API. Everything here comes from community clients 
 | `transport/` | `Transport`: static + per-request headers, cookie rotation (`on_rotate` hook), per-operation rate limits, retries, HTTP/X-error mapping. Knows nothing about GraphQL shapes. |
 | `catalog.rs` | `Catalog`: resolves an operation name to an `OperationSpec` (query id, method, feature switches, field toggles), builds the `features` map. |
 | `discovery.rs` | Best-effort query-id discovery from x.com's bundles (legacy + Relay formats). |
-| `client.rs` | `XClient::graphql(op, variables)` and helpers like `home_timeline`. Recovers once from stale ids. `XClient::production` builds one with the default cache paths and discovery (used by the app and the CLI). |
+| `client.rs` | `XClient::graphql(op, variables)` and helpers like `home_timeline`. Recovers once from stale ids. `XClient::production` builds one with the default cache paths and discovery (used by the CLI). `XClient::production_in` takes the cache folder instead (used by the app, so debug builds keep theirs in `dev-data`). |
 | `requests.rs` | Private: which operation and variables serve each `FeedSource` and `PageRequest`. Only live-verified variable sets are mapped. |
 | `backend.rs` | `XBackend`: `Backend` over `XClient` + `translate`. |
 | `wire.rs` | Private, lenient readers over Twitter JSON: `at`/`str_at`/`u64_at`…, `timeline()` classifying entries (items, modules, cursors). |
@@ -68,20 +68,20 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 Use **Sign in** (banner or rail). The dialog's main button, **Sign in on x.com**, opens the sign-in window:
 
 - The window is `twitty.exe --login-helper`, a child process. Its tao event loop can't share the main thread with GPUI, so the helper flag is handled first thing in `main()`, before logging, the runtime or GPUI start.
-- It shows `https://x.com/i/flow/login` in WebView2 (`wry`), **InPrivate**, so no cookie reaches the disk. WebView2's profile folder is `%LOCALAPPDATA%\Twitty\cache\webview2` (its default, next to the exe, isn't writable under Program Files).
+- It shows `https://x.com/i/flow/login` in WebView2 (`wry`), **InPrivate**, so no cookie reaches the disk. WebView2's profile folder is `webview2` in the cache folder (`%LOCALAPPDATA%\Twitty\cache`, or `dev-data\cache` in debug builds; see [development.md](development.md#local-data)) (its default, next to the exe, isn't writable under Program Files).
 - Every 500 ms it reads the `x.com` cookies (`cookies_for_url`, which includes HttpOnly ones). x.com sets a guest `ct0` before sign-in and replaces it when `auth_token` arrives, so `state::login::CookieWatch` only takes the pair once it is unchanged over two more polls. x.com is a single-page app, so page loads can't tell when sign-in is done.
 - The helper writes exactly one JSON line to its stdout and exits: `{"outcome":"signed_in","auth_token":…,"ct0":…}`, `{"outcome":"closed"}` (the user closed the window) or `{"outcome":"failed","reason":…}` (e.g. no WebView2). It isn't persisted, since both ends are the same exe. The app reads that one line, never waits for the end of the stream (WebView2's own processes may hold the pipe), and never logs it. Closing the dialog kills the helper.
 - Google and Apple sign-in are refused in embedded browsers. The dialog says to use a username, email or phone with a password; 2FA and captchas work.
 
 **Paste cookies instead** unfolds the fallback: the dialog explains where to find the cookies and normalises what was pasted (quotes, `auth_token=` prefixes, spaces).
 
-Either way, the values are validated with `Session::new`, then the app calls `Viewer`. Only a session Twitter accepts is stored (Windows Credential Manager, entry `Twitty` / `x-session`). If the window fails, the dialog shows why and unfolds the cookie fields.
+Either way, the values are validated with `Session::new`, then the app calls `Viewer`. Only a session Twitter accepts is stored (Windows Credential Manager, entry `Twitty` / `x-session`, or `x-session-dev` for debug builds). If the window fails, the dialog shows why and unfolds the cookie fields.
 
 At startup the app takes the first of:
 
 1. `TWITTY_AUTH_TOKEN` and `TWITTY_CT0` environment variables;
 2. the keyring entry stored by the dialog;
-3. `%APPDATA%\Twitty\config\session.json`, then `session.json` in the working directory (for development; gitignored).
+3. `session.json` in the config folder (`%APPDATA%\Twitty\config`, or `dev-data\config` in debug builds), then `session.json` in the working directory (for development; gitignored).
 
 A session file is `{"auth_token": "…", "ct0": "…"}`. Unusable sources are logged (never their contents) and skipped. With none of these, the app runs on demo data with a banner. At startup the app calls `Viewer`: on success the rail's account button shows `@handle`; on `Unauthorized` the sign-in dialog opens with "session expired" (the stored entry is kept until a new sign-in replaces it).
 

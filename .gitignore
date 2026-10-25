@@ -6,3 +6,5 @@
 /session*.json.tmp
 /.env
 /dumps/
+# Debug builds keep their decks, settings, caches and logs here (see twitty::dirs).
+/dev-data/
