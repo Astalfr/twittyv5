@@ -9,6 +9,7 @@ pub mod compose;
 pub mod deck;
 pub mod diagnostics;
 pub mod emoji;
+pub mod filters;
 pub mod follow;
 pub mod image_scale;
 pub mod interactions;

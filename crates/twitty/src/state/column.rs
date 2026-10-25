@@ -1,10 +1,18 @@
-//! Paging state of one column: which rows are loaded, which cursors to use
-//! next, and how the visible list must change after each load.
+//! Paging state of one column: which rows are loaded, which of them the
+//! column's filters show, which cursors to use next, and how the visible list
+//! must change after each load.
 
 use std::{collections::HashSet, ops::Range};
 
 use chrono::{DateTime, Utc};
 use twitty_model::{BackendError, FeedItem, FeedPage, FeedSource, PageRequest, PageToken};
+
+use crate::state::filters::ColumnFilters;
+
+/// How many pages in a row may come back with every row hidden by the
+/// filters before the column stops loading more by itself (scrolling still
+/// loads more). Keeps a strict filter from walking the whole feed.
+pub const MAX_HIDDEN_PAGES: u8 = 3;
 
 /// The kind of load a column can perform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,9 +53,16 @@ pub enum ListChange {
 }
 
 /// Paging state of a column.
+///
+/// Every index it hands out (rows, [`ListChange`], selection, unseen rows)
+/// counts the rows the filters show.
 #[derive(Debug)]
 pub struct ColumnModel {
     source: FeedSource,
+    filters: ColumnFilters,
+    /// Every row loaded, shown or not, in order.
+    all: Vec<FeedItem>,
+    /// The rows of `all` the filters show.
     items: Vec<FeedItem>,
     keys: HashSet<String>,
     newer: Option<PageToken>,
@@ -58,6 +73,8 @@ pub struct ColumnModel {
     unseen: usize,
     /// Row highlighted for keyboard actions.
     selected: Option<usize>,
+    /// Pages in a row (refreshed or older) whose rows were all hidden.
+    hidden_pages: u8,
 }
 
 impl ColumnModel {
@@ -65,6 +82,8 @@ impl ColumnModel {
     pub fn new(source: FeedSource) -> Self {
         Self {
             source,
+            filters: ColumnFilters::default(),
+            all: Vec::new(),
             items: Vec::new(),
             keys: HashSet::new(),
             newer: None,
@@ -73,7 +92,43 @@ impl ColumnModel {
             loaded_once: false,
             unseen: 0,
             selected: None,
+            hidden_pages: 0,
         }
+    }
+
+    /// An empty column for `source` that shows what `filters` let through.
+    pub fn with_filters(source: FeedSource, filters: ColumnFilters) -> Self {
+        Self { filters, ..Self::new(source) }
+    }
+
+    pub fn filters(&self) -> &ColumnFilters {
+        &self.filters
+    }
+
+    /// Changes which rows show. The loaded rows are filtered again, so the
+    /// list starts over (nothing selected or unseen).
+    pub fn set_filters(&mut self, filters: ColumnFilters) -> ListChange {
+        if filters == self.filters {
+            return ListChange::None;
+        }
+        self.filters = filters;
+        self.items = self.shown(&self.all);
+        self.selected = None;
+        self.unseen = 0;
+        self.hidden_pages = 0;
+        ListChange::Reset { count: self.items.len() }
+    }
+
+    /// Whether every loaded row is hidden by the filters (there are some).
+    pub fn all_hidden(&self) -> bool {
+        self.items.is_empty() && !self.all.is_empty()
+    }
+
+    /// Whether the last loads brought rows the filters all hid, so the column
+    /// should load older ones by itself (at most [`MAX_HIDDEN_PAGES`] times in
+    /// a row) instead of waiting for a scroll that may never come.
+    pub fn wants_more(&self) -> bool {
+        self.has_older() && (1..=MAX_HIDDEN_PAGES).contains(&self.hidden_pages)
     }
 
     /// The row highlighted for keyboard actions.
@@ -138,7 +193,7 @@ impl ColumnModel {
 
     /// How many rows at the top are pinned tweets. Newer rows go below them.
     pub fn pinned(&self) -> usize {
-        self.items.iter().take_while(|item| matches!(item, FeedItem::Pinned(_))).count()
+        leading_pins(&self.items)
     }
 
     /// The user scrolled to the top: everything is seen.
@@ -208,7 +263,9 @@ impl ColumnModel {
                 self.keys.clear();
                 // Same end-of-feed rule as `Older`: no rows means nothing below.
                 self.older = if page.items.is_empty() { None } else { page.older };
-                self.items = self.dedup(page.items);
+                self.all = self.dedup(page.items);
+                self.items = self.shown(&self.all);
+                self.count_hidden_page(self.all.len(), self.items.len());
                 self.newer = page.newer;
                 self.loaded_once = true;
                 self.unseen = 0;
@@ -220,12 +277,15 @@ impl ColumnModel {
                 // with no rows; either way stop asking.
                 self.older = if page.items.is_empty() { None } else { page.older };
                 let fresh = self.dedup(unpinned(page.items));
-                if fresh.is_empty() {
+                let shown = self.shown(&fresh);
+                self.count_hidden_page(fresh.len(), shown.len());
+                self.all.extend(fresh);
+                if shown.is_empty() {
                     return ListChange::None;
                 }
                 let start = self.items.len();
-                let count = fresh.len();
-                self.items.extend(fresh);
+                let count = shown.len();
+                self.items.extend(shown);
                 ListChange::Splice { range: start..start, count }
             }
             LoadKind::Newer => {
@@ -233,15 +293,20 @@ impl ColumnModel {
                     self.newer = page.newer;
                 }
                 let fresh = self.dedup(unpinned(page.items));
-                if fresh.is_empty() {
+                let shown = self.shown(&fresh);
+                // Hidden pins still lead `all`, so its insertion point can
+                // differ from the visible one.
+                let at_all = leading_pins(&self.all);
+                self.all.splice(at_all..at_all, fresh);
+                if shown.is_empty() {
                     return ListChange::None;
                 }
-                let count = fresh.len();
+                let count = shown.len();
                 let at = self.pinned();
                 self.unseen += count;
                 // Keep the same row selected when rows arrive above it.
                 self.selected = self.selected.map(|ix| if ix >= at { ix + count } else { ix });
-                self.items.splice(at..at, fresh);
+                self.items.splice(at..at, shown);
                 ListChange::Splice { range: at..at, count }
             }
         }
@@ -250,13 +315,29 @@ impl ColumnModel {
     /// Replaces the source (e.g. switching Home between For you and Following)
     /// and clears all rows.
     pub fn set_source(&mut self, source: FeedSource) -> ListChange {
-        *self = Self::new(source);
+        *self = Self::with_filters(source, std::mem::take(&mut self.filters));
         ListChange::Reset { count: 0 }
     }
 
     fn dedup(&mut self, items: Vec<FeedItem>) -> Vec<FeedItem> {
         items.into_iter().filter(|item| self.keys.insert(item.key())).collect()
     }
+
+    /// The rows of `items` the filters show.
+    fn shown(&self, items: &[FeedItem]) -> Vec<FeedItem> {
+        items.iter().filter(|item| self.filters.shows(item)).cloned().collect()
+    }
+
+    /// Counts a page of `loaded` new rows, of which `shown` show.
+    fn count_hidden_page(&mut self, loaded: usize, shown: usize) {
+        self.hidden_pages =
+            if loaded > 0 && shown == 0 { self.hidden_pages.saturating_add(1) } else { 0 };
+    }
+}
+
+/// How many rows at the top of `items` are pinned tweets.
+fn leading_pins(items: &[FeedItem]) -> usize {
+    items.iter().take_while(|item| matches!(item, FeedItem::Pinned(_))).count()
 }
 
 /// `items` without pinned tweets. Pins are only taken from a refresh, so they
@@ -572,5 +653,144 @@ mod tests {
         assert_eq!(m.source(), &other);
         assert!(m.items().is_empty());
         assert!(!m.loaded_once());
+    }
+
+    use crate::state::filters::{TweetKind, kinds};
+    use twitty_model::{Media, Post, ReplyRef};
+
+    /// A text-only tweet with id `id`.
+    fn text(id: &str) -> Post {
+        let backend = MockBackend::new();
+        let page = block_on(backend.feed(&home(), PageRequest::First)).unwrap();
+        let post = page.items[0].posts()[0].clone();
+        Post { id: PostId::new(id), media: vec![], embed: None, reply_to: None, ..post }
+    }
+
+    /// A tweet with a picture, with id `id`.
+    fn picture(id: &str) -> Post {
+        let mut post = text(id);
+        let image = twitty_model::ImageRef { url: post.url.clone(), size: None, crops: vec![] };
+        post.media.push(Media::Image { image, alt: None });
+        post
+    }
+
+    /// Feeds `items` to a load of `kind`, with cursors both ways.
+    fn feed(m: &mut ColumnModel, kind: LoadKind, items: Vec<FeedItem>) -> ListChange {
+        m.begin(kind, Utc::now()).expect("a load can start");
+        let page = FeedPage {
+            items,
+            newer: Some(PageToken::new("newer")),
+            older: Some(PageToken::new("older")),
+        };
+        m.finish(kind, Ok(page))
+    }
+
+    fn ids(items: &[FeedItem]) -> Vec<String> {
+        items.iter().flat_map(|i| i.posts()).map(|p| p.id.to_string()).collect()
+    }
+
+    #[test]
+    fn filters_hide_rows_until_changed_back() {
+        let backend = MockBackend::new();
+        let hidden = [TweetKind::Retweets, TweetKind::Videos];
+        let mut m = ColumnModel::with_filters(home(), ColumnFilters::hiding(&hidden));
+        let change = load(&mut m, &backend, LoadKind::Refresh).unwrap();
+        let shown = m.items().len();
+        assert!(shown < MockBackend::PAGE_SIZE, "the mock's first page has a retweet");
+        assert_eq!(change, ListChange::Reset { count: shown });
+        assert!(m.items().iter().all(|i| hidden.iter().all(|k| !kinds(i).contains(k))));
+
+        m.select(1);
+        assert_eq!(m.set_filters(ColumnFilters::hiding(&hidden)), ListChange::None, "no change");
+        let change = m.set_filters(ColumnFilters::default());
+        assert_eq!(change, ListChange::Reset { count: MockBackend::PAGE_SIZE });
+        assert_eq!(m.items().len(), MockBackend::PAGE_SIZE, "hidden rows come back");
+        assert_eq!(m.selected(), None);
+    }
+
+    #[test]
+    fn hidden_new_rows_are_neither_unseen_nor_new_again() {
+        let mut m = ColumnModel::with_filters(home(), ColumnFilters::hiding(&[TweetKind::Images]));
+        feed(&mut m, LoadKind::Refresh, vec![FeedItem::Post(text("1"))]);
+        let change = feed(
+            &mut m,
+            LoadKind::Newer,
+            vec![FeedItem::Post(picture("3")), FeedItem::Post(text("2"))],
+        );
+        assert_eq!(change, ListChange::Splice { range: 0..0, count: 1 });
+        assert_eq!(m.unseen(), 1, "only the shown row counts");
+        assert_eq!(ids(m.items()), ["2", "1"]);
+
+        let again = feed(&mut m, LoadKind::Newer, vec![FeedItem::Post(picture("3"))]);
+        assert_eq!(again, ListChange::None, "a hidden row is still known");
+        let only_hidden = feed(&mut m, LoadKind::Newer, vec![FeedItem::Post(picture("4"))]);
+        assert_eq!(only_hidden, ListChange::None);
+        assert_eq!(m.unseen(), 1);
+
+        m.set_filters(ColumnFilters::default());
+        assert_eq!(ids(m.items()), ["4", "3", "2", "1"], "in feed order");
+        assert_eq!(m.unseen(), 0);
+    }
+
+    #[test]
+    fn newer_rows_keep_their_place_below_a_hidden_pin() {
+        let mut m =
+            ColumnModel::with_filters(home(), ColumnFilters::hiding(&[TweetKind::TextOnly]));
+        feed(
+            &mut m,
+            LoadKind::Refresh,
+            vec![FeedItem::Pinned(text("p")), FeedItem::Post(picture("1"))],
+        );
+        assert_eq!(m.pinned(), 0, "the pin is hidden");
+        let change = feed(&mut m, LoadKind::Newer, vec![FeedItem::Post(picture("2"))]);
+        assert_eq!(change, ListChange::Splice { range: 0..0, count: 1 });
+        m.set_filters(ColumnFilters::default());
+        assert_eq!(ids(m.items()), ["p", "2", "1"], "the pin still leads");
+        assert_eq!(m.pinned(), 1);
+    }
+
+    #[test]
+    fn pages_hidden_whole_ask_for_more_a_few_times() {
+        let mut m = ColumnModel::with_filters(home(), ColumnFilters::hiding(&[TweetKind::Images]));
+        assert!(!m.wants_more());
+        feed(&mut m, LoadKind::Refresh, vec![FeedItem::Post(picture("1"))]);
+        assert!(m.all_hidden());
+        for n in 2..=MAX_HIDDEN_PAGES + 1 {
+            assert!(m.wants_more(), "after {} hidden pages", n - 1);
+            feed(&mut m, LoadKind::Older, vec![FeedItem::Post(picture(&n.to_string()))]);
+        }
+        assert!(!m.wants_more(), "gives up until the user scrolls");
+
+        let change = feed(&mut m, LoadKind::Older, vec![FeedItem::Post(text("9"))]);
+        assert_eq!(change, ListChange::Splice { range: 0..0, count: 1 });
+        assert!(!m.wants_more() && !m.all_hidden());
+        feed(&mut m, LoadKind::Older, vec![FeedItem::Post(picture("10"))]);
+        assert!(m.wants_more(), "the count starts again after a shown row");
+    }
+
+    #[test]
+    fn a_thread_and_a_retweet_are_filtered_as_a_whole() {
+        let mut m = ColumnModel::with_filters(home(), ColumnFilters::hiding(&[TweetKind::Replies]));
+        let reply =
+            Post { reply_to: Some(ReplyRef { post: None, user: None, handle: None }), ..text("2") };
+        let by = std::sync::Arc::clone(&text("x").author);
+        feed(
+            &mut m,
+            LoadKind::Refresh,
+            vec![
+                FeedItem::Thread(vec![text("1"), reply.clone()]),
+                FeedItem::Repost { by, post: reply },
+                FeedItem::Post(text("3")),
+            ],
+        );
+        assert_eq!(ids(m.items()), ["3"]);
+    }
+
+    #[test]
+    fn switching_the_source_keeps_the_filters() {
+        let filters = ColumnFilters::hiding(&[TweetKind::Quotes]);
+        let mut m = ColumnModel::with_filters(home(), filters.clone());
+        m.set_source(FeedSource::Bookmarks);
+        assert_eq!(m.filters(), &filters);
     }
 }

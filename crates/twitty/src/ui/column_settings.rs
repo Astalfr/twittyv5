@@ -1,5 +1,5 @@
-//! A column's settings dialog: its name, width, and how it announces new
-//! tweets. Every change applies to the column right away.
+//! A column's settings dialog: its name, width, how it announces new tweets,
+//! and which tweets it shows. Every change applies to the column right away.
 
 use gpui_kit::{
     App, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render, Styled,
@@ -14,9 +14,13 @@ use crate::{
     sound,
     state::alerts::Announcement,
     state::deck::{ColumnId, ColumnSettings, ColumnWidth, Volume},
+    state::filters::TweetKind,
     ui::button::TextButton,
     ui::column,
 };
+
+/// Space kept between the dialog and the window's top and bottom edges.
+const DIALOG_MARGIN: f32 = 48.0;
 
 /// Volume slider granularity, in percent.
 const VOLUME_STEP: f32 = 5.0;
@@ -173,6 +177,19 @@ impl ColumnSettingsView {
         self.report(true, cx);
     }
 
+    /// Turns the advanced filters on (they apply, and their switches show)
+    /// or off (every tweet shows; the choices are kept).
+    pub fn set_advanced_filters(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.settings.filters.advanced = on;
+        self.report(true, cx);
+    }
+
+    /// Shows or hides the tweets of `kind`.
+    pub fn set_kind_shown(&mut self, kind: TweetKind, shown: bool, cx: &mut Context<Self>) {
+        self.settings.filters.set_shown(kind, shown);
+        self.report(true, cx);
+    }
+
     /// Sends a sample notification the way new tweets will, switched on or
     /// not: from the signed-in account, as if they had tweeted.
     pub fn test_notification(&self, cx: &mut Context<Self>) {
@@ -202,15 +219,20 @@ const DESKTOP_LABEL: &str = if cfg!(windows) {
 };
 
 impl Render for ColumnSettingsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let weak = cx.entity().downgrade();
         let alerts = self.settings.alerts;
+        let filters = &self.settings.filters;
         let section =
             |title: &'static str| div().pt_2().text_sm().font_weight(FontWeight::BOLD).child(title);
         v_flex()
             .id("column-settings")
+            .debug_selector(|| "column-settings".into())
             .w(px(420.))
+            // With the sound and the filters on, it can be taller than the window.
+            .max_h(window.viewport_size().height - px(DIALOG_MARGIN))
+            .overflow_y_scroll()
             .gap_3()
             .p_6()
             .rounded_2xl()
@@ -252,12 +274,18 @@ impl Render for ColumnSettingsView {
                     .justify_between()
                     .gap_3()
                     .child(
-                        Switch::new("column-desktop")
-                            .checked(alerts.desktop)
-                            .label(DESKTOP_LABEL)
-                            .on_click(move |on, _, cx| {
-                                weak.update(cx, |this, cx| this.set_desktop(*on, cx)).ok();
-                            }),
+                        // Shrinks (the label wraps) so the Test button stays inside.
+                        div().flex_1().min_w_0().child(
+                            Switch::new("column-desktop")
+                                .checked(alerts.desktop)
+                                .label(DESKTOP_LABEL)
+                                .on_click({
+                                    let weak = weak.clone();
+                                    move |on, _, cx| {
+                                        weak.update(cx, |this, cx| this.set_desktop(*on, cx)).ok();
+                                    }
+                                }),
+                        ),
                     )
                     .child(
                         Button::new("column-test-notification")
@@ -268,6 +296,34 @@ impl Render for ColumnSettingsView {
                             .on_click(cx.listener(|this, _, _, cx| this.test_notification(cx))),
                     ),
             )
+            .child(section("Filters"))
+            .child(
+                Switch::new("column-advanced-filters")
+                    .checked(filters.advanced)
+                    .label("Show advanced filters")
+                    .on_click({
+                        let weak = weak.clone();
+                        move |on, _, cx| {
+                            weak.update(cx, |this, cx| this.set_advanced_filters(*on, cx)).ok();
+                        }
+                    }),
+            )
+            .when(filters.advanced, |d| {
+                d.child(
+                    v_flex().debug_selector(|| "column-filters".into()).gap_3().pl_6().children(
+                        TweetKind::ALL.into_iter().enumerate().map(|(ix, kind)| {
+                            let weak = weak.clone();
+                            Switch::new(("column-filter", ix))
+                                .checked(filters.shows_kind(kind))
+                                .label(kind.label())
+                                .on_click(move |on, _, cx| {
+                                    weak.update(cx, |this, cx| this.set_kind_shown(kind, *on, cx))
+                                        .ok();
+                                })
+                        }),
+                    ),
+                )
+            })
             .child(
                 h_flex().justify_end().pt_2().child(
                     Button::new("column-settings-done")
@@ -414,5 +470,46 @@ mod tests {
         view.update(cx, |v, cx| v.set_sound(false, cx));
         cx.run_until_parked();
         assert!(cx.debug_bounds("column-volume").is_none());
+    }
+
+    #[gpui_kit::test]
+    fn the_advanced_switch_shows_the_filters(cx: &mut TestAppContext) {
+        let (view, events, cx) = open(ColumnSettings::default(), cx);
+        assert!(cx.debug_bounds("column-filters").is_none(), "hidden by default");
+
+        view.update(cx, |v, cx| v.set_advanced_filters(true, cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("column-filters").is_some());
+
+        view.update(cx, |v, cx| v.set_kind_shown(TweetKind::Replies, false, cx));
+        let filters = view.read_with(cx, |v, _| v.settings().filters.clone());
+        assert_eq!(filters, crate::state::filters::ColumnFilters::hiding(&[TweetKind::Replies]));
+
+        view.update(cx, |v, cx| v.set_advanced_filters(false, cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("column-filters").is_none());
+        let filters = view.read_with(cx, |v, _| v.settings().filters.clone());
+        assert!(!filters.is_active() && !filters.shows_kind(TweetKind::Replies), "kept for later");
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 3);
+        assert!(
+            events.iter().all(|e| matches!(e, ColumnSettingsEvent::Changed(..))),
+            "every switch is saved at once"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn the_dialog_scrolls_instead_of_outgrowing_the_window(cx: &mut TestAppContext) {
+        let _sound = cx.update(RecordingSound::install);
+        let (view, _, cx) = open(ColumnSettings::default(), cx);
+        cx.simulate_resize(gpui_kit::size(px(1000.), px(500.)));
+        view.update(cx, |v, cx| {
+            v.set_sound(true, cx);
+            v.set_advanced_filters(true, cx);
+        });
+        cx.run_until_parked();
+        let dialog = cx.debug_bounds("column-settings").expect("the dialog is drawn");
+        assert!(dialog.size.height <= px(500. - DIALOG_MARGIN), "{:?}", dialog.size);
     }
 }
