@@ -316,33 +316,45 @@ impl Render for LoginView {
                 |d, message| d.child(div().text_sm().text_color(theme.danger).child(message)),
             )
             .child(
+                div()
+                    .debug_selector(|| "login-footnote".into())
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(
+                        "The session is kept in Windows Credential Manager. Using Twitter's \
+                         internal API is against Twitter's terms; a secondary account is safer.",
+                    ),
+            )
+            .child(
                 h_flex()
                     .justify_end()
                     .gap_2()
                     .child(
-                        Button::new("login-cancel")
-                            .ghost()
-                            .text_button(Size::Medium)
-                            .label("Cancel")
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(LoginEvent::Dismissed))),
+                        div().debug_selector(|| "login-cancel".into()).child(
+                            Button::new("login-cancel")
+                                .ghost()
+                                .text_button(Size::Medium)
+                                .label("Cancel")
+                                .on_click(
+                                    cx.listener(|_, _, _, cx| cx.emit(LoginEvent::Dismissed)),
+                                ),
+                        ),
                     )
                     .when(paste_shown, |d| {
                         let submit = Button::new("login-submit");
                         let submit = if has_browser { submit.outline() } else { submit.primary() };
                         d.child(
-                            submit
-                                .text_button(Size::Medium)
-                                .label(if checking { "Checking…" } else { "Sign in" })
-                                .loading(checking)
-                                .disabled(browsing)
-                                .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+                            div().debug_selector(|| "login-submit".into()).child(
+                                submit
+                                    .text_button(Size::Medium)
+                                    .label(if checking { "Checking…" } else { "Sign in" })
+                                    .loading(checking)
+                                    .disabled(browsing)
+                                    .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+                            ),
                         )
                     }),
             )
-            .child(div().text_xs().text_color(theme.muted_foreground).child(
-                "The session is kept in Windows Credential Manager. Using Twitter's internal API is \
-                 against Twitter's terms; a secondary account is safer.",
-            ))
     }
 }
 
@@ -509,6 +521,21 @@ mod tests {
     fn browse(view: &Entity<LoginView>, cx: &mut VisualTestContext) {
         view.update_in(cx, |v, window, cx| v.sign_in_with_browser(window, cx));
         cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn cancel_comes_last_below_the_footnote(cx: &mut TestAppContext) {
+        let (_view, cx, _) = open(cx, MockBackend::new(), MemoryStore::default());
+        cx.run_until_parked();
+        let footnote = cx.debug_bounds("login-footnote").expect("the footnote is drawn");
+        let cancel = cx.debug_bounds("login-cancel").expect("cancel is drawn");
+        let dialog = cx.debug_bounds("login-dialog").expect("the dialog is drawn");
+        assert!(cancel.top() >= footnote.bottom(), "{cancel:?} below {footnote:?}");
+        // No sign-in window here, so the cookie fields and their button are shown.
+        let submit = cx.debug_bounds("login-submit").expect("sign in is drawn");
+        assert_eq!(submit.top(), cancel.top(), "side by side: {submit:?} {cancel:?}");
+        assert!(submit.left() >= cancel.right(), "sign in comes after cancel");
+        assert!(submit.right() <= dialog.right(), "{submit:?} inside {dialog:?}");
     }
 
     #[gpui_kit::test]
