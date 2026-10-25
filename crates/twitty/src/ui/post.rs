@@ -155,7 +155,7 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
                             .children(n.target.as_ref().filter(|p| !p.body.is_empty()).map(|p| {
                                 div()
                                     .text_color(theme.muted_foreground)
-                                    .child(p.body.text().to_owned())
+                                    .child(emoji::text(p.body.text().to_owned()))
                             })),
                     ),
             )
@@ -1072,7 +1072,7 @@ fn quote_card(
                     div()
                         .debug_selector(move || format!("quote-body-{}", id.1))
                         .text_color(theme.foreground)
-                        .child(body),
+                        .child(emoji::text(body)),
                 )
                 .when(more, |d| {
                     d.child(
@@ -1141,7 +1141,7 @@ pub(crate) fn post_preview(
                         .debug_selector(move || format!("{name}-body"))
                         .line_clamp(lines)
                         .text_color(theme.foreground)
-                        .child(shown.body.text().to_owned()),
+                        .child(emoji::text(shown.body.text().to_owned())),
                 ),
         )
         .children(post.media.first().map(|m| {

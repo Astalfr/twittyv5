@@ -13,7 +13,7 @@ use twitty_model::{Backend, BackendError, Post};
 use crate::{
     runtime::Runtime,
     state::compose::{self, ComposeTarget, MAX_LENGTH},
-    ui::{button::TextButton, post::post_preview},
+    ui::{button::TextButton, emoji, post::post_preview},
 };
 
 /// Width of the dialog card.
@@ -167,7 +167,9 @@ impl Render for ComposeView {
                                 .text_color(theme.muted_foreground)
                                 .child(format!("Replying to @{}", parent.author.handle)),
                         )
-                        .child(div().line_clamp(3).child(parent.body.text().to_owned())),
+                        .child(
+                            div().line_clamp(3).child(emoji::text(parent.body.text().to_owned())),
+                        ),
                 )
             })
             .child(Textarea::new(&self.text).disabled(sending))
