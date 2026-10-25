@@ -23,6 +23,7 @@ pub mod poll;
 pub mod profile;
 pub mod repost;
 pub mod settings;
+pub mod sheets;
 pub mod sources;
 pub mod thread;
 pub mod toasts;

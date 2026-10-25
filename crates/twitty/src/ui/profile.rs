@@ -142,6 +142,13 @@ impl ProfilePanel {
         self.tab
     }
 
+    /// The list's scroll position: the first row shown, and how far into it.
+    #[cfg(test)]
+    pub(crate) fn scroll_top(&self) -> (usize, gpui_kit::Pixels) {
+        let top = self.list.logical_scroll_top();
+        (top.item_ix, top.offset_in_item)
+    }
+
     pub fn model(&self, tab: ProfileTab) -> &ColumnModel {
         match tab {
             ProfileTab::Tweets => &self.tweets,
