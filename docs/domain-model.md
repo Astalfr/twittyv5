@@ -22,7 +22,7 @@ So Twitty has an **anti-corruption layer**:
 | `CommunityNote` | Context readers added to a tweet: `body` (`RichText`, its links as spans) and `url`, the note's own page |
 | `RichText` | `text: String` + `spans: Vec<Span>`. Spans are **byte ranges into `text`**, sorted and non-overlapping. |
 | `SpanKind` | `Mention`, `Hashtag`, `Cashtag`, `Link { display, url }` |
-| `Media` | `Image`, `Video`, `Gif`, each with an `ImageRef` that carries size hints (so the list can reserve height). A `Video` has its playable files as `VideoVariant`s (URL, bitrate, size), best first; `Media::stream` is the one to play by default |
+| `Media` | `Image`, `Video`, `Gif`, each with an `ImageRef` that carries size hints (so the list can reserve height) and suggested crops (`Region`s in pixels of the image, one per tile shape; empty when the source has none). A `Video` has its playable files as `VideoVariant`s (URL, bitrate, size), best first; `Media::stream` is the one to play by default |
 | `Embed` | `Quote(PostOrGone)`, `LinkCard`, `Poll` |
 | `FeedItem` | `Post`, `Repost { by, post }`, `Thread(Vec<Post>)`, `Notification`, `Unavailable`, `Unsupported { reason }` |
 | `FeedPage` | `items` + `newer`/`older` page tokens |
@@ -45,7 +45,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `search_users` (one 
 3c. **Community Notes**: `birdwatch_pivot` becomes `Post::community_note` (the note's text with its links, and its page); a pivot without text or link is dropped with a warning, the tweet stays. See [x-api.md](x-api.md#community-notes-2026-10-24).
 4. **Entities**: Twitter gives offsets in **Unicode code points** of the raw, HTML-escaped text (checked against 453 live entities on 2026-10-24: 98 only match as code points, none only as UTF-16). They are converted to byte ranges in the decoded string. Inverted, out-of-range or overlapping entities are dropped with a warning; the text itself is never lost.
 5. **Text clean-up**: decode HTML entities (`&amp;`, `&lt;`, …). Show `t.co` links as their `display_url`, with a `Link` span to the expanded URL. Drop the trailing media `t.co` link, and the leading `@mentions` of replies (both are outside `display_text_range`; reply info is shown separately).
-6. **Media**: images and posters use `media_url_https?name=medium`. A video keeps every MP4 variant (HLS playlists are left out), highest bitrate first, with the size Twitter puts in the path (`/vid/avc1/1280x720/…`) when there is one; a GIF's stream is its highest-bitrate MP4. Sizes come from `original_info`.
+6. **Media**: images and posters use `media_url_https?name=medium`. A video keeps every MP4 variant (HLS playlists are left out), highest bitrate first, with the size Twitter puts in the path (`/vid/avc1/1280x720/…`) when there is one; a GIF's stream is its highest-bitrate MP4. Sizes come from `original_info`. A photo's suggested crops come from `original_info.focus_rects` (Twitter gives five: 16:9, 1:1, about 7:8, 1:2 and the whole image); `ImageRef::with_crops` drops any that are empty or outside the image. Videos and GIFs have none.
 6b. **Cards**: `summary`/`summary_large_image`/`player`, `unified_card` (a JSON document inside a binding) and `<id>:broadcast` become `Embed::Link`; `pollNchoice_*` becomes `Embed::Poll`. Unknown cards are ignored, not unsupported. A quote wins over a card.
 6c. **Skipped on purpose** (not `Unsupported`): promoted entries, prompts and covers, who-to-follow users, trends and topics. Conversation modules become `FeedItem::Thread` (or a single `Post`).
 7. **Unavailable tweets** (`TweetTombstone`, `TweetUnavailable`, withheld, or a deleted quoted tweet) become `Unavailable { reason }` / `PostOrGone::Unavailable`.
@@ -56,7 +56,7 @@ The `Backend` trait (`viewer`, `feed`, `thread`, `profile`, `search_users` (one 
 
 Saved files:
 - `decks.json`: decks (name, icon), columns, `FeedSource`, and each column's name, width (px) and alerts (sound, volume, system notification). v1 → v2 turned the width presets into pixels (narrow 310, medium 350, wide 400). The deck `icon` was added later without a bump (absent or unknown = the grid icon).
-- `settings.json`: theme, `polling` and `animations` (optional, added without a version bump; absent = on), `gif_autoplay` and `sidebar_expanded` (same; absent = off), `check_updates` (same; absent = on)
+- `settings.json`: theme, `polling` and `animations` (optional, added without a version bump; absent = on), `gif_autoplay` and `sidebar_expanded` (same; absent = off), `media_max_height` (same; pixels, clamped to 150..=800 on load; absent = no limit), `check_updates` (same; absent = on)
 - the keyring entry holding the session (`{schema_version, auth_token, ct0}`, see `twitty::account`)
 - the optional tweet cache
 

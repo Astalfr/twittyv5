@@ -10,7 +10,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{dirs::AppDirs, state::playback::Autoplay};
+use crate::{
+    dirs::AppDirs,
+    state::{media_layout::MaxHeight, playback::Autoplay},
+};
 
 /// Current version of the settings file.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -33,6 +36,9 @@ pub struct Settings {
     /// off: they play when clicked).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gif_autoplay: Option<bool>,
+    /// The tallest a tweet's media may be (default: no limit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_max_height: Option<MaxHeight>,
     /// Whether the sidebar shows labels and the decks' edit buttons (default
     /// off: icons only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,6 +56,7 @@ impl Default for Settings {
             polling: None,
             animations: None,
             gif_autoplay: None,
+            media_max_height: None,
             sidebar_expanded: None,
             check_updates: None,
         }
@@ -149,6 +156,7 @@ mod tests {
         assert!(s.polling_enabled(), "v1 files predate the setting: polling on");
         assert!(s.animations_enabled(), "and animations on");
         assert_eq!(s.gif_autoplay(), Autoplay::Off, "and GIFs wait for a click");
+        assert_eq!(s.media_max_height, None, "and media are not capped");
         assert!(!s.sidebar_expanded(), "and the sidebar shows icons only");
         assert!(s.check_updates(), "and updates are looked for");
     }
@@ -158,6 +166,16 @@ mod tests {
         let s = Settings { theme: Some("Neon".into()), ..Settings::default() };
         assert_eq!(s.theme_or_default(&KNOWN), Some("Lights out"));
         assert_eq!(Settings::default().theme_or_default(&KNOWN), Some("Lights out"));
+    }
+
+    #[test]
+    fn media_max_height_is_stored_as_pixels_and_clamped() {
+        let s = Settings { media_max_height: Some(MaxHeight::new(420.0)), ..Settings::default() };
+        let json: serde_json::Value = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["media_max_height"], serde_json::json!(420));
+        let edited =
+            Settings::from_json(r#"{"schema_version": 1, "media_max_height": 5}"#).unwrap();
+        assert_eq!(edited.media_max_height, Some(MaxHeight::new(0.0)), "clamped to the minimum");
     }
 
     #[test]
@@ -177,6 +195,7 @@ mod tests {
             theme: Some("Light".into()),
             animations: Some(false),
             gif_autoplay: Some(true),
+            media_max_height: Some(MaxHeight::new(420.0)),
             sidebar_expanded: Some(true),
             check_updates: Some(false),
             ..Settings::default()

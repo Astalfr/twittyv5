@@ -209,7 +209,7 @@ mod tests {
         for scale in [1.0, 1.25, 1.5, 2.0, 3.0] {
             let target = BoxPx::bucket(LOGO_SIZE, LOGO_SIZE, scale).unwrap();
             assert!(dim(16) > target.w * 2, "the source is sharp enough at {scale}x");
-            let image = decode(&bytes, target).unwrap();
+            let image = decode(&bytes, target, None).unwrap();
             let size = image.size(0);
             assert_eq!(
                 (size.width.0, size.height.0),

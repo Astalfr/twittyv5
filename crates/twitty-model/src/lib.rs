@@ -28,7 +28,7 @@ pub use error::BackendError;
 pub use feed::{FeedItem, FeedPage, FeedSource, HomeMode, NotificationFilter, SearchSort, UserTab};
 pub use ids::{ListId, NotificationId, PageToken, PostId, UserId};
 pub use list::{ListSummary, ListVisibility};
-pub use media::{AspectRatio, ImageRef, Media, VideoVariant};
+pub use media::{AspectRatio, ImageRef, Media, Region, VideoVariant};
 pub use notification::{Notification, NotificationKind};
 pub use post::{
     CommunityNote, Embed, LinkCard, Metrics, Poll, PollOption, Post, PostOrGone, ReplyRef,
