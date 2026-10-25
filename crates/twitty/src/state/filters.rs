@@ -323,4 +323,22 @@ mod tests {
             assert_eq!(TweetKind::from_key(kind.key()), Some(kind));
         }
     }
+
+    #[test]
+    fn a_live_following_timeline_loses_its_retweets() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../twitty-x/tests/fixtures/home--latest-retweets.json"
+        );
+        let raw = std::fs::read_to_string(path).unwrap();
+        let items = twitty_x::translate::feed_page(&serde_json::from_str(&raw).unwrap()).page.items;
+        let is_retweet = |i: &&FeedItem| matches!(i, FeedItem::Repost { .. });
+        let retweets = items.iter().filter(is_retweet).count();
+        assert!(retweets > 0, "the fixture has retweets");
+
+        let filters = ColumnFilters::hiding(&[Retweets]);
+        let shown: Vec<_> = items.iter().filter(|i| filters.shows(i)).collect();
+        assert!(!shown.iter().any(is_retweet));
+        assert_eq!(shown.len(), items.len() - retweets, "only the retweets go");
+    }
 }

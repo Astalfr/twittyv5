@@ -1,8 +1,9 @@
 //! Scrubs captured Twitter responses so they can be committed as test fixtures.
 //!
-//! The output keeps the JSON structure, every key, all numbers and the length
-//! (in Unicode code points) of every string, so entity offsets stay valid.
-//! Text, names, handles, ids, URLs and opaque tokens are replaced with
+//! The output keeps the JSON structure, every key, all numbers but ids and the
+//! length (in Unicode code points) of every string, so entity offsets stay valid.
+//! Text, names, handles, ids (also numeric ones under an `id` or `*_id` key),
+//! URLs and opaque tokens are replaced with
 //! pseudo-random characters. The replacement of a word or id is the same
 //! everywhere in one run (a handle in `screen_name` matches the `@handle` in a
 //! tweet's text, an id in `id_str` matches the one in an `entryId`), but the
@@ -162,8 +163,30 @@ impl Anonymiser {
                     self.walk(v, path);
                     path.pop();
                 }
+                // Keys can be ids too (`media_entities` of a unified card, keyed
+                // `3_<media id>`): scrambled like the `id` values pointing at them.
+                if map.keys().any(|k| DIGIT_RUN.is_match(k)) {
+                    *map = std::mem::take(map)
+                        .into_iter()
+                        .map(|(k, v)| {
+                            let k = if DIGIT_RUN.is_match(&k) { self.opaque(&k) } else { k };
+                            (k, v)
+                        })
+                        .collect();
+                }
             }
             Value::Array(items) => items.iter_mut().for_each(|v| self.walk(v, path)),
+            // Ids sent as numbers (`source_user_id` of a media, `id` in cards).
+            Value::Number(n) => {
+                let key = path.last().map(String::as_str).unwrap_or_default();
+                if let Some(id) = n.as_u64()
+                    && (key == "id" || key.ends_with("_id"))
+                    && DIGIT_RUN.is_match(&id.to_string())
+                    && let Ok(scrubbed) = self.word(&id.to_string()).parse::<u64>()
+                {
+                    *n = scrubbed.into();
+                }
+            }
             Value::String(s) => {
                 // Card type names (`summary_large_image`, `unified_card`…) drive translation.
                 let card_name =
@@ -200,7 +223,7 @@ impl Anonymiser {
             return self.text(s);
         }
         if OPAQUE_KEYS.contains(&key) {
-            return WORD.replace_all(s, |c: &Captures<'_>| self.word(&c[0])).into_owned();
+            return self.opaque(s);
         }
         // Anything else is structural; only embedded ids are replaced.
         DIGIT_RUN.replace_all(s, |c: &Captures<'_>| self.word(&c[0])).into_owned()
@@ -227,6 +250,11 @@ impl Anonymiser {
         }
         out.push_str(&self.words(&s[last..]));
         out
+    }
+
+    /// An opaque token: every word and number in it is scrambled.
+    fn opaque(&self, s: &str) -> String {
+        WORD.replace_all(s, |c: &Captures<'_>| self.word(&c[0])).into_owned()
     }
 
     fn words(&self, s: &str) -> String {
@@ -473,6 +501,42 @@ mod tests {
         assert_eq!(v["entryId"], format!("tweet-{id}"));
         assert!(!id.starts_with('0'));
         assert_eq!(id.len(), 19);
+    }
+
+    #[test]
+    fn numeric_ids_are_scrubbed_like_string_ids() {
+        let mut v = json!({
+            "user": {"rest_id": "776016867420962816"},
+            "media": {"source_user_id": 776016867420962816_u64, "source_status_id": 18220723},
+            "card": {"string_value": "{\"id\":119027497,\"followers\":119027497}"},
+            "bitrate": 2176000,
+            "small_id": 12345
+        });
+        Anonymiser::with_key(42).anonymise(&mut v);
+        let user = v["user"]["rest_id"].as_str().unwrap().to_owned();
+        assert_eq!(v["media"]["source_user_id"].to_string(), user, "same id, same replacement");
+        assert_ne!(v["media"]["source_status_id"], 18220723);
+        let card: Value =
+            serde_json::from_str(v["card"]["string_value"].as_str().unwrap()).unwrap();
+        assert_ne!(card["id"], 119027497);
+        assert_eq!(card["followers"], 119027497, "counts are kept");
+        assert_eq!(v["bitrate"], 2176000);
+        assert_eq!(v["small_id"], 12345, "short numbers are structural");
+    }
+
+    #[test]
+    fn id_keys_are_scrubbed_like_the_ids_pointing_at_them() {
+        let doc = json!({
+            "component_objects": {"media_1": {"data": {"id": "3_2112487685814194176"}}},
+            "media_entities": {"3_2112487685814194176": {"media_url_https": "https://pbs.twimg.com/m.jpg"}}
+        });
+        let mut v = json!({"card": {"string_value": doc.to_string()}});
+        Anonymiser::with_key(42).anonymise(&mut v);
+        let out: Value = serde_json::from_str(v["card"]["string_value"].as_str().unwrap()).unwrap();
+        let id = out["component_objects"]["media_1"]["data"]["id"].as_str().unwrap();
+        assert!(!id.contains("2112487685814194176"));
+        assert!(out["media_entities"].get(id).is_some(), "the id still finds its entity");
+        assert!(out["component_objects"].get("media_1").is_some(), "other keys are kept");
     }
 
     #[test]

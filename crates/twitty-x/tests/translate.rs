@@ -15,6 +15,7 @@ use twitty_x::translate::{Translated, feed_page, follow_status, lists, users};
 const FIXTURES: &[&str] = &[
     "home",
     "home--latest",
+    "home--latest-retweets",
     "usertweets-elonmusk",
     "usertweets-nasa",
     "search-quotes",

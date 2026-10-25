@@ -324,7 +324,7 @@ TWITTY_LIVE=1 TWITTY_AUTH_TOKEN=… TWITTY_CT0=… cargo test -p twitty-x --test
 
 1. Capture into the gitignored `dumps/`: `twitty-x-cli capture home` / `capture op …`.
 2. Scrub it: `twitty-x-cli anonymise dumps/x.json crates/twitty-x/tests/fixtures/x.json`.
-   - Keeps the JSON structure, all keys and numbers, dates, `__typename`s, card type names, Twitter's own hosts and URL route words, and the code-point length of every string (so entity offsets stay valid).
+   - Keeps the JSON structure, keys and numbers (except ids: numbers under an `id`/`*_id` key, and keys with an id in them like a unified card's `media_entities` `3_<id>`, are scrambled with the same mapping as string ids), dates, `__typename`s, card type names, Twitter's own hosts and URL route words, and the code-point length of every string (so entity offsets stay valid).
    - Replaces text, names, handles, ids, other hosts, URL paths and opaque tokens with pseudo-random characters. A word or id maps to the same replacement everywhere in the file (handle in `screen_name` = `@handle` in text, `id_str` = id in `entryId`), but the key is random per run, so it can't be reversed with a dictionary.
    - Refuses to write if any original handle or user display name survives in a string value. Reviewed false positives (e.g. an account literally named "None" colliding with enum values) can be passed with `--allow`.
 3. Add the name to `FIXTURES` in `tests/translate.rs`, run `cargo insta review` and read the summary snapshot.
