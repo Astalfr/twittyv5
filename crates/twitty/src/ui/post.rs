@@ -285,7 +285,7 @@ fn profile_hover(
         .child(avatar(profile, AVATAR));
     let profile = Arc::clone(profile);
     let hub = hub.clone();
-    HoverCard::new(("author", key)).trigger(trigger).content(move |_, _, cx| {
+    HoverCard::new(("author", key)).trigger(trigger).content(move |_, window, cx| {
         let theme = cx.theme().clone();
         let p = Arc::clone(&profile);
         let hub = hub.clone();
@@ -306,7 +306,8 @@ fn profile_hover(
                     ),
             )
             .when(!p.bio.is_empty(), |d| {
-                d.child(div().text_sm().child(emoji::text(p.bio.text().to_owned())))
+                let bio = rich_text(("card-bio", key), &p.bio, &hub, theme.link, window, cx);
+                d.child(div().text_sm().child(bio))
             })
             .child(
                 h_flex()
@@ -1578,6 +1579,26 @@ mod tests {
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("count-tooltip").is_some(), "the full count shows on hover");
+    }
+
+    #[gpui_kit::test]
+    fn the_authors_card_shows_the_bio_as_rich_text(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
+        let author = Arc::make_mut(&mut post.author);
+        let tag = SpanKind::Hashtag { tag: "rust".into() };
+        author.bio = RichText::new("I like #rust", vec![Span { range: 7..12, kind: tag }]).unwrap();
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("card-bio-text-0").is_none(), "no card before hovering");
+
+        let face = cx.debug_bounds("post-avatar-0").expect("the avatar is rendered");
+        cx.simulate_mouse_move(face.center(), None, Default::default());
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("card-bio-text-0").is_some(), "the bio, as rich text");
     }
 
     /// A mock tweet whose only media is a GIF, rendered with `FakeVideo` and

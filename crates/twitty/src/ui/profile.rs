@@ -430,6 +430,9 @@ impl ProfilePanel {
                 .when(!p.bio.is_empty(), |d| {
                     d.child(rich_text(("bio", 0), &p.bio, &self.hub, theme.link, window, cx))
                 })
+                .when(p.location.is_some() || p.website.is_some(), |d| {
+                    d.child(self.render_place_and_site(&theme))
+                })
                 .child(
                     h_flex()
                         .debug_selector(|| "profile-counts".into())
@@ -441,6 +444,42 @@ impl ProfilePanel {
                         .child(count(p.counts.followers, "Followers")),
                 ),
         )
+    }
+
+    /// The location and the website, which opens in the browser.
+    fn render_place_and_site(&self, theme: &Theme) -> impl IntoElement {
+        let p = &self.profile;
+        let with_icon = |icon: IconName| {
+            h_flex().gap_1().min_w_0().child(Icon::new(icon).size(px(14.)).flex_none())
+        };
+        let site = p.website.as_ref().zip(profile::website_label(p)).map(|(url, label)| {
+            let url = url.to_string();
+            with_icon(IconName::Link).child(
+                div()
+                    .id("profile-website")
+                    .debug_selector(|| "profile-website".into())
+                    .truncate()
+                    .text_color(theme.link)
+                    .cursor_pointer()
+                    .hover(|s| s.underline())
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .child(label),
+            )
+        });
+        h_flex()
+            .flex_wrap()
+            .gap_x_4()
+            .text_sm()
+            .text_color(theme.muted_foreground)
+            .children(p.location.clone().map(|place| {
+                with_icon(IconName::MapPin).child(
+                    div()
+                        .debug_selector(|| "profile-location".into())
+                        .truncate()
+                        .child(emoji::text(place)),
+                )
+            }))
+            .children(site)
     }
 
     fn render_follow(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -630,7 +669,9 @@ impl Render for ProfilePanel {
 mod tests {
     use super::*;
     use gpui_kit::TestAppContext;
-    use twitty_model::{FollowAction, ImageRef, mock::MockBackend};
+    use twitty_model::{
+        FollowAction, ImageRef, RichText, Span, SpanKind, UserRef, mock::MockBackend,
+    };
 
     /// Draws the panel for `profile`, unknown to the mock so the refresh
     /// keeps it as given.
@@ -665,6 +706,40 @@ mod tests {
         });
         cx.run_until_parked();
         (panel, cx)
+    }
+
+    /// Someone with a bio mentioning an account, a location and a website.
+    fn described() -> Profile {
+        let mut p = someone();
+        let mention = SpanKind::Mention(UserRef { id: None, handle: "ferris".into() });
+        p.bio = RichText::new("Crab fan, by @ferris", vec![Span { range: 13..20, kind: mention }])
+            .unwrap();
+        p.location = Some("Paris 🇫🇷".into());
+        p.website = Some("https://www.rust-lang.org/".parse().unwrap());
+        p
+    }
+
+    #[gpui_kit::test]
+    fn the_bio_location_and_website_are_shown(cx: &mut TestAppContext) {
+        let cx = header(described(), cx);
+        assert!(cx.debug_bounds("bio-text-0").is_some(), "the bio, as rich text");
+        assert!(cx.debug_bounds("profile-location").is_some());
+        assert!(cx.debug_bounds("profile-website").is_some());
+    }
+
+    #[gpui_kit::test]
+    fn without_a_location_or_website_there_is_no_row_for_them(cx: &mut TestAppContext) {
+        let cx = header(someone(), cx);
+        assert!(cx.debug_bounds("profile-location").is_none());
+        assert!(cx.debug_bounds("profile-website").is_none());
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_website_opens_it(cx: &mut TestAppContext) {
+        let cx = header(described(), cx);
+        let site = cx.debug_bounds("profile-website").expect("the website is drawn");
+        cx.simulate_click(site.center(), gpui_kit::Modifiers::default());
+        assert_eq!(cx.opened_url().as_deref(), Some("https://www.rust-lang.org/"));
     }
 
     fn click_follow(cx: &mut gpui_kit::VisualTestContext) {

@@ -291,6 +291,42 @@ fn authors_are_shared_within_a_page() {
     assert!(same.iter().all(|a| std::sync::Arc::ptr_eq(a, first)), "one Arc per author");
 }
 
+/// Authors' bios: Twitter marks up only their links, so mentions, hashtags
+/// and cashtags are found in the text. E-mail addresses must stay plain.
+/// (The fixture's other bios with mentions belong to promoted tweets, which
+/// are not shown.)
+#[test]
+fn bios_mark_up_links_mentions_and_hashtags() {
+    let page = load("home").page;
+    let mut seen = std::collections::HashSet::new();
+    let mut out = String::new();
+    for p in page.items.iter().flat_map(FeedItem::posts) {
+        let quoted = match &p.embed {
+            Some(Embed::Quote { quoted }) => match quoted.as_ref() {
+                PostOrGone::Post(q) => Some(&q.author),
+                PostOrGone::Unavailable { .. } => None,
+            },
+            _ => None,
+        };
+        for a in std::iter::once(&p.author).chain(quoted) {
+            if a.bio.spans().is_empty() || !seen.insert(a.id.clone()) {
+                continue;
+            }
+            let _ = writeln!(out, "@{}", a.handle);
+            for s in a.bio.spans() {
+                let kind = match &s.kind {
+                    SpanKind::Mention(u) => format!("mention {}", u.handle),
+                    SpanKind::Hashtag { tag } => format!("hashtag {tag}"),
+                    SpanKind::Cashtag { symbol } => format!("cashtag {symbol}"),
+                    SpanKind::Link { url } => format!("link {url}"),
+                };
+                let _ = writeln!(out, "  {:?} {kind}", &a.bio.text()[s.range.clone()]);
+            }
+        }
+    }
+    insta::assert_snapshot!("home-bios", out);
+}
+
 /// The v1.1 `friendships/create` replies (hand-written, no real account):
 /// what each follow change reads as.
 #[test]

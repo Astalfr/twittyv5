@@ -45,6 +45,9 @@ gpui_kit::assets::icon_assets!(
         PanelLeftClose,
         Pencil,
         Trash,
+        // The profile's location and website.
+        MapPin,
+        Link,
         // Deck icons (`ui::deck_settings::icon`).
         LayoutGrid,
         Star,
@@ -153,6 +156,8 @@ mod tests {
             IconName::PanelLeftClose,
             IconName::Pencil,
             IconName::Trash,
+            IconName::MapPin,
+            IconName::Link,
             // The title bar's window buttons.
             IconName::WindowMinimize,
             IconName::WindowMaximize,

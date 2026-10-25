@@ -236,6 +236,7 @@ Promoted entries (`promoted-tweet-*`, or items with `promotedMetadata`) will be 
 Observed live on 2026-10-24 (input for M4):
 - `HomeTimeline`: one `TimelineAddEntries` with `cursor-top`, 28 `tweet-*`, 7 `promoted-tweet-*`, `cursor-bottom`; all results were `Tweet`.
 - **User objects changed**: `core.user_results.result` has no `legacy` block anymore. Name and handle are in `core.{name, screen_name, created_at}`, and there are `avatar`, `banner`, `profile_bio`, `location`, `website`, `verification`, `is_blue_verified`, `relationship_counts`, `relationship_perspectives`, `tweet_counts`, `privacy`.
+- `profile_bio.entities.description` only ever has `urls` (checked on 491 bios, 2026-10-25), even when the bio has `@handles` or `#tags`: those are found in the text by `translate::text::typed_entities`. `profile_bio.entities.url` holds the website.
 - Tweets still have `legacy` (`full_text`, `entities`, `extended_entities`, counts, `favorited`, `retweeted`, `bookmarked`, `created_at`, `quoted_status_id_str`), plus `views`, `quoted_status_result`, `edit_control`, `grok_*`.
 - `HomeLatestTimeline` on the test account returned no tweets: a `TimelineShowCover` (email review prompt) and an entry `flip-prompt-message-grok-bot-inline`. Covers and prompts must be skipped.
 

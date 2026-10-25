@@ -7,6 +7,7 @@
 
 use serde_json::Value;
 use twitty_model::{RichText, Span, SpanKind, UserId, UserRef};
+use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 use url::Url;
 
 use crate::wire::{array_at, at, str_at};
@@ -69,6 +70,117 @@ pub(crate) fn entities(set: &Value) -> Vec<RawEntity> {
     });
     push("media", &|_| Some(RawKind::Media));
     out
+}
+
+/// The mentions, hashtags and cashtags typed in `raw`, found the way Twitter's
+/// web client finds them (a rough port of twitter-text). Bios need this: their
+/// entities only carry `urls` (checked on 491 live bios, 2026-10-25). Offsets
+/// are code points, like Twitter's.
+pub(crate) fn typed_entities(raw: &str) -> Vec<RawEntity> {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let before = i.checked_sub(1).and_then(|j| chars.get(j).copied());
+        let found = match chars[i] {
+            '@' | '＠' => mention(&chars, i, before),
+            '#' | '＃' => hashtag(&chars, i, before),
+            '$' => cashtag(&chars, i, before),
+            _ => None,
+        };
+        match found {
+            Some(e) => {
+                i = e.end;
+                out.push(e);
+            }
+            None => i += 1,
+        }
+    }
+    out
+}
+
+fn handle_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Letters, digits, `_` and combining marks (Hindi, Thai… hashtags).
+fn hashtag_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c.general_category_group() == GeneralCategoryGroup::Mark
+}
+
+/// The end of the run of `ok` characters starting at `from`.
+fn run_end(chars: &[char], from: usize, ok: impl Fn(char) -> bool) -> usize {
+    chars
+        .get(from..)
+        .and_then(|rest| rest.iter().position(|&c| !ok(c)))
+        .map_or(chars.len(), |n| from + n)
+}
+
+/// Whether the text at `end` goes on like an e-mail address or a URL, which
+/// makes what came before it not an entity.
+fn goes_on_as_address(chars: &[char], end: usize) -> bool {
+    matches!(chars.get(end), Some('@' | '＠' | '#' | '＃'))
+        || chars.get(end..end + 3) == Some(&[':', '/', '/'][..])
+}
+
+fn mention(chars: &[char], at: usize, before: Option<char>) -> Option<RawEntity> {
+    // `name@example.com` is an e-mail address, not a mention.
+    if before.is_some_and(|c| handle_char(c) || "@＠!#$%&*".contains(c)) {
+        return None;
+    }
+    let end = run_end(chars, at + 1, handle_char);
+    if !(1..=15).contains(&(end - at - 1)) || goes_on_as_address(chars, end) {
+        return None;
+    }
+    let handle = chars[at + 1..end].iter().collect();
+    Some(RawEntity { start: at, end, kind: RawKind::Mention { handle, id: None } })
+}
+
+fn hashtag(chars: &[char], at: usize, before: Option<char>) -> Option<RawEntity> {
+    // The raw text is HTML-escaped: `&#39;` is not a hashtag.
+    if before.is_some_and(|c| hashtag_char(c) || c == '&') {
+        return None;
+    }
+    let end = run_end(chars, at + 1, hashtag_char);
+    let tag = &chars[at + 1..end];
+    // At least one letter: `#123` and the keycap `#️⃣` (marks only) are not tags.
+    if !tag.iter().any(|c| c.is_alphabetic()) || goes_on_as_address(chars, end) {
+        return None;
+    }
+    Some(RawEntity { start: at, end, kind: RawKind::Hashtag(tag.iter().collect()) })
+}
+
+/// `$TSLA`, `$BRK.A`: 1 to 6 letters, then maybe a `.` or `_` and 1 or 2 more.
+fn cashtag(chars: &[char], at: usize, before: Option<char>) -> Option<RawEntity> {
+    if before.is_some_and(|c| !c.is_whitespace()) {
+        return None;
+    }
+    let letters = |from| run_end(chars, from, |c: char| c.is_ascii_alphabetic());
+    let mut end = letters(at + 1);
+    if !(1..=6).contains(&(end - at - 1)) {
+        return None;
+    }
+    if matches!(chars.get(end), Some('.' | '_')) {
+        let suffix = letters(end + 1);
+        if (1..=2).contains(&(suffix - end - 1)) {
+            end = suffix;
+        }
+    }
+    if chars.get(end).is_some_and(|&c| hashtag_char(c)) || goes_on_as_address(chars, end) {
+        return None;
+    }
+    Some(RawEntity { start: at, end, kind: RawKind::Cashtag(chars[at + 1..end].iter().collect()) })
+}
+
+/// Adds the entities typed in `raw` to Twitter's own, skipping those that
+/// overlap one of Twitter's (an `@` inside a link).
+pub(crate) fn with_typed_entities(raw: &str, mut ents: Vec<RawEntity>) -> Vec<RawEntity> {
+    let typed: Vec<_> = typed_entities(raw)
+        .into_iter()
+        .filter(|t| !ents.iter().any(|e| e.start < t.end && t.start < e.end))
+        .collect();
+    ents.extend(typed);
+    ents
 }
 
 /// Reads the entities of Twitter's "rich message" texts (Community Notes, …):
@@ -263,6 +375,56 @@ mod tests {
         assert!(rt.spans().is_empty(), "unparsable URL gives no link span");
     }
 
+    /// The text each typed entity covers.
+    fn typed(raw: &str) -> Vec<String> {
+        let chars: Vec<char> = raw.chars().collect();
+        typed_entities(raw).iter().map(|e| chars[e.start..e.end].iter().collect()).collect()
+    }
+
+    #[test]
+    fn typed_mentions_hashtags_and_cashtags() {
+        assert_eq!(
+            typed("@a hi (@b_2), #tag. $AAPL $BRK.A ＠wide ＃広い #日本語"),
+            ["@a", "@b_2", "#tag", "$AAPL", "$BRK.A", "＠wide", "＃広い", "#日本語"]
+        );
+    }
+
+    #[test]
+    fn combining_marks_stay_in_a_hashtag() {
+        assert_eq!(typed("#हिन्दी #ภาษาไทย"), ["#हिन्दी", "#ภาษาไทย"]);
+    }
+
+    #[test]
+    fn addresses_and_lookalikes_are_not_typed_entities() {
+        let none: [&str; 0] = [];
+        for raw in [
+            "me@example.com",
+            "aysvczyothcf4@njkxf.mwy",
+            "@toolonghandle_1234",
+            "@a@b",
+            "@a://x",
+            "it&#39;s",
+            "a#b",
+            "#123",
+            "#️⃣",
+            "# alone",
+            "@ alone",
+            "$5 a$B $TOOLONG $a1",
+        ] {
+            assert_eq!(typed(raw), none, "{raw}");
+        }
+    }
+
+    #[test]
+    fn typed_entities_inside_twitters_are_skipped() {
+        let raw = "see https://t.co/@x #ok";
+        let ents = entities(&json!({"urls": [{"url": "https://t.co/@x",
+            "expanded_url": "https://a.io/@x", "display_url": "a.io/@x", "indices": [4, 18]}]}));
+        let rt = rich_text(raw, with_typed_entities(raw, ents), None);
+        let s = spans(&rt);
+        assert_eq!(s.iter().map(|s| s.0).collect::<Vec<_>>(), ["a.io/@x", "#ok"]);
+    }
+
     fn link_ref(from: usize, to: usize, expanded: &str) -> Value {
         json!({"fromIndex": from, "toIndex": to, "ref": {
             "type": "TimelineUrl", "url": "https://t.co/x", "expandedUrl": expanded, "urlType": "ExternalUrl"
@@ -314,6 +476,33 @@ mod tests {
             let rt = rich_text(&raw, rich_message_entities(&raw, &ents), None);
             for s in rt.spans() {
                 prop_assert!(rt.text().get(s.range.clone()).is_some());
+            }
+        }
+    }
+
+    proptest! {
+        /// Whatever a bio says, finding its entities never panics and gives
+        /// valid, sorted, non-overlapping spans that start with their sigil.
+        #[test]
+        fn typed_entities_never_panic_and_spans_are_valid(
+            raw in "([@#$＠＃&_:/. a-zA-Z0-9]|\\PC){0,40}",
+            urls in proptest::collection::vec((0usize..45, 0usize..45), 0..3),
+        ) {
+            let ents = urls.into_iter().map(|(start, end)| RawEntity {
+                start,
+                end,
+                kind: RawKind::Url { display: "d.io".into(), expanded: "https://d.io/".into() },
+            }).collect();
+            let rt = rich_text(&raw, with_typed_entities(&raw, ents), None);
+            let mut last = 0;
+            for s in rt.spans() {
+                let covered = rt.text().get(s.range.clone());
+                prop_assert!(covered.is_some());
+                prop_assert!(s.range.start >= last);
+                last = s.range.end;
+                if !matches!(s.kind, SpanKind::Link { .. }) {
+                    prop_assert!(covered.is_some_and(|c| c.starts_with(['@', '#', '$', '＠', '＃'])));
+                }
             }
         }
     }
