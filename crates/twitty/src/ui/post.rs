@@ -440,6 +440,9 @@ fn post_row(
                 .child(emoji::text(post.author.display_name.clone())),
         )
         .children(post.author.badges.verified.map(|v| verified_badge(v, &theme)))
+        .when(post.author.badges.protected, |d| {
+            d.child(protected_badge(format!("post-protected-{key}"), &theme))
+        })
         .child(
             div()
                 .id(("author-handle", key))
@@ -736,6 +739,17 @@ pub(crate) fn verified_badge(
         VerifiedKind::Government => theme.muted_foreground,
     };
     Icon::new(IconName::BadgeCheck).size(px(16.)).text_color(color).flex_none()
+}
+
+/// The lock shown after a protected account's name, tagged `selector` for tests.
+pub(crate) fn protected_badge(
+    selector: String,
+    theme: &gpui_kit::component::Theme,
+) -> impl IntoElement {
+    div()
+        .debug_selector(move || selector)
+        .flex_none()
+        .child(Icon::new(IconName::Lock).size(px(14.)).text_color(theme.muted_foreground))
 }
 
 /// Text with clickable mentions, hashtags and links. The hovered one is
@@ -1548,6 +1562,26 @@ mod tests {
         let time = cx.debug_bounds("post-time-0").expect("the time is rendered");
         assert!(time.size.width > px(10.), "the time keeps its width: {time:?}");
         assert!(time.right() <= px(310.), "the time is inside the row: {time:?}");
+    }
+
+    #[gpui_kit::test]
+    fn a_protected_author_has_a_lock_by_the_name(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
+        Arc::make_mut(&mut post.author).badges.protected = false;
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let item = FeedItem::Post(post.clone());
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item, hub: hub.clone() });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("post-protected-0").is_none(), "a public account has none");
+
+        Arc::make_mut(&mut post.author).badges.protected = true;
+        let (_view, cx) = cx.add_window_view(|_, _| OnePost { item: FeedItem::Post(post), hub });
+        cx.run_until_parked();
+        let lock = cx.debug_bounds("post-protected-0").expect("the lock is rendered");
+        let name = cx.debug_bounds("post-name-0").expect("the name is rendered");
+        let handle = cx.debug_bounds("post-handle-0").expect("the handle is rendered");
+        assert!(name.right() <= lock.left() && lock.right() <= handle.left(), "{lock:?}");
     }
 
     #[gpui_kit::test]

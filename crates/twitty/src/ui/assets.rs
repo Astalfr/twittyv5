@@ -50,6 +50,8 @@ gpui_kit::assets::icon_assets!(
         // A pinned tweet's label.
         Pin,
         Link,
+        // A protected account's badge.
+        Lock,
         // Deck icons (`ui::deck_settings::icon`).
         LayoutGrid,
         Star,
@@ -161,6 +163,7 @@ mod tests {
             IconName::MapPin,
             IconName::Pin,
             IconName::Link,
+            IconName::Lock,
             // The title bar's window buttons.
             IconName::WindowMinimize,
             IconName::WindowMaximize,
