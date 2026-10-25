@@ -81,6 +81,13 @@ impl std::fmt::Debug for ProfilePanel {
 }
 
 impl ProfilePanel {
+    /// Measures every row again (something their height depends on, like
+    /// the media height cap, changed).
+    pub fn remeasure(&mut self, cx: &mut Context<Self>) {
+        self.list.remeasure();
+        cx.notify();
+    }
+
     /// Shows `profile` at once, then refreshes it and loads its tweets.
     /// `viewer` is the signed-in account, if any.
     pub fn new(
@@ -517,7 +524,7 @@ impl ProfilePanel {
                         hub.update(cx, |hub, cx| hub.navigate(to, cx));
                     })
                     .child(
-                        img(remote_image::source(media.preview().url.as_str(), TILE, TILE))
+                        img(remote_image::cropped(media.preview(), TILE, TILE))
                             .size_full()
                             .object_fit(ObjectFit::Cover),
                     )

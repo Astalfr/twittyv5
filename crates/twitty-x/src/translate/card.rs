@@ -117,7 +117,7 @@ fn unified(doc: &str) -> Option<LinkCard> {
             let url = Url::parse(str_at(m, &["media_url_https"])?).ok()?;
             let w = u64_at(m, &["original_info", "width"]).and_then(|w| u32::try_from(w).ok());
             let h = u64_at(m, &["original_info", "height"]).and_then(|h| u32::try_from(h).ok());
-            Some(ImageRef { url, size: w.zip(h) })
+            Some(ImageRef::sized(url, w.zip(h)))
         });
     let domain = vanity
         .or(subtitle.clone())
@@ -153,7 +153,7 @@ impl<'a> Bindings<'a> {
         let url = Url::parse(str_at(v, &["url"])?).ok()?;
         let w = u64_at(v, &["width"]).and_then(|w| u32::try_from(w).ok());
         let h = u64_at(v, &["height"]).and_then(|h| u32::try_from(h).ok());
-        Some(ImageRef { url, size: w.zip(h) })
+        Some(ImageRef::sized(url, w.zip(h)))
     }
 }
 

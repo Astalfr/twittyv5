@@ -26,7 +26,7 @@ pub(crate) fn profile(user: &Value) -> Option<Profile> {
     let mut p = Profile::new(UserId::new(id), handle, name);
     p.avatar = either(&["avatar", "image_url"], &["legacy", "profile_image_url_https"])
         .and_then(|u| Url::parse(&avatar_size(u)).ok())
-        .map(|url| ImageRef { url, size: Some((73, 73)) });
+        .map(|url| ImageRef::sized(url, Some((73, 73))));
     p.banner = either(&["banner", "image_url"], &["legacy", "profile_banner_url"])
         .and_then(|u| Url::parse(u).ok())
         .map(ImageRef::new);

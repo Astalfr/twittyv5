@@ -11,17 +11,55 @@ pub struct ImageRef {
     pub url: Url,
     /// Intrinsic size in pixels, when known.
     pub size: Option<(u32, u32)>,
+    /// Regions worth keeping when the image is cropped to a box of another
+    /// shape, one per box shape the source suggests, in pixels of `size`.
+    /// Empty when there are none: crop around the centre.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crops: Vec<Region>,
 }
 
 impl ImageRef {
     /// An image without size information.
     pub fn new(url: Url) -> Self {
-        Self { url, size: None }
+        Self { url, size: None, crops: Vec::new() }
+    }
+
+    /// An image of known size, without suggested crops.
+    pub fn sized(url: Url, size: Option<(u32, u32)>) -> Self {
+        Self { url, size, crops: Vec::new() }
+    }
+
+    /// Adds the suggested `crops` that are non-empty and inside the image.
+    /// Without a size, none can be checked, so none are kept.
+    pub fn with_crops(mut self, crops: impl IntoIterator<Item = Region>) -> Self {
+        if let Some(size) = self.size {
+            self.crops.extend(crops.into_iter().filter(|r| r.fits_in(size)));
+        }
+        self
     }
 
     /// Width / height, when known and non-degenerate.
     pub fn aspect(&self) -> Option<AspectRatio> {
         self.size.and_then(|(w, h)| AspectRatio::new(w, h))
+    }
+}
+
+/// A rectangle in an image, in pixels from its top-left corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Region {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+}
+
+impl Region {
+    /// Whether the region is non-empty and inside a `size` (width, height) image.
+    pub fn fits_in(&self, (width, height): (u32, u32)) -> bool {
+        self.w > 0
+            && self.h > 0
+            && self.x.checked_add(self.w).is_some_and(|r| r <= width)
+            && self.y.checked_add(self.h).is_some_and(|b| b <= height)
     }
 }
 
@@ -110,6 +148,17 @@ mod tests {
         assert!(AspectRatio::new(0, 10).is_none());
         assert!(AspectRatio::new(10, 0).is_none());
         assert!((AspectRatio::new(16, 9).unwrap().as_f32() - 1.777).abs() < 0.01);
+    }
+
+    #[test]
+    fn only_crops_inside_the_image_are_kept() {
+        let url = Url::parse("https://img.example/p.jpg").unwrap();
+        let r = |x, y, w, h| Region { x, y, w, h };
+        let crops = [r(0, 0, 100, 50), r(0, 0, 0, 50), r(50, 0, 51, 50), r(0, 1, 100, 50)];
+        let image = ImageRef::sized(url.clone(), Some((100, 50))).with_crops(crops);
+        assert_eq!(image.crops, [r(0, 0, 100, 50)]);
+        assert!(ImageRef::new(url).with_crops(crops).crops.is_empty(), "no size, no check");
+        assert!(!r(u32::MAX, 0, 2, 1).fits_in((u32::MAX, 1)), "no overflow");
     }
 
     #[test]

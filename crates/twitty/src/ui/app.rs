@@ -6,9 +6,18 @@ use gpui_kit::{
     Animation, AnimationExt, AnyElement, AnyView, AnyWindowHandle, Context, ElementId, Entity,
     FocusHandle, FontWeight, ImgResourceLoader, IntoElement, ObjectFit, ParentElement, Render,
     Resource, ScrollHandle, SharedString, SharedUri, Styled, StyledImage, Subscription, Task,
-    Window, assets::IconName, canvas, component::button::*, component::checkbox::Checkbox,
-    component::scroll::ScrollableElement, component::tooltip::Tooltip, component::*, div, img,
-    prelude::*, px,
+    Window,
+    assets::IconName,
+    canvas,
+    component::button::*,
+    component::checkbox::Checkbox,
+    component::scroll::ScrollableElement,
+    component::slider::{Slider, SliderEvent, SliderState},
+    component::tooltip::Tooltip,
+    component::*,
+    div, img,
+    prelude::*,
+    px,
 };
 use twitty_model::{
     Backend, BackendError, FeedSource, Profile, SpanKind, UserRef, mock::MockBackend,
@@ -21,7 +30,7 @@ use crate::{
         compose::ComposeTarget,
         deck::{ColumnConfig, ColumnId, ColumnSettings, DeckFile, DeckIcon},
         interactions::Toggle,
-        media_layout::{self, viewer},
+        media_layout::{self, MaxHeight, viewer},
         motion,
         playback::{self, Autoplay, State},
         poll,
@@ -44,7 +53,7 @@ use crate::{
         keys,
         login::{LoginEvent, LoginView},
         player::{Options as PlayerOptions, Quality, VideoPlayer, play_pause_sign},
-        post::span_url,
+        post::{MediaMaxHeight, span_url},
         profile::{CloseProfile, ProfilePanel},
         repost::{RepostEvent, RepostView},
         theme,
@@ -157,6 +166,9 @@ pub struct TwittyApp {
     /// The settings page's scroll position, kept in a handle so the copy that
     /// animates out after "Done" doesn't jump back to the top.
     settings_scroll: ScrollHandle,
+    /// The settings page's media height slider (its last step is no limit).
+    media_height: Entity<SliderState>,
+    _media_height_sub: Subscription,
     /// The signed-in account, once the session check answered.
     viewer: Option<Profile>,
     login: Option<Entity<LoginView>>,
@@ -238,6 +250,23 @@ impl TwittyApp {
     ) -> Self {
         let theme_name = settings.theme_or_default(&theme::NAMES).unwrap_or(theme::NAMES[0]);
         let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&backend)));
+        let media_height = cx.new(|_| {
+            SliderState::new()
+                // `min` clamps against the current max (100), so max first.
+                .max(MaxHeight::slider_value(None))
+                .min(f32::from(MaxHeight::MIN))
+                .step(f32::from(MaxHeight::STEP))
+                .default_value(MaxHeight::slider_value(settings.media_max_height))
+        });
+        let media_height_sub =
+            cx.subscribe(&media_height, |this, _, e: &SliderEvent, cx| match e {
+                SliderEvent::Change(v) => {
+                    this.set_media_max_height(MaxHeight::from_slider(v.start()), false, cx);
+                }
+                SliderEvent::Release(v) => {
+                    this.set_media_max_height(MaxHeight::from_slider(v.start()), true, cx);
+                }
+            });
         let mut this = Self {
             deck,
             settings,
@@ -249,6 +278,8 @@ impl TwittyApp {
             deck_scroll: ScrollHandle::new(),
             deck_overflows: false,
             settings_scroll: ScrollHandle::new(),
+            media_height,
+            _media_height_sub: media_height_sub,
             viewer: None,
             login: None,
             add_column: None,
@@ -295,6 +326,7 @@ impl TwittyApp {
             cx.set_reduce_motion(true);
         }
         cx.set_global(GifAutoplay(this.settings.gif_autoplay()));
+        cx.set_global(MediaMaxHeight(this.settings.media_max_height));
         this.build_hub(window, cx);
         this.build_columns(cx);
         if this.options.session.is_some() {
@@ -1613,6 +1645,33 @@ impl TwittyApp {
         self.save_settings(cx);
     }
 
+    /// Caps the height of tweets' media (`None`: no cap). Rows already
+    /// measured are measured again, as their height changes. Saved when
+    /// `save` (the slider was released), else only shown.
+    pub fn set_media_max_height(
+        &mut self,
+        limit: Option<MaxHeight>,
+        save: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let changed = self.settings.media_max_height != limit;
+        if changed {
+            self.settings.media_max_height = limit;
+            cx.set_global(MediaMaxHeight(limit));
+            for (_, column) in &self.columns {
+                column.update(cx, |c, cx| c.remeasure(cx));
+            }
+            if let Some(panel) = self.profile_panel() {
+                panel.update(cx, |p, cx| p.remeasure(cx));
+            }
+        }
+        if save {
+            self.save_settings(cx);
+        } else if changed {
+            cx.notify();
+        }
+    }
+
     /// Turns the periodic update check on or off.
     pub fn set_check_updates(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.settings.check_updates = Some(enabled);
@@ -1700,6 +1759,25 @@ impl TwittyApp {
                             weak.update(cx, |this, cx| this.set_gif_autoplay(*checked, cx)).ok();
                         }
                     }),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .pt_1()
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .text_sm()
+                            .child("Maximum media height (taller media are cropped)")
+                            .child(
+                                div()
+                                    .text_color(theme.muted_foreground)
+                                    .child(MaxHeight::label(self.settings.media_max_height)),
+                            ),
+                    )
+                    .child(
+                        Slider::new(&self.media_height).accessibility_label("Maximum media height"),
+                    ),
             )
             .child(section("Appearance"))
             .child(
@@ -4351,6 +4429,57 @@ mod tests {
         );
         assert!(cx.update(|_, cx| cx.reduce_motion()), "animations off is GPUI's reduce motion");
         cx.simulate_keystrokes("escape");
+    }
+
+    #[gpui_kit::test]
+    fn the_media_height_cap_applies_live_and_is_saved(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            theme::init(theme::NAMES[0], cx);
+            cx.set_global(Runtime::inline());
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let options = AppOptions { settings_path: Some(path.clone()), ..AppOptions::default() };
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(DeckFile::default(), Settings::default(), backend, options, window, cx)
+        });
+        cx.run_until_parked();
+        // The heights of the media grids drawn in the first rows.
+        let grids = |cx: &mut gpui_kit::VisualTestContext| {
+            const GRIDS: [&str; 12] = [
+                "media-0", "media-1", "media-2", "media-3", "media-4", "media-5", "media-6",
+                "media-7", "media-8", "media-9", "media-10", "media-11",
+            ];
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            GRIDS
+                .iter()
+                .filter_map(|g| cx.debug_bounds(g))
+                .map(|b| f32::from(b.size.height))
+                .collect::<Vec<_>>()
+        };
+        let uncapped = grids(cx);
+        assert!(uncapped.iter().any(|h| *h > 160.), "some media are taller: {uncapped:?}");
+
+        // Dragging the slider shows the cap at once, but doesn't save it yet.
+        let cap = Some(MaxHeight::new(150.));
+        app.update(cx, |app, cx| app.set_media_max_height(cap, false, cx));
+        let capped = grids(cx);
+        assert_eq!(capped.len(), uncapped.len(), "the same rows are drawn");
+        // The grid's 1px border is outside the cap.
+        assert!(capped.iter().all(|h| *h <= 152.5), "capped at 150px: {capped:?}");
+        assert_eq!(Settings::load(&path).unwrap().media_max_height, None);
+
+        // Releasing it saves; the last step lifts the cap again.
+        app.update(cx, |app, cx| app.set_media_max_height(cap, true, cx));
+        cx.run_until_parked();
+        assert_eq!(Settings::load(&path).unwrap().media_max_height, cap);
+        app.update(cx, |app, cx| app.set_media_max_height(None, true, cx));
+        cx.run_until_parked();
+        assert_eq!(grids(cx), uncapped);
+        assert_eq!(Settings::load(&path).unwrap().media_max_height, None);
     }
 
     #[gpui_kit::test]

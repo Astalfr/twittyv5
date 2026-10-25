@@ -167,6 +167,13 @@ impl ColumnView {
         self.settings.title(self.model.source())
     }
 
+    /// Measures every row again (something their height depends on, like
+    /// the media height cap, changed).
+    pub fn remeasure(&mut self, cx: &mut Context<Self>) {
+        self.list.remeasure();
+        cx.notify();
+    }
+
     /// Applies edited settings (name, width, alerts).
     pub fn set_settings(&mut self, settings: ColumnSettings, cx: &mut Context<Self>) {
         if settings.width != self.settings.width {

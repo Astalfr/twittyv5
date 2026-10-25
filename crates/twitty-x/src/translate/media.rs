@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use serde_json::Value;
-use twitty_model::{ImageRef, Media, VideoVariant};
+use twitty_model::{ImageRef, Media, Region, VideoVariant};
 use url::Url;
 
 use crate::wire::{array_at, at, str_at, u64_at};
@@ -40,13 +40,19 @@ fn one(m: &Value) -> Option<Media> {
     })
 }
 
-/// The still image, sized for a column (`?name=medium`, at most 1200 px).
+/// The still image, sized for a column (`?name=medium`, at most 1200 px),
+/// with Twitter's suggested crops (`focus_rects`, one per tile shape, in
+/// pixels of the original). Videos and GIFs have none.
 fn image(m: &Value) -> Option<ImageRef> {
     let base = str_at(m, &["media_url_https"])?;
     let url = if base.contains('?') { base.to_owned() } else { format!("{base}?name=medium") };
     let w = u64_at(m, &["original_info", "width"]).and_then(|w| u32::try_from(w).ok());
     let h = u64_at(m, &["original_info", "height"]).and_then(|h| u32::try_from(h).ok());
-    Some(ImageRef { url: Url::parse(&url).ok()?, size: w.zip(h) })
+    let crops = array_at(m, &["original_info", "focus_rects"]).iter().filter_map(|r| {
+        let side = |k: &str| u64_at(r, &[k]).and_then(|v| u32::try_from(v).ok());
+        Some(Region { x: side("x")?, y: side("y")?, w: side("w")?, h: side("h")? })
+    });
+    Some(ImageRef::sized(Url::parse(&url).ok()?, w.zip(h)).with_crops(crops))
 }
 
 /// The MP4 variants, highest bitrate first (HLS playlists are left out).
@@ -113,6 +119,26 @@ mod tests {
         assert_eq!(m[1].stream(), Some(&variants[0].url));
         assert_eq!(*duration, Some(Duration::from_millis(43119)));
         assert!(matches!(&m[2], Media::Gif { stream: Some(_), .. }));
+    }
+
+    #[test]
+    fn a_photo_keeps_the_crops_that_fit_it() {
+        let legacy = json!({"extended_entities": {"media": [
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/A.jpg",
+             "original_info": {"width": 1075, "height": 1217, "focus_rects": [
+                {"x": 0, "y": 0, "w": 1075, "h": 602},
+                {"x": 151, "y": 0, "w": 609, "h": 1217},
+                {"x": 600, "y": 0, "w": 609, "h": 1217},
+                {"x": 0, "y": 0, "w": 0, "h": 10},
+                {"x": 0, "y": "?", "w": 10, "h": 10}
+             ]}},
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/media/B.jpg",
+             "original_info": {"focus_rects": [{"x": 0, "y": 0, "w": 10, "h": 10}]}}
+        ]}});
+        let m = media(&legacy);
+        let r = |x, y, w, h| Region { x, y, w, h };
+        assert_eq!(m[0].preview().crops, [r(0, 0, 1075, 602), r(151, 0, 609, 1217)]);
+        assert!(m[1].preview().crops.is_empty(), "no size to check them against");
     }
 
     #[test]

@@ -39,7 +39,7 @@ depends on nothing else of ours.
 | `state::follow` | The profile sheet's Follow button: optimistic follow/unfollow, rollback with the reason, protected accounts' requests, late profile refreshes ignored after a click |
 | `state::deck` | `DeckFile` (versioned `decks.json`), column add/remove/move, `ColumnSettings` (name, width, alerts) |
 | `state::alerts` | Which loads announce new rows, and the notification: who it's from (title and picture) and its lines |
-| `state::media_layout` | Geometry of the 1–4 media grid |
+| `state::media_layout` | Geometry of the 1–4 media grid, and which part of an image a tile shows (`crop_for`) |
 | `state::profile` | Profile sheet: Tweets / Media tabs and their sources, media gallery tiles, list row mapping and splices |
 | `state::motion` | Animation timing: which rows just arrived (`Recent`, `Entrance`), row frames, the toggle "pop" curve ([ui.md](ui.md#animations)) |
 | `state::playback` | Video frame timing (`Timeline`): the clock starts with the first frame, waits for a slow decoder, pauses, follows the sound while it plays (`tick_with`), seeks (with a preview while paused) and ends; which frame is due and which leave the screen |

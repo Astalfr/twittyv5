@@ -591,7 +591,7 @@ fn url(s: &str) -> Url {
 }
 
 fn image(s: &str, w: u32, h: u32) -> ImageRef {
-    ImageRef { url: url(s), size: Some((w, h)) }
+    ImageRef::sized(url(s), Some((w, h)))
 }
 
 fn photo(n: usize, k: usize, w: u32, h: u32) -> Media {

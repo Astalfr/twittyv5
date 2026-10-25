@@ -82,7 +82,11 @@ fn post_line(p: &Post, indent: &str) -> String {
             }
         };
         let size = m.preview().size.map(|(w, h)| format!(" {w}x{h}")).unwrap_or_default();
-        let _ = write!(s, " {{{kind}{size}{extra}}}");
+        let crops = match m.preview().crops.len() {
+            0 => String::new(),
+            n => format!(" ✂{n}"),
+        };
+        let _ = write!(s, " {{{kind}{size}{crops}{extra}}}");
     }
     if let Some(r) = &p.reply_to {
         let _ = write!(s, " ↩{}", r.handle.as_deref().unwrap_or("?"));

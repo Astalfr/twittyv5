@@ -809,6 +809,18 @@ pub fn span_url(kind: &SpanKind) -> String {
     }
 }
 
+/// The media height cap from Settings, for the rows to read. Changing it must
+/// also remeasure the lists showing rows (`TwittyApp::set_media_max_height`).
+#[derive(Debug, Clone, Copy)]
+pub struct MediaMaxHeight(pub Option<media_layout::MaxHeight>);
+
+impl gpui_kit::Global for MediaMaxHeight {}
+
+/// The app's media height cap; none when unset.
+pub fn media_max_height(cx: &App) -> Option<media_layout::MaxHeight> {
+    cx.try_global::<MediaMaxHeight>().and_then(|g| g.0)
+}
+
 #[expect(clippy::too_many_arguments, reason = "the row's pieces, passed down as is")]
 fn media_grid(
     id: (&'static str, usize),
@@ -824,8 +836,8 @@ fn media_grid(
     let post = Arc::new(post.clone());
     // Tiles are positioned inside the 1px border, so lay them out on the inner width.
     let inner = (width - 2.0 * BORDER).max(0.0);
-    let grid =
-        media_layout::layout(media.len(), media.first().and_then(|m| m.preview().aspect()), inner);
+    let aspect = media.first().and_then(|m| m.preview().aspect());
+    let grid = media_layout::layout(media.len(), aspect, inner, media_max_height(cx));
     div()
         .id(id)
         .debug_selector(move || format!("{}-{}", id.0, id.1))
@@ -869,7 +881,7 @@ fn media_grid(
                 .w(px(tile.w))
                 .h(px(tile.h))
                 .child(rounded_img(
-                    remote_image::source(m.preview().url.as_str(), tile.w, tile.h),
+                    remote_image::cropped(m.preview(), tile.w, tile.h),
                     tile.w,
                     tile.h,
                     corners,
@@ -1134,14 +1146,15 @@ pub(crate) fn post_preview(
         )
         .children(post.media.first().map(|m| {
             let inner = (width - 2.0 * BORDER).max(0.0);
-            let h = media_layout::layout(1, m.preview().aspect(), inner).height.min(max_media);
+            let h =
+                media_layout::layout(1, m.preview().aspect(), inner, None).height.min(max_media);
             div()
                 .debug_selector(move || format!("{name}-media"))
                 .relative()
                 .w_full()
                 .h(px(h))
                 .child(rounded_img(
-                    remote_image::source(m.preview().url.as_str(), inner, h),
+                    remote_image::cropped(m.preview(), inner, h),
                     inner,
                     h,
                     media_layout::Corners::BOTTOM,
@@ -1584,10 +1597,10 @@ mod tests {
             crate::video::FakeVideo::install(vec![std::time::Duration::ZERO], cx)
         });
         let (mut post, backend) = mock_post();
-        let poster = twitty_model::ImageRef {
-            url: "https://pbs.twimg.com/tweet_video_thumb/a.jpg".parse().unwrap(),
-            size: Some((480, 270)),
-        };
+        let poster = twitty_model::ImageRef::sized(
+            "https://pbs.twimg.com/tweet_video_thumb/a.jpg".parse().unwrap(),
+            Some((480, 270)),
+        );
         let stream = Some("https://video.twimg.com/tweet_video/a.mp4".parse().unwrap());
         post.media = vec![Media::Gif { poster, stream, alt: None }];
         post.embed = None;
@@ -1674,10 +1687,10 @@ mod tests {
     fn a_quoted_video_or_gif_shows_its_badge(cx: &mut gpui_kit::TestAppContext) {
         cx.update(gpui_kit::init);
         let (outer, backend) = mock_post();
-        let poster = twitty_model::ImageRef {
-            url: "https://pbs.twimg.com/media/q.jpg".parse().unwrap(),
-            size: Some((1280, 720)),
-        };
+        let poster = twitty_model::ImageRef::sized(
+            "https://pbs.twimg.com/media/q.jpg".parse().unwrap(),
+            Some((1280, 720)),
+        );
         let quote = |media: Media| {
             let mut quoted = outer.clone();
             quoted.media = vec![media];
@@ -2297,10 +2310,10 @@ mod tests {
         cx.update(gpui_kit::init);
         let (outer, backend) = mock_post();
         let image = |k: usize| Media::Image {
-            image: twitty_model::ImageRef {
-                url: format!("https://pbs.twimg.com/media/q{k}.jpg").parse().unwrap(),
-                size: Some((1200, 800)),
-            },
+            image: twitty_model::ImageRef::sized(
+                format!("https://pbs.twimg.com/media/q{k}.jpg").parse().unwrap(),
+                Some((1200, 800)),
+            ),
             alt: None,
         };
         let mut quoted = outer.clone();
