@@ -856,20 +856,27 @@ impl TwittyApp {
         }
         self.leaving_sheet = (!leaving.is_empty() && !cx.reduce_motion()).then(|| Leaving {
             what: leaving,
-            _clear: Self::after_exit(cx, |this| this.leaving_sheet = None),
+            _clear: Self::after_exit(cx, cx.theme().motion.duration_slow, |this| {
+                this.leaving_sheet = None
+            }),
         });
         cx.notify();
     }
 
     /// Keeps `what` drawn while it animates out.
     fn leave(&mut self, what: LeavingOverlay, cx: &mut Context<Self>) {
-        self.leaving = (!cx.reduce_motion())
-            .then(|| Leaving { what, _clear: Self::after_exit(cx, |this| this.leaving = None) });
+        self.leaving = (!cx.reduce_motion()).then(|| {
+            let wait = cx.theme().motion.duration_fast;
+            Leaving { what, _clear: Self::after_exit(cx, wait, |this| this.leaving = None) }
+        });
     }
 
-    /// Runs `clear` once an exit animation is over.
-    fn after_exit(cx: &mut Context<Self>, clear: fn(&mut Self)) -> Task<()> {
-        let wait = cx.theme().motion.duration_fast;
+    /// Runs `clear` once an exit animation of `wait` is over.
+    fn after_exit(
+        cx: &mut Context<Self>,
+        wait: std::time::Duration,
+        clear: fn(&mut Self),
+    ) -> Task<()> {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(wait).await;
             this.update(cx, |this, cx| {
@@ -2493,16 +2500,19 @@ impl Render for TwittyApp {
             Animation::new(tokens.duration_normal)
                 .with_easing(move |t| easing.sample(t).clamp(0., 1.))
         };
-        let exit = {
+        // Sheets close slower than dialogs, slowing down as they go, so a
+        // 600px panel doesn't vanish at full speed. The sheet under one that
+        // closes glides back in step with it.
+        let sheet_close = {
             let tokens = theme.motion.clone();
             move || {
-                let easing = tokens.easing_exit.clone();
-                Animation::new(tokens.duration_fast)
+                let easing = tokens.easing_enter.clone();
+                Animation::new(tokens.duration_slow)
                     .with_easing(move |t| easing.sample(t).clamp(0., 1.))
             }
         };
-        let sheet_layers = self.render_sheets(enter.clone(), cx);
-        let leaving_sheets = self.render_leaving_sheets(exit.clone());
+        let sheet_layers = self.render_sheets(enter.clone(), sheet_close.clone(), cx);
+        let leaving_sheets = self.render_leaving_sheets(sheet_close.clone());
         let demo = self.options.session.is_none();
         let can_sign_in = self.options.account.is_some();
         // At the top of the deck area, so the rail and the title bar still meet.
@@ -2636,7 +2646,7 @@ impl Render for TwittyApp {
                                 .left_0()
                                 .size_full()
                                 .bg(backdrop)
-                                .with_animation("thread-backdrop-out", exit(), |d, t| {
+                                .with_animation("thread-backdrop-out", sheet_close(), |d, t| {
                                     d.opacity(1. - t)
                                 }),
                         )
@@ -2778,9 +2788,11 @@ impl TwittyApp {
     fn render_sheets(
         &self,
         enter: impl Fn() -> Animation,
+        close: impl Fn() -> Animation,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let shade = cx.theme().overlay.alpha(LOWER_SHEET_ALPHA);
+        let closing = matches!(self.sheets.last_change(), sheets::Change::Popped(_));
         self.sheets
             .visible()
             .map(|(depth, open)| {
@@ -2821,7 +2833,7 @@ impl TwittyApp {
                         })
                         .into_any_element(),
                     Some(from) => layer
-                        .with_animation(id, enter(), move |d, t| {
+                        .with_animation(id, if closing { close() } else { enter() }, move |d, t| {
                             d.right(px(from + (to - from) * t))
                         })
                         .into_any_element(),
@@ -2831,7 +2843,7 @@ impl TwittyApp {
     }
 
     /// The sheets that just closed, sliding out from where they were.
-    fn render_leaving_sheets(&self, exit: impl Fn() -> Animation) -> Vec<AnyElement> {
+    fn render_leaving_sheets(&self, close: impl Fn() -> Animation) -> Vec<AnyElement> {
         let Some(leaving) = &self.leaving_sheet else {
             return Vec::new();
         };
@@ -2843,7 +2855,7 @@ impl TwittyApp {
                 let id =
                     ElementId::Name(format!("sheet-out-{}", sheet.entity_id().as_u64()).into());
                 inert(div().absolute().top_0().right(px(at)).h_full().child(sheet.view()))
-                    .with_animation(id, exit(), move |d, t| {
+                    .with_animation(id, close(), move |d, t| {
                         d.right(px(at - motion::PANEL_TRAVEL * t)).opacity(1. - t)
                     })
                     .into_any_element()
@@ -3753,6 +3765,14 @@ mod tests {
         };
         assert_eq!(leaving(&app, cx), vec![0], "the top one leaves");
         assert_eq!(panel_root(&app, cx).as_deref(), Some("1"));
+        // Slower than a dialog's exit.
+        let motion = cx.update(|_, cx| cx.theme().motion.clone());
+        cx.executor().advance_clock(motion.duration_fast + std::time::Duration::from_millis(10));
+        cx.run_until_parked();
+        assert_eq!(leaving(&app, cx), vec![0], "still sliding out");
+        cx.executor().advance_clock(motion.duration_slow - motion.duration_fast);
+        cx.run_until_parked();
+        assert!(!app.read_with(cx, |app, _| app.is_leaving()), "gone when its animation ends");
         finish_exits(cx);
         assert!(!app.read_with(cx, |app, _| app.is_leaving()));
 
