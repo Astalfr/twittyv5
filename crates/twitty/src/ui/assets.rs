@@ -94,6 +94,9 @@ const OWN_ICONS: [(&str, &[u8]); 4] = [
     (ADD_DECK, include_bytes!("../../resources/icons/add-deck.svg")),
 ];
 
+/// The app's logo, 256px (the `.ico`'s largest frame).
+pub const LOGO_PNG: &[u8] = include_bytes!("../../resources/twitty-logo.png");
+
 /// The app's asset source.
 #[derive(Debug, Clone, Copy)]
 pub struct Assets;
@@ -101,7 +104,7 @@ pub struct Assets;
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path == LOGO {
-            return Ok(Some(Cow::Borrowed(include_bytes!("../../resources/twitty-logo.png"))));
+            return Ok(Some(Cow::Borrowed(LOGO_PNG)));
         }
         if let Some((_, bytes)) = OWN_ICONS.iter().find(|(p, _)| *p == path) {
             return Ok(Some(Cow::Borrowed(bytes)));

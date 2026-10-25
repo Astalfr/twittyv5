@@ -26,9 +26,12 @@ futures = "0.3"
 # The notification sound (mp3) and the sound of videos, decoded by
 # twitty-media and played through a rodio mixer (GPUI has no audio).
 rodio = { version = "0.23", default-features = false, features = ["playback", "mp3"] }
-# Video decoding through Media Foundation (twitty-media only). 0.62 is the
-# version GPUI already builds, so this adds features, not a second copy.
+# Video decoding through Media Foundation (twitty-media), and the Windows
+# toasts for new tweets (twitty). 0.62 is the version GPUI already builds,
+# with these features, so this adds no second copy.
 windows = { version = "0.62", features = [
+    "Data_Xml_Dom",
+    "UI_Notifications",
     "Win32_Foundation",
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
@@ -36,6 +39,9 @@ windows = { version = "0.62", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Variant",
 ] }
+# Registers the app's notification identity (as GPUI does) for Twitty's own
+# toasts. The version GPUI already builds.
+windows-registry = "0.6"
 
 # Async / HTTP for the X adapter.
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }

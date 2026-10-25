@@ -39,6 +39,12 @@ use twitty::{
     video::{SystemVideo, Video},
 };
 
+#[cfg(windows)]
+use twitty::notifier::{Notifications, WindowsToasts};
+
+/// The app's identity for Windows notifications.
+const APP_ID: &str = "Twitty.Twitty";
+
 fn main() -> anyhow::Result<()> {
     let log_path = logging::default_path();
     let log_file = log_path.as_deref().map(|p| logging::open(p, logging::MAX_BYTES));
@@ -125,14 +131,20 @@ fn main() -> anyhow::Result<()> {
 
     gpui_kit::application().with_assets(ui::assets::Assets).run(move |cx| {
         // Before any window or notification: Windows only shows toasts from
-        // an identified app (GPUI registers the id for the current user).
-        cx.set_app_identity("Twitty.Twitty", "Twitty");
+        // an identified app. Twitty's own toasts (`notifier`) register the
+        // same id; GPUI does when it shows one.
+        cx.set_app_identity(APP_ID, "Twitty");
         gpui_kit::init(cx);
         ui::theme::init(theme_name, cx);
         ui::emoji::load_font(cx);
         ui::keys::bind(cx);
         cx.set_global(runtime);
         cx.set_global(Sound(Arc::new(SystemSound)));
+        #[cfg(windows)]
+        cx.set_global(Notifications {
+            notifier: Arc::new(WindowsToasts::new(APP_ID, "Twitty", &cache_dir())),
+            pictures: cache_dir().join("avatars"),
+        });
         cx.set_global(Video(Arc::new(SystemVideo)));
         cx.set_http_client(Arc::new(http));
 
@@ -170,6 +182,12 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Where downloads that can be thrown away go.
+fn cache_dir() -> PathBuf {
+    directories::ProjectDirs::from("", "", "Twitty")
+        .map_or_else(std::env::temp_dir, |d| d.cache_dir().to_path_buf())
+}
+
 /// Self-update from GitHub Releases, for a copy installed by the installer
 /// only: a `cargo run` build never offers to replace itself.
 fn update_services() -> Option<UpdateServices> {
@@ -178,9 +196,7 @@ fn update_services() -> Option<UpdateServices> {
         tracing::info!("not installed by the installer: no update checks");
         return None;
     }
-    let downloads = directories::ProjectDirs::from("", "", "Twitty")
-        .map_or_else(std::env::temp_dir, |d| d.cache_dir().to_path_buf())
-        .join("updates");
+    let downloads = cache_dir().join("updates");
     match GitHubReleases::new(
         update::GITHUB_API,
         update::REPOSITORY,
