@@ -831,17 +831,11 @@ impl TwittyApp {
         cx.notify();
     }
 
-    /// Closes every sheet (a click beside them).
+    /// Closes every sheet (a click beside the top one, on a lower sheet's
+    /// edge or the backdrop).
     fn close_all_sheets(&mut self, cx: &mut Context<Self>) {
         let all = self.sheets.clear();
         self.leave_sheets(all, cx);
-    }
-
-    /// Brings the sheet `depth` levels under the top back on top, closing
-    /// the ones above it (a click on its visible edge).
-    fn back_to_sheet(&mut self, depth: usize, cx: &mut Context<Self>) {
-        let above = self.sheets.back_to(depth);
-        self.leave_sheets(above, cx);
     }
 
     /// Keeps `closed` (sheets that just came off the top of the stack, the
@@ -2778,7 +2772,7 @@ impl TwittyApp {
     /// from the right edge when it opens, so its hitbox is about where it
     /// ends up from the first frame; the ones under it slide to their place,
     /// a little further left at each level. A press on a lower sheet's edge
-    /// brings it back on top, and nothing inside it reacts.
+    /// closes them all, like one on the backdrop, and nothing inside it reacts.
     fn render_sheets(
         &self,
         enter: impl Fn() -> Animation,
@@ -2810,7 +2804,7 @@ impl TwittyApp {
                                 .bg(shade)
                                 .on_any_mouse_down(cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
-                                    this.back_to_sheet(depth, cx);
+                                    this.close_all_sheets(cx);
                                 })),
                         )
                     });
@@ -3670,12 +3664,13 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn lower_sheets_show_their_edge_and_a_press_there_brings_one_back(cx: &mut TestAppContext) {
+    fn lower_sheets_show_their_edge_and_a_press_there_closes_them_all(cx: &mut TestAppContext) {
         use crate::state::sheets::{MAX_PEEKS, PEEK};
         let (app, cx) = keyboard_app(cx);
-        stack_threads(&app, &["1", "2", "3", "4", "5", "6"], cx);
-        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 6);
-        const NAMES: [&str; 5] = ["sheet-0", "sheet-1", "sheet-2", "sheet-3", "sheet-4"];
+        stack_threads(&app, &["1", "2", "3", "4", "5", "6", "7", "8"], cx);
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 8);
+        const NAMES: [&str; 7] =
+            ["sheet-0", "sheet-1", "sheet-2", "sheet-3", "sheet-4", "sheet-5", "sheet-6"];
         assert!(MAX_PEEKS < NAMES.len());
         let sheet = |cx: &mut VisualTestContext, depth: usize| cx.debug_bounds(NAMES[depth]);
         let top = sheet(cx, 0).expect("top sheet drawn");
@@ -3688,13 +3683,13 @@ mod tests {
         assert!(sheet(cx, MAX_PEEKS + 1).is_none(), "deeper sheets are hidden behind");
         assert_eq!(cx.debug_bounds("sheet-edge-0"), None, "the top sheet is live");
 
-        // The visible strip of the sheet two levels down ("4").
+        // The visible strip of the sheet two levels down.
         let two = sheet(cx, 2).unwrap();
         let strip = point(two.left() + px(PEEK / 2.), px(300.));
         cx.simulate_click(strip, Modifiers::default());
         cx.run_until_parked();
-        assert_eq!(panel_root(&app, cx).as_deref(), Some("4"), "nothing inside it reacted");
-        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 4);
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0, "all of them closed");
+        assert!(app.read_with(cx, |app, _| app.media_viewer().is_none()), "nothing inside reacted");
     }
 
     #[gpui_kit::test]
@@ -3711,6 +3706,29 @@ mod tests {
         cx.simulate_click(OUTSIDE, Modifiers::default());
         cx.run_until_parked();
         assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0);
+    }
+
+    #[gpui_kit::test]
+    fn a_click_beside_a_profile_and_its_thread_closes_both(cx: &mut TestAppContext) {
+        let (app, cx) = keyboard_app(cx);
+        let (_, panel) = open_profile(&app, cx);
+        let id = panel.read_with(cx, |p, _| {
+            let items = p.model(crate::state::profile::ProfileTab::Tweets).items();
+            items.iter().flat_map(|i| i.posts()).next().map(|p| p.id.clone()).unwrap()
+        });
+        let hub = app.read_with(cx, |app, _| app.hub.clone());
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(id), cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 2);
+
+        // Over the deck's tweets, not an empty deck.
+        cx.simulate_click(OUTSIDE, Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert_eq!(app.read_with(cx, |app, _| app.sheet_count()), 0, "every sheet closed");
     }
 
     #[gpui_kit::test]

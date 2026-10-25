@@ -5,10 +5,10 @@
 /// Most sheets kept open; opening one more drops the oldest.
 pub const MAX_SHEETS: usize = 8;
 /// How far left each sheet under the top one shifts, in pixels.
-pub const PEEK: f32 = 16.0;
+pub const PEEK: f32 = 32.0;
 /// Sheets under the top one that show an edge. Deeper ones sit behind the
 /// last of them, so the stack never runs far across the deck.
-pub const MAX_PEEKS: usize = 3;
+pub const MAX_PEEKS: usize = 5;
 
 /// How far left of the top sheet the sheet `depth` levels under it sits.
 pub fn offset(depth: usize) -> f32 {
@@ -51,17 +51,6 @@ impl<T> SheetStack<T> {
         let top = self.sheets.pop()?;
         self.last = Change::Popped(1);
         Some(top)
-    }
-
-    /// Takes off every sheet above the one `depth` levels under the top,
-    /// which becomes the top. Returns them, the bottom one first.
-    pub fn back_to(&mut self, depth: usize) -> Vec<T> {
-        let keep = self.sheets.len().saturating_sub(depth);
-        let removed = self.sheets.split_off(keep.max(1).min(self.sheets.len()));
-        if !removed.is_empty() {
-            self.last = Change::Popped(removed.len());
-        }
-        removed
     }
 
     /// Takes off the first sheet `matches` picks, wherever it is.
@@ -172,19 +161,6 @@ mod tests {
     }
 
     #[test]
-    fn back_to_a_lower_sheet_takes_off_the_ones_above() {
-        let mut s = stack(4);
-        assert_eq!(s.back_to(2), vec![2, 3]);
-        assert_eq!(s.top(), Some(&1));
-        assert_eq!(s.last_change(), Change::Popped(2));
-        assert_eq!(s.back_to(0), Vec::<usize>::new(), "already on top");
-        assert_eq!(s.last_change(), Change::Popped(2), "nothing changed");
-        // Past the bottom, the bottom sheet stays.
-        assert_eq!(s.back_to(9), vec![1]);
-        assert_eq!(s.top(), Some(&0));
-    }
-
-    #[test]
     fn removing_a_sheet_keeps_the_others_in_order() {
         let mut s = stack(3);
         assert_eq!(s.remove(|v| *v == 1), Some(1));
@@ -207,10 +183,10 @@ mod tests {
     fn only_the_sheets_with_a_visible_edge_are_drawn_deepest_first() {
         assert_eq!(depths(&stack(0)), vec![]);
         assert_eq!(depths(&stack(2)), vec![(1, 0), (0, 1)]);
-        let six = depths(&stack(6));
-        assert_eq!(six.len(), MAX_PEEKS + 1);
-        assert_eq!(six.first(), Some(&(MAX_PEEKS, 5 - MAX_PEEKS)));
-        assert_eq!(six.last(), Some(&(0, 5)));
+        let full = depths(&stack(MAX_SHEETS));
+        assert_eq!(full.len(), MAX_PEEKS + 1);
+        assert_eq!(full.first(), Some(&(MAX_PEEKS, MAX_SHEETS - 1 - MAX_PEEKS)));
+        assert_eq!(full.last(), Some(&(0, MAX_SHEETS - 1)));
     }
 
     #[test]
@@ -226,7 +202,7 @@ mod tests {
         let mut s = stack(3);
         assert_eq!(s.moved_from(0), None, "the new top slides in");
         assert_eq!(s.moved_from(1), Some(0));
-        s.back_to(2);
-        assert_eq!(s.moved_from(0), Some(2));
+        s.pop();
+        assert_eq!(s.moved_from(0), Some(1));
     }
 }
