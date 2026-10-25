@@ -1533,8 +1533,10 @@ impl TwittyApp {
             return;
         };
         self.close_overlays(cx);
-        let view =
-            cx.new(|cx| ColumnSettingsView::new(id, &config.source, config.settings, window, cx));
+        let viewer = self.viewer().cloned().map(Arc::new);
+        let view = cx.new(|cx| {
+            ColumnSettingsView::new(id, &config.source, viewer, config.settings, window, cx)
+        });
         self._column_settings_sub =
             Some(cx.subscribe(&view, |this, _, e: &ColumnSettingsEvent, cx| match e {
                 ColumnSettingsEvent::Preview(id, settings) => {

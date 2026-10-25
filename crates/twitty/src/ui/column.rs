@@ -8,18 +8,19 @@ use std::{
 use gpui_kit::{
     Animation, AnimationExt, AnyElement, App, Context, ElementId, Entity, EventEmitter, FontWeight,
     IntoElement, ListAlignment, ListOffset, ListState, ParentElement, Render, SharedString, Styled,
-    Subscription, SystemNotification, Task, Window, assets::IconName, base, component::button::*,
+    Subscription, Task, Window, assets::IconName, base, component::button::*,
     component::scroll::ScrollableElement, component::skeleton::Skeleton,
     component::spinner::Spinner, component::*, div, list, prelude::*, px,
 };
 use twitty_model::{Backend, BackendError, FeedSource};
 
 use crate::{
+    notifier::{self, Toast},
     runtime::Runtime,
     sound,
     state::{
         add_column::ColumnKind,
-        alerts,
+        alerts::{self, Announcement},
         column::{ColumnModel, ListChange, LoadKind, Status},
         deck::{ColumnConfig, ColumnId, ColumnSettings},
         motion::{self, Entrance, Recent},
@@ -242,7 +243,7 @@ impl ColumnView {
             sound::play(alerts.volume, cx);
         }
         if alerts.desktop {
-            show_notification(self.id, self.title(), news.body, cx);
+            show_notification(self.id, &self.title(), &news, cx);
         }
     }
 
@@ -607,15 +608,16 @@ fn arriving(key: &str, entrance: Entrance, row: AnyElement, tint: gpui_kit::Hsla
         .into_any_element()
 }
 
-/// Shows column `id`'s system notification. One tag per column: a newer
-/// one replaces the column's last toast.
-pub fn show_notification(id: ColumnId, title: String, body: String, cx: &App) {
-    cx.show_system_notification(SystemNotification {
-        tag: format!("column-{}", id.0).into(),
-        title: title.into(),
-        body: body.into(),
-        actions: Vec::new(),
-    });
+/// Shows column `id` (titled `title`)'s system notification for `news`. One
+/// tag per column: a newer one replaces the column's last toast.
+pub fn show_notification(id: ColumnId, title: &str, news: &Announcement, cx: &mut App) {
+    let toast = Toast {
+        tag: format!("column-{}", id.0),
+        title: news.title(title),
+        lines: news.lines.clone(),
+        picture: None,
+    };
+    notifier::show(toast, news.avatar(), cx);
 }
 
 /// Header icon for a source.
@@ -854,8 +856,19 @@ mod tests {
         assert_eq!(sound.played(), [volume]);
         let shown = cx.shown_system_notifications();
         assert_eq!(shown.len(), 1);
-        assert_eq!(shown[0].title.as_ref(), "Friends", "titled with the column's name");
-        assert!(shown[0].body.starts_with("2 new tweets\n"), "{}", shown[0].body);
+        let newest = column.read_with(cx, |c, _| match &c.model.items()[0] {
+            twitty_model::FeedItem::Post(post) => post.clone(),
+            other => panic!("the mock pushes tweets, not {other:?}"),
+        });
+        assert_eq!(
+            shown[0].title.as_ref(),
+            format!("Friends - {} @{}", newest.author.display_name, newest.author.handle),
+            "the column's name, then the newest tweet's author"
+        );
+        assert_eq!(
+            shown[0].body.as_ref(),
+            format!("{}\n+1 more tweet", alerts::shorten(newest.body.text()))
+        );
 
         // A refresh is not news.
         column.update(cx, |c, cx| c.load(LoadKind::Refresh, cx));
@@ -867,6 +880,36 @@ mod tests {
         poll_new(&backend, &column, cx);
         assert_eq!(sound.played().len(), 2);
         assert_eq!(cx.shown_system_notifications().len(), 1);
+    }
+
+    #[gpui_kit::test]
+    fn the_notification_pictures_the_newest_author(cx: &mut TestAppContext) {
+        use crate::{notifier::RecordingNotifier, state::deck::ColumnAlerts};
+        let (backend, column) = setup(cx);
+        let dir = tempfile::tempdir().unwrap();
+        cx.update(|cx| {
+            cx.set_http_client(gpui_kit::http_client::FakeHttpClient::create(|_| async {
+                Ok(gpui_kit::http_client::Response::builder()
+                    .status(200)
+                    .body(gpui_kit::http_client::AsyncBody::from(b"avatar".to_vec()))?)
+            }));
+        });
+        let recorder = cx.update(|cx| RecordingNotifier::install(dir.path(), cx));
+        cx.run_until_parked();
+        let alerts = ColumnAlerts { desktop: true, ..ColumnAlerts::default() };
+        set_alerts(&column, alerts, cx);
+        poll_new(&backend, &column, cx);
+
+        let shown = recorder.shown();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].tag, "column-1");
+        let author = column.read_with(cx, |c, _| match &c.model.items()[0] {
+            twitty_model::FeedItem::Post(post) => Arc::clone(&post.author),
+            other => panic!("the mock pushes tweets, not {other:?}"),
+        });
+        assert_eq!(shown[0].title, format!("Home - {} @{}", author.display_name, author.handle));
+        let picture = shown[0].picture.as_ref().expect("the author's avatar");
+        assert_eq!(std::fs::read(picture).unwrap(), b"avatar");
     }
 
     #[gpui_kit::test]

@@ -5,6 +5,7 @@ pub mod account;
 pub mod audio;
 pub mod format;
 pub mod logging;
+pub mod notifier;
 pub mod runtime;
 pub mod sound;
 pub mod state;

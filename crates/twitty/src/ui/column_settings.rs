@@ -6,10 +6,13 @@ use gpui_kit::{
     Subscription, Window, component::button::*, component::input::*, component::slider::*,
     component::switch::Switch, component::*, div, prelude::*, px,
 };
-use twitty_model::FeedSource;
+use std::sync::Arc;
+
+use twitty_model::{FeedSource, Profile};
 
 use crate::{
     sound,
+    state::alerts::Announcement,
     state::deck::{ColumnId, ColumnSettings, ColumnWidth, Volume},
     ui::button::TextButton,
     ui::column,
@@ -39,6 +42,8 @@ pub struct ColumnSettingsView {
     id: ColumnId,
     /// The column's source, whose title stands in for a blank name.
     source: FeedSource,
+    /// The signed-in account, whom the test notification is from.
+    viewer: Option<Arc<Profile>>,
     settings: ColumnSettings,
     name: Entity<InputState>,
     width: Entity<SliderState>,
@@ -59,6 +64,7 @@ impl ColumnSettingsView {
     pub fn new(
         id: ColumnId,
         source: &FeedSource,
+        viewer: Option<Arc<Profile>>,
         settings: ColumnSettings,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -109,7 +115,7 @@ impl ColumnSettingsView {
             }),
         ];
         name.update(cx, |s, cx| s.focus(window, cx));
-        Self { id, source: source.clone(), settings, name, width, volume, _subs: subs }
+        Self { id, source: source.clone(), viewer, settings, name, width, volume, _subs: subs }
     }
 
     pub fn id(&self) -> ColumnId {
@@ -167,10 +173,15 @@ impl ColumnSettingsView {
         self.report(true, cx);
     }
 
-    /// Sends a sample notification the way new tweets will, switched on or not.
+    /// Sends a sample notification the way new tweets will, switched on or
+    /// not: from the signed-in account, as if they had tweeted.
     pub fn test_notification(&self, cx: &mut Context<Self>) {
-        let title = self.settings.title(&self.source);
-        column::show_notification(self.id, title, TEST_NOTIFICATION.to_owned(), cx);
+        let news = Announcement {
+            count: 1,
+            from: self.viewer.clone(),
+            lines: vec![TEST_NOTIFICATION.to_owned()],
+        };
+        column::show_notification(self.id, &self.settings.title(&self.source), &news, cx);
     }
 }
 
@@ -288,7 +299,7 @@ mod tests {
     ) {
         cx.update(gpui_kit::init);
         let (view, cx) = cx.add_window_view(|window, cx| {
-            ColumnSettingsView::new(ColumnId(3), &FeedSource::Bookmarks, settings, window, cx)
+            ColumnSettingsView::new(ColumnId(3), &FeedSource::Bookmarks, None, settings, window, cx)
         });
         let events = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&events);
@@ -345,7 +356,7 @@ mod tests {
         let shown = cx.shown_system_notifications();
         assert_eq!(shown.len(), 1, "sent even while the switch is off");
         assert_eq!(shown[0].tag.as_ref(), "column-3", "replaces the column's own toast");
-        assert_eq!(shown[0].title.as_ref(), "Bookmarks", "the column's title");
+        assert_eq!(shown[0].title.as_ref(), "Bookmarks", "the column's title, signed out");
         assert_eq!(shown[0].body.as_ref(), TEST_NOTIFICATION);
         assert!(
             !view.read_with(cx, |v, _| v.settings().alerts.desktop),
@@ -356,6 +367,30 @@ mod tests {
         view.update(cx, |v, cx| v.set_name("Saved", cx));
         view.update(cx, |v, cx| v.test_notification(cx));
         assert_eq!(cx.shown_system_notifications()[1].title.as_ref(), "Saved");
+    }
+
+    #[gpui_kit::test]
+    fn the_test_notification_is_from_the_signed_in_account(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_app_identity("Twitty.Test", "Twitty");
+        });
+        let me = Arc::new(Profile::new(twitty_model::UserId::new("1"), "me", "My Name"));
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let settings = ColumnSettings::default();
+            ColumnSettingsView::new(
+                ColumnId(3),
+                &FeedSource::Bookmarks,
+                Some(me),
+                settings,
+                window,
+                cx,
+            )
+        });
+        view.update(cx, |v, cx| v.test_notification(cx));
+        let shown = cx.shown_system_notifications();
+        assert_eq!(shown[0].title.as_ref(), "Bookmarks - My Name @me", "titled like a tweet's");
+        assert_eq!(shown[0].body.as_ref(), TEST_NOTIFICATION);
     }
 
     #[gpui_kit::test]
