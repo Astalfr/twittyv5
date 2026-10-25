@@ -4,6 +4,7 @@
 
 - Windows 11 (main platform). macOS and Linux should work through GPUI but aren't a goal.
 - Rust stable ≥ 1.98, pinned in `rust-toolchain.toml`, edition 2024.
+- The WebView2 runtime, for the sign-in window (built into Windows 11; without it the dialog falls back to pasting cookies).
 - MSVC build tools (Visual Studio Build Tools, "Desktop development with C++") and the Windows SDK.
 - Optional tools: `cargo install cargo-insta cargo-llvm-cov cargo-deny cargo-nextest`.
 
@@ -91,6 +92,7 @@ Icons come from GPUI Kit's Lucide catalog. Only the ones listed in `crates/twitt
 | Data | Location |
 |---|---|
 | Credentials (`auth_token`, `ct0`) | Windows Credential Manager, entry `Twitty` / `x-session` (versioned JSON) |
+| Sign-in window's WebView2 profile | `%LOCALAPPDATA%\Twitty\cache\webview2` (InPrivate: no cookies are kept; safe to delete) |
 | Decks, settings | `%APPDATA%\Twitty\config\` (`decks.json`, `settings.json`) |
 | Query-ID cache, client ids | `%LOCALAPPDATA%\Twitty\cache\` (`query-ids.json`, `client-ids.json`) |
 | Log | `%LOCALAPPDATA%\Twitty\data\logs\twitty.log` (+ `twitty.log.1`), rotated at startup past 5 MB |

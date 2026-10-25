@@ -13,6 +13,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use twitty_model::Backend;
 
+use crate::browser_login::BrowserSignIn;
+
 /// Version of the keyring payload.
 pub const CREDENTIALS_SCHEMA_VERSION: u32 = 1;
 
@@ -194,6 +196,8 @@ pub enum SessionSource {
 pub struct AccountServices {
     pub connect: Connector,
     pub store: Arc<dyn CredentialStore>,
+    /// The x.com sign-in window, where there is one (Windows).
+    pub browser: Option<Arc<dyn BrowserSignIn>>,
 }
 
 impl fmt::Debug for AccountServices {

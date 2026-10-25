@@ -34,6 +34,11 @@ tracing-subscriber.workspace = true
 unicode-segmentation.workspace = true
 unicode-properties.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# The sign-in window (see `browser_login`).
+wry.workspace = true
+tao.workspace = true
+
 [build-dependencies]
 embed-resource.workspace = true
 

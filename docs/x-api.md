@@ -61,11 +61,21 @@ Confirmed live on 2026-10-24: the logged-in web client uses this old-style `<id>
 
 **Cookie rotation**: when a response's `Set-Cookie` carries a new `ct0`/`auth_token`, the transport switches to it for the next request and calls the `on_rotate` hook. The app writes the rotated session back to where it came from: the keyring, or the session file (write + rename); sessions from env vars aren't persisted. Empty values (deletions) are ignored; an expired session shows up as 401 instead.
 
-**Login (v1)**: GPUI's webview doesn't support Windows, so the user copies `auth_token` and `ct0` from their browser's DevTools (Application → Cookies → x.com).
+**Login**: the user signs in on the real x.com page in a WebView2 window, and the app reads the cookies from it. Twitty never sees the password, and never drives Twitter's login flow (`onboarding/task.json`) itself: that flow needs browser fingerprints and captchas, and changes often. Pasting `auth_token` and `ct0` from a browser's DevTools remains as the fallback.
 
 ### Signing in
 
-Use **Sign in** (banner or rail). The dialog explains where to find the cookies, normalises what was pasted (quotes, `auth_token=` prefixes, spaces), validates it with `Session::new`, then calls `Viewer`. Only a session Twitter accepts is stored (Windows Credential Manager, entry `Twitty` / `x-session`).
+Use **Sign in** (banner or rail). The dialog's main button, **Sign in on x.com**, opens the sign-in window:
+
+- The window is `twitty.exe --login-helper`, a child process. Its tao event loop can't share the main thread with GPUI, so the helper flag is handled first thing in `main()`, before logging, the runtime or GPUI start.
+- It shows `https://x.com/i/flow/login` in WebView2 (`wry`), **InPrivate**, so no cookie reaches the disk. WebView2's profile folder is `%LOCALAPPDATA%\Twitty\cache\webview2` (its default, next to the exe, isn't writable under Program Files).
+- Every 500 ms it reads the `x.com` cookies (`cookies_for_url`, which includes HttpOnly ones). x.com sets a guest `ct0` before sign-in and replaces it when `auth_token` arrives, so `state::login::CookieWatch` only takes the pair once it is unchanged over two more polls. x.com is a single-page app, so page loads can't tell when sign-in is done.
+- The helper writes exactly one JSON line to its stdout and exits: `{"outcome":"signed_in","auth_token":…,"ct0":…}`, `{"outcome":"closed"}` (the user closed the window) or `{"outcome":"failed","reason":…}` (e.g. no WebView2). It isn't persisted, since both ends are the same exe. The app reads that one line, never waits for the end of the stream (WebView2's own processes may hold the pipe), and never logs it. Closing the dialog kills the helper.
+- Google and Apple sign-in are refused in embedded browsers. The dialog says to use a username, email or phone with a password; 2FA and captchas work.
+
+**Paste cookies instead** unfolds the fallback: the dialog explains where to find the cookies and normalises what was pasted (quotes, `auth_token=` prefixes, spaces).
+
+Either way, the values are validated with `Session::new`, then the app calls `Viewer`. Only a session Twitter accepts is stored (Windows Credential Manager, entry `Twitty` / `x-session`). If the window fails, the dialog shows why and unfolds the cookie fields.
 
 At startup the app takes the first of:
 

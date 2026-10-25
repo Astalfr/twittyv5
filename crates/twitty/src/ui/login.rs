@@ -1,5 +1,6 @@
-//! The sign-in dialog: paste `auth_token` and `ct0`, checked with
-//! `Backend::viewer` before anything is stored.
+//! The sign-in dialog: sign in on x.com in a window, or paste `auth_token` and
+//! `ct0`. Either way the session is checked with `Backend::viewer` before
+//! anything is stored.
 
 use std::sync::Arc;
 
@@ -42,8 +43,21 @@ pub struct LoginView {
     services: AccountServices,
     auth_token: Entity<InputState>,
     ct0: Entity<InputState>,
+    /// The sign-in window, while it is open.
+    browsing: Option<Task<()>>,
     check: Option<Task<()>>,
     _subs: Vec<Subscription>,
+}
+
+impl Drop for LoginView {
+    /// Closing the dialog closes the sign-in window too.
+    fn drop(&mut self) {
+        if self.form.status() == &LoginStatus::Browsing
+            && let Some(browser) = &self.services.browser
+        {
+            browser.cancel();
+        }
+    }
 }
 
 impl std::fmt::Debug for LoginView {
@@ -77,8 +91,11 @@ impl LoginView {
             cx.subscribe_in(&auth_token, window, on_enter),
             cx.subscribe_in(&ct0, window, on_enter),
         ];
-        auth_token.update(cx, |s, cx| s.focus(window, cx));
-        Self { form: LoginForm::new(notice), services, auth_token, ct0, check: None, _subs: subs }
+        let form = LoginForm::new(notice, services.browser.is_some());
+        if form.paste_shown() {
+            auth_token.update(cx, |s, cx| s.focus(window, cx));
+        }
+        Self { form, services, auth_token, ct0, browsing: None, check: None, _subs: subs }
     }
 
     pub fn form(&self) -> &LoginForm {
@@ -98,6 +115,40 @@ impl LoginView {
         self.ct0.update(cx, |s, cx| s.set_value(c, window, cx));
     }
 
+    /// Shows or hides the cookie fields.
+    pub fn toggle_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.form.toggle_paste();
+        if self.form.paste_shown() {
+            self.auth_token.update(cx, |s, cx| s.focus(window, cx));
+        }
+        cx.notify();
+    }
+
+    /// Opens the x.com sign-in window, then checks the session it hands back.
+    pub fn sign_in_with_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(browser) = self.services.browser.clone() else {
+            return;
+        };
+        if !self.form.start_browser() {
+            return;
+        }
+        // Blocks until the window closes, which can take minutes: not on the
+        // network runtime's few workers.
+        let window_closed = cx.background_spawn(async move { browser.sign_in() });
+        self.browsing = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = window_closed.await;
+            this.update_in(cx, |this, window, cx| {
+                window.activate_window();
+                if let Some(credentials) = this.form.browser_finished(result) {
+                    this.check(credentials, cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
     /// Checks the pasted values with the backend.
     pub fn submit(&mut self, cx: &mut Context<Self>) {
         let auth_token = self.auth_token.read(cx).value();
@@ -106,6 +157,11 @@ impl LoginView {
             cx.notify();
             return;
         };
+        self.check(credentials, cx);
+    }
+
+    /// Builds a backend for `credentials` and asks it who is signed in.
+    fn check(&mut self, credentials: Credentials, cx: &mut Context<Self>) {
         let backend = match (self.services.connect)(&credentials) {
             Ok(backend) => backend,
             Err(e) => {
@@ -156,7 +212,11 @@ const DIALOG_WIDTH: f32 = 560.0;
 impl Render for LoginView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        let busy = self.form.busy();
+        let browsing = self.form.status() == &LoginStatus::Browsing;
         let checking = self.form.status() == &LoginStatus::Checking;
+        let has_browser = self.services.browser.is_some();
+        let paste_shown = self.form.paste_shown();
         // `min_w_0` lets a step's text wrap instead of pushing past the dialog.
         let step = |n: &'static str, text: &'static str| {
             h_flex()
@@ -175,22 +235,30 @@ impl Render for LoginView {
             v_flex()
                 .gap_1()
                 .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(label))
-                .child(Input::new(state).disabled(checking))
+                .child(Input::new(state).disabled(busy))
         };
-        v_flex()
-            .debug_selector(|| "login-dialog".into())
-            .w(px(DIALOG_WIDTH))
+        let browser = v_flex()
+            .gap_2()
+            .child(
+                Button::new("login-browser")
+                    .primary()
+                    .text_button(Size::Medium)
+                    .label(if browsing { "Waiting for x.com…" } else { "Sign in on x.com" })
+                    .loading(browsing)
+                    .disabled(busy)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.sign_in_with_browser(window, cx)),
+                    ),
+            )
+            .child(div().text_sm().text_color(theme.muted_foreground).child(if browsing {
+                "Finish signing in in the x.com window. It closes by itself once you're in."
+            } else {
+                "Opens x.com in a window. Use your username, email or phone and password: \
+                 Google and Apple sign-in don't work there. Twitty keeps the session, never \
+                 your password."
+            }));
+        let paste = v_flex()
             .gap_4()
-            .p_6()
-            .rounded_2xl()
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.popover)
-            .text_color(theme.foreground)
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Sign in to Twitter"))
-            .when_some(self.form.notice().map(str::to_owned), |d, notice| {
-                d.child(div().text_sm().text_color(theme.warning).child(notice))
-            })
             .child(
                 v_flex()
                     .gap_2()
@@ -207,7 +275,39 @@ impl Render for LoginView {
                     )),
             )
             .child(field("auth_token", &self.auth_token))
-            .child(field("ct0", &self.ct0))
+            .child(field("ct0", &self.ct0));
+        v_flex()
+            .debug_selector(|| "login-dialog".into())
+            .w(px(DIALOG_WIDTH))
+            .gap_4()
+            .p_6()
+            .rounded_2xl()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .text_color(theme.foreground)
+            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Sign in to Twitter"))
+            .when_some(self.form.notice().map(str::to_owned), |d, notice| {
+                d.child(div().text_sm().text_color(theme.warning).child(notice))
+            })
+            .when(has_browser, |d| {
+                d.child(browser).child(
+                    h_flex().child(
+                        Button::new("login-paste-toggle")
+                            .ghost()
+                            .text_button(Size::Small)
+                            .label(if paste_shown {
+                                "Hide the cookie fields"
+                            } else {
+                                "Paste cookies instead"
+                            })
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.toggle_paste(window, cx)),
+                            ),
+                    ),
+                )
+            })
+            .when(paste_shown, |d| d.child(paste))
             .when_some(
                 match self.form.status() {
                     LoginStatus::Failed(message) => Some(message.clone()),
@@ -222,19 +322,25 @@ impl Render for LoginView {
                     .child(
                         Button::new("login-cancel")
                             .ghost()
-                            .text_button(Size::Medium).label("Cancel")
+                            .text_button(Size::Medium)
+                            .label("Cancel")
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(LoginEvent::Dismissed))),
                     )
-                    .child(
-                        Button::new("login-submit")
-                            .primary()
-                            .text_button(Size::Medium).label(if checking { "Checking…" } else { "Sign in" })
-                            .loading(checking)
-                            .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
-                    ),
+                    .when(paste_shown, |d| {
+                        let submit = Button::new("login-submit");
+                        let submit = if has_browser { submit.outline() } else { submit.primary() };
+                        d.child(
+                            submit
+                                .text_button(Size::Medium)
+                                .label(if checking { "Checking…" } else { "Sign in" })
+                                .loading(checking)
+                                .disabled(browsing)
+                                .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+                        )
+                    }),
             )
             .child(div().text_xs().text_color(theme.muted_foreground).child(
-                "The cookies are kept in Windows Credential Manager. Using Twitter's internal API is \
+                "The session is kept in Windows Credential Manager. Using Twitter's internal API is \
                  against Twitter's terms; a secondary account is safer.",
             ))
     }
@@ -243,11 +349,41 @@ impl Render for LoginView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::account::{ConnectError, MemoryStore};
+    use crate::{
+        account::{ConnectError, MemoryStore},
+        browser_login::{BrowserError, BrowserSignIn},
+    };
     use gpui_kit::{TestAppContext, VisualTestContext};
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
     use twitty_model::mock::MockBackend;
 
+    /// A sign-in window that closes at once with a set result.
+    struct FakeBrowser {
+        result: Result<Option<Credentials>, BrowserError>,
+        cancels: Arc<AtomicUsize>,
+    }
+
+    impl BrowserSignIn for FakeBrowser {
+        fn sign_in(&self) -> Result<Option<Credentials>, BrowserError> {
+            self.result.clone()
+        }
+        fn cancel(&self) {
+            self.cancels.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     fn services(backend: MockBackend, store: MemoryStore) -> AccountServices {
+        services_with(backend, store, None)
+    }
+
+    fn services_with(
+        backend: MockBackend,
+        store: MemoryStore,
+        browser: Option<Arc<dyn BrowserSignIn>>,
+    ) -> AccountServices {
         AccountServices {
             connect: Arc::new(move |c: &Credentials| {
                 if c.auth_token == "bad;value" {
@@ -256,6 +392,7 @@ mod tests {
                 Ok(Arc::new(backend.clone()) as Arc<dyn Backend>)
             }),
             store: Arc::new(store),
+            browser,
         }
     }
 
@@ -264,14 +401,20 @@ mod tests {
         backend: MockBackend,
         store: MemoryStore,
     ) -> (Entity<LoginView>, &mut VisualTestContext, Arc<std::sync::Mutex<Vec<String>>>) {
+        open_with(cx, services(backend, store))
+    }
+
+    fn open_with(
+        cx: &mut TestAppContext,
+        services: AccountServices,
+    ) -> (Entity<LoginView>, &mut VisualTestContext, Arc<std::sync::Mutex<Vec<String>>>) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             cx.set_global(Runtime::inline());
         });
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let (view, cx) = cx.add_window_view(|window, cx| {
-            LoginView::new(services(backend, store), None, window, cx)
-        });
+        let (view, cx) =
+            cx.add_window_view(|window, cx| LoginView::new(services, None, window, cx));
         let seen = Arc::clone(&events);
         cx.update(|_, cx| {
             cx.subscribe(&view, move |_, e: &LoginEvent, _| {
@@ -346,5 +489,115 @@ mod tests {
             view.read_with(cx, |v, _| v.form().status().clone()),
             LoginStatus::Failed(_)
         ));
+    }
+
+    fn with_browser(
+        cx: &mut TestAppContext,
+        backend: MockBackend,
+        store: MemoryStore,
+        result: Result<Option<Credentials>, BrowserError>,
+    ) -> (Entity<LoginView>, &mut VisualTestContext, Arc<Mutex<Vec<String>>>) {
+        let browser: Arc<dyn BrowserSignIn> =
+            Arc::new(FakeBrowser { result, cancels: Arc::default() });
+        open_with(cx, services_with(backend, store, Some(browser)))
+    }
+
+    fn status(view: &Entity<LoginView>, cx: &mut VisualTestContext) -> LoginStatus {
+        view.read_with(cx, |v, _| v.form().status().clone())
+    }
+
+    fn browse(view: &Entity<LoginView>, cx: &mut VisualTestContext) {
+        view.update_in(cx, |v, window, cx| v.sign_in_with_browser(window, cx));
+        cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn the_cookie_fields_fold_away_behind_the_window(cx: &mut TestAppContext) {
+        let session = Credentials { auth_token: "tok".into(), ct0: "csrf".into() };
+        let (view, cx, _) =
+            with_browser(cx, MockBackend::new(), MemoryStore::default(), Ok(Some(session)));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("login-step-1").is_none(), "folded at first");
+        view.update_in(cx, |v, window, cx| v.toggle_paste(window, cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("login-step-1").is_some(), "shown on request");
+    }
+
+    #[gpui_kit::test]
+    fn window_session_is_checked_then_stored(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let session = Credentials { auth_token: "tok".into(), ct0: "csrf".into() };
+        let (view, cx, events) =
+            with_browser(cx, MockBackend::new(), store.clone(), Ok(Some(session.clone())));
+        browse(&view, cx);
+        assert_eq!(events.lock().unwrap().len(), 1);
+        assert!(events.lock().unwrap()[0].starts_with("signed in @"));
+        assert_eq!(crate::account::decode(&store.raw().unwrap()).unwrap(), session);
+    }
+
+    #[gpui_kit::test]
+    fn closing_the_window_stores_nothing(cx: &mut TestAppContext) {
+        let store = MemoryStore::default();
+        let (view, cx, events) = with_browser(cx, MockBackend::new(), store.clone(), Ok(None));
+        browse(&view, cx);
+        assert!(events.lock().unwrap().is_empty());
+        assert_eq!(store.raw(), None);
+        assert_eq!(status(&view, cx), LoginStatus::Editing);
+    }
+
+    #[gpui_kit::test]
+    fn a_broken_window_offers_pasting(cx: &mut TestAppContext) {
+        let failed = Err(BrowserError::Helper("WebView2 is unavailable".into()));
+        let (view, cx, events) =
+            with_browser(cx, MockBackend::new(), MemoryStore::default(), failed);
+        browse(&view, cx);
+        assert!(events.lock().unwrap().is_empty());
+        assert!(matches!(status(&view, cx), LoginStatus::Failed(m) if m.contains("WebView2")));
+        assert!(cx.debug_bounds("login-step-1").is_some(), "the cookie fields are shown");
+    }
+
+    #[gpui_kit::test]
+    fn rejected_window_session_is_not_stored(cx: &mut TestAppContext) {
+        let backend = MockBackend::new();
+        backend.fail_next(BackendError::Unauthorized);
+        let store = MemoryStore::default();
+        let session = Credentials { auth_token: "tok".into(), ct0: "csrf".into() };
+        let (view, cx, events) = with_browser(cx, backend, store.clone(), Ok(Some(session)));
+        browse(&view, cx);
+        assert!(events.lock().unwrap().is_empty());
+        assert_eq!(store.raw(), None);
+        assert!(
+            matches!(status(&view, cx), LoginStatus::Failed(m) if m.contains("signing in again"))
+        );
+    }
+
+    #[gpui_kit::test]
+    fn closing_the_dialog_closes_the_window(cx: &mut TestAppContext) {
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let browser: Arc<dyn BrowserSignIn> =
+            Arc::new(FakeBrowser { result: Ok(None), cancels: Arc::clone(&cancels) });
+        let services = services_with(MockBackend::new(), MemoryStore::default(), Some(browser));
+        let (view, cx, _) = open_with(cx, services);
+        // Not parked: the window is still open.
+        view.update_in(cx, |v, window, cx| v.sign_in_with_browser(window, cx));
+        assert_eq!(status(&view, cx), LoginStatus::Browsing);
+        drop(view);
+        cx.update(|window, _| window.remove_window());
+        cx.run_until_parked();
+        assert_eq!(cancels.load(Ordering::SeqCst), 1);
+    }
+
+    #[gpui_kit::test]
+    fn a_finished_window_is_not_cancelled(cx: &mut TestAppContext) {
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let browser: Arc<dyn BrowserSignIn> =
+            Arc::new(FakeBrowser { result: Ok(None), cancels: Arc::clone(&cancels) });
+        let services = services_with(MockBackend::new(), MemoryStore::default(), Some(browser));
+        let (view, cx, _) = open_with(cx, services);
+        browse(&view, cx);
+        drop(view);
+        cx.update(|window, _| window.remove_window());
+        cx.run_until_parked();
+        assert_eq!(cancels.load(Ordering::SeqCst), 0);
     }
 }

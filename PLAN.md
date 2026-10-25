@@ -323,7 +323,7 @@ I can't access TweetDeck myself, so this is a spec rather than a copy. The colou
 - **Transaction ID enforcement** (error 353): port the real algorithm when it's required.
 - **Bot / TLS fingerprinting**: if plain reqwest gets blocked, swap the transport for a Chrome-impersonating client (`wreq`). This change stays inside `transport`.
 - **GPUI API churn**: exact pins. Upgrade only when a new gpui-kit is released, in a separate commit.
-- **No embedded webview on Windows**: login means pasting cookies. A future option is a small external helper that reads them from the user's browser profile.
+- **No embedded webview in GPUI on Windows**: the sign-in window is a separate `twitty --login-helper` process running WebView2 through `wry` (see docs/decisions.md). Pasting cookies remains as the fallback.
 
 ---
 

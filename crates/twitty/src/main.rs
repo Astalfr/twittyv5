@@ -24,6 +24,7 @@ use twitty::{
         AccountServices, ConnectError, Connector, CredentialStore, Credentials, KeyringStore,
         SessionSource,
     },
+    browser_login::{self, BrowserSignIn, HelperProcess},
     logging,
     runtime::Runtime,
     sound::{Sound, SystemSound},
@@ -40,6 +41,11 @@ use twitty::{
 };
 
 fn main() -> anyhow::Result<()> {
+    // The sign-in window runs in its own process, before any of the app's
+    // logging, runtime or windows exist.
+    if std::env::args().nth(1).as_deref() == Some(browser_login::HELPER_FLAG) {
+        return browser_login::run_helper();
+    }
     let log_path = logging::default_path();
     let log_file = log_path.as_deref().map(|p| logging::open(p, logging::MAX_BYTES));
     let file_layer = match &log_file {
@@ -119,7 +125,7 @@ fn main() -> anyhow::Result<()> {
         log_path,
         poll: true,
         session,
-        account: Some(AccountServices { connect, store }),
+        account: Some(AccountServices { connect, store, browser: browser_sign_in() }),
         updates: update_services(),
     };
 
@@ -193,6 +199,20 @@ fn update_services() -> Option<UpdateServices> {
         }),
         Err(e) => {
             tracing::error!("update checks unavailable: {e}");
+            None
+        }
+    }
+}
+
+/// The x.com sign-in window, run by this same executable.
+fn browser_sign_in() -> Option<Arc<dyn BrowserSignIn>> {
+    if !cfg!(windows) {
+        return None;
+    }
+    match std::env::current_exe() {
+        Ok(exe) => Some(Arc::new(HelperProcess::new(exe))),
+        Err(e) => {
+            tracing::error!("no sign-in window: {e}");
             None
         }
     }
