@@ -17,6 +17,8 @@ use gpui_kit::{
 use sha2::Digest as _;
 use twitty_model::ImageRef;
 
+use crate::ui::assets::LOGO_PNG;
+
 /// One notification, ready to show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Toast {
@@ -108,6 +110,22 @@ async fn picture(dir: &Path, url: &str, cx: &mut AsyncApp) -> anyhow::Result<Pat
     Ok(path)
 }
 
+/// Saves the app's logo in `dir` for Windows to show on toasts, unless the
+/// same logo is already there, and returns its path.
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only Windows toasts take the icon")
+)]
+fn save_icon(dir: &Path) -> std::io::Result<PathBuf> {
+    let path = dir.join("twitty.png");
+    if std::fs::read(&path).is_ok_and(|bytes| bytes == LOGO_PNG) {
+        return Ok(path);
+    }
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(&path, LOGO_PNG)?;
+    Ok(path)
+}
+
 /// The file name of the copy of `url`: a hash, and its image extension.
 fn picture_name(url: &str) -> String {
     let digest = sha2::Sha256::digest(url.as_bytes());
@@ -145,14 +163,26 @@ pub struct WindowsToasts {
 
 #[cfg(windows)]
 impl WindowsToasts {
-    /// Toasts from `app_id`, named `app_name` in Windows' notification list.
+    /// Toasts from `app_id`, named `app_name` in Windows' notification list,
+    /// with the app's logo, saved in `dir`, as their icon.
+    ///
     /// Registers the id for the current user, like GPUI does before its own
     /// first toast: an app without a package and its id unregistered shows
-    /// nothing.
-    pub fn new(app_id: &str, app_name: &str) -> Self {
+    /// nothing. GPUI only registers the name, so its toasts get a generic
+    /// icon; Twitty adds the logo, which then serves both.
+    pub fn new(app_id: &str, app_name: &str, dir: &Path) -> Self {
         let registered = windows_registry::CURRENT_USER
             .create(format!(r"Software\Classes\AppUserModelId\{app_id}"))
-            .and_then(|key| key.set_string("DisplayName", app_name));
+            .and_then(|key| {
+                key.set_string("DisplayName", app_name)?;
+                match save_icon(dir) {
+                    Ok(icon) => key.set_string("IconUri", icon.to_string_lossy().as_ref()),
+                    Err(e) => {
+                        tracing::warn!("notifications without the app's icon: {e}");
+                        Ok(())
+                    }
+                }
+            });
         if let Err(e) = registered {
             tracing::warn!("could not register the notification identity: {e}");
         }
@@ -344,6 +374,18 @@ mod tests {
         assert_eq!(shown[0].tag.as_ref(), "column-1");
         assert_eq!(shown[0].title.as_ref(), "Home - Alice @alice");
         assert_eq!(shown[0].body.as_ref(), "hello\n+1 more tweet");
+    }
+
+    #[test]
+    fn the_icon_is_saved_and_kept_up_to_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_icon(&dir.path().join("cache")).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), LOGO_PNG);
+        assert!(path.is_absolute(), "the registry takes a full path");
+
+        std::fs::write(&path, b"an older logo").unwrap();
+        assert_eq!(save_icon(&dir.path().join("cache")).unwrap(), path);
+        assert_eq!(std::fs::read(&path).unwrap(), LOGO_PNG, "replaced");
     }
 
     #[test]

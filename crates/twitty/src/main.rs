@@ -142,7 +142,7 @@ fn main() -> anyhow::Result<()> {
         cx.set_global(Sound(Arc::new(SystemSound)));
         #[cfg(windows)]
         cx.set_global(Notifications {
-            notifier: Arc::new(WindowsToasts::new(APP_ID, "Twitty")),
+            notifier: Arc::new(WindowsToasts::new(APP_ID, "Twitty", &cache_dir())),
             pictures: cache_dir().join("avatars"),
         });
         cx.set_global(Video(Arc::new(SystemVideo)));
