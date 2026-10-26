@@ -21,8 +21,11 @@ env:
   CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
-  check:
-    name: fmt, clippy, test
+  # `lint` and `test` run in parallel: clippy only type-checks (rmeta) and
+  # shares no artifacts with the test build, so one job running both just
+  # added their times. Each keeps its own cache for the same reason.
+  lint:
+    name: fmt, clippy
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
@@ -37,21 +40,40 @@ jobs:
       - name: Install toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
+      - name: Format
+        run: cargo fmt --all -- --check
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: debug
+          shared-key: clippy
           # Save what was compiled even if a step failed or timed out, so the
           # next run doesn't start cold again. Only main saves (10 GB quota);
           # pull requests restore main's cache.
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Format
-        run: cargo fmt --all -- --check
-
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
         timeout-minutes: 30
+
+  test:
+    name: test
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - name: Disable Defender real-time scanning
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test
         run: cargo test --workspace --locked
@@ -59,7 +81,7 @@ jobs:
 
   build:
     name: build twitty.exe
-    # Pull requests only run `check`: the release build (~5 min, mostly thin
+    # Pull requests only run `lint` and `test`: the release build (~5 min, mostly thin
     # LTO + link) is the slowest job. Pushes to main keep building it, which
     # also keeps the release cache warm for version tags.
     if: github.event_name != 'pull_request'
@@ -122,7 +144,7 @@ jobs:
   # update from the latest release, so this only runs once tests and build pass.
   release:
     name: publish release
-    needs: [check, build]
+    needs: [lint, test, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10

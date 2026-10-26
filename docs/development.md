@@ -25,17 +25,18 @@
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push to `main`/`master`, on `v*` tags, on pull requests and on demand (`workflow_dispatch`). `check` and `build` run on `windows-latest`. `build` doesn't run on pull requests, and `release` runs on tags only:
+`.github/workflows/ci.yml` runs on every push to `main`/`master`, on `v*` tags, on pull requests and on demand (`workflow_dispatch`). `lint`, `test` and `build` run in parallel on `windows-latest`. `build` doesn't run on pull requests, and `release` runs on tags only:
 
 | Job | Steps |
 |---|---|
-| `check` | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked` |
+| `lint` | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` |
+| `test` | `cargo test --workspace --locked` |
 | `build` | Not on pull requests. `cargo build --release --locked -p twitty`, uploads `target/release/twitty.exe` as the artifact `twitty-windows-x64-<sha>`, then builds the installer and uploads it as `twitty-setup-windows-x64-<sha>` (both kept 30 days) |
-| `release` | Tags `v*` only, after `check` and `build` pass (`ubuntu-latest`, `contents: write`): downloads both artifacts, fails unless the installer is named after the tag's version, then `gh release create <tag>` with the installer and `twitty.exe` and generated notes |
+| `release` | Tags `v*` only, after `lint`, `test` and `build` pass (`ubuntu-latest`, `contents: write`): downloads both artifacts, fails unless the installer is named after the tag's version, then `gh release create <tag>` with the installer and `twitty.exe` and generated notes |
 
-- The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` caches debug and release builds separately. Only `main` saves caches, and it saves them even when a step fails or times out (`cache-on-failure`). The compile steps have their own `timeout-minutes`, below the job's, so the save step still runs. Pull requests restore `main`'s cache.
+- The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` keeps one cache per job (`clippy`, `test`, `release`): clippy only type-checks, so it shares no artifacts with the test build. Only `main` saves caches, and it saves them even when a step fails or times out (`cache-on-failure`). The compile steps have their own `timeout-minutes`, below the job's, so the save step still runs. Pull requests restore `main`'s cache.
 - CI builds without debug info (`CARGO_PROFILE_DEV_DEBUG=0`) and turns off Defender real-time scanning first. Runs on `main` are never cancelled by a newer push (that would discard their cache); pull request runs are.
-- Pull requests skip `build`. The release build is the slowest job (about 5 minutes, mostly thin LTO and linking, even with a warm cache), and it rarely breaks when `check` passes. Pushes to `main` still build it, which also keeps the release cache warm for `v*` tags.
+- Pull requests skip `build`. The release build is the slowest job (about 5 minutes, mostly thin LTO and linking, even with a warm cache), and it rarely breaks when `lint` and `test` pass. Pushes to `main` still build it, which also keeps the release cache warm for `v*` tags.
 - The lib crates set `doctest = false` (there are no doctests), so `cargo test` skips four empty rustdoc runs. A crate that gains a doc example must turn its doctests back on.
 - The first run after changing a `CARGO_*` variable in the workflow, `Cargo.lock` or the toolchain starts cold (new cache key).
 - `--locked` fails the build if `Cargo.lock` is out of date, so commit the lockfile with every dependency change.
