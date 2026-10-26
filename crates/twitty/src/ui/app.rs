@@ -952,11 +952,19 @@ impl TwittyApp {
                     (box_w, box_h),
                 )
             });
+        // Strips along the whole left and right screen edges (over the side
+        // padding, header and footer); ghost, so the background only shows on
+        // hover. Drawn first, so the header and footer buttons stay on top.
         let nav = |id: &'static str, icon: IconName, delta: isize| {
             Button::new(id)
                 .ghost()
                 .large()
-                .w(px(viewer::NAV))
+                .absolute()
+                .top_0()
+                .map(|b| if delta < 0 { b.left_0() } else { b.right_0() })
+                .w(px(viewer::PADDING + viewer::NAV))
+                .h_full()
+                .rounded_none()
                 .icon(Icon::new(icon).size(px(28.)))
                 .when(interactive, |b| {
                     b.on_click(cx.listener(move |this, _, window, cx| {
@@ -968,14 +976,23 @@ impl TwittyApp {
         };
         v_flex()
             .id("media-viewer")
+            .relative()
             .size_full()
-            .p(px(viewer::PADDING))
+            .py(px(viewer::PADDING))
             // Buttons and the image stop their clicks; anything else is backdrop.
             .when(interactive, |d| d.on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))))
             .gap(px(viewer::GAP))
+            .when(count > 1, |d| {
+                d.child(nav("media-prev", IconName::ChevronLeft, -1)).child(nav(
+                    "media-next",
+                    IconName::ChevronRight,
+                    1,
+                ))
+            })
             .child(
                 h_flex()
                     .flex_none()
+                    .px(px(viewer::PADDING))
                     .h(px(viewer::HEADER))
                     .justify_between()
                     .items_center()
@@ -998,7 +1015,9 @@ impl TwittyApp {
                     .gap(px(viewer::GAP))
                     .items_center()
                     .justify_center()
-                    .when(count > 1, |d| d.child(nav("media-prev", IconName::ChevronLeft, -1)))
+                    .px(px(viewer::PADDING))
+                    // Room for the ‹ › strips over the sides.
+                    .when(count > 1, |d| d.child(div().flex_none().w(px(viewer::NAV))))
                     .child(
                         // An explicit box from the window size, so the image can't
                         // push past the screen edge. The image is the bitmap's
@@ -1073,11 +1092,12 @@ impl TwittyApp {
                                     })
                             })),
                     )
-                    .when(count > 1, |d| d.child(nav("media-next", IconName::ChevronRight, 1))),
+                    .when(count > 1, |d| d.child(div().flex_none().w(px(viewer::NAV)))),
             )
             .child(
                 h_flex()
                     .flex_none()
+                    .px(px(viewer::PADDING))
                     .h(px(viewer::FOOTER))
                     .overflow_hidden()
                     .justify_center()
@@ -4842,9 +4862,38 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(index(cx), Some(1), "the button steps and keeps the viewer open");
 
-        // The padding around everything (below the title bar) is backdrop.
+        // The strips run along the whole screen edges, corners included.
+        cx.simulate_click(point(px(2.), title_bar::HEIGHT + px(2.)), Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(index(cx), Some(0), "the top-left corner steps back");
         cx.simulate_click(
-            point(px(viewer::PADDING / 2.), title_bar::HEIGHT + px(viewer::PADDING / 2.)),
+            point(viewport.width - px(2.), viewport.height - px(2.)),
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        assert_eq!(index(cx), Some(1), "the bottom-right corner steps on");
+
+        // The close button stays on top of the › strip.
+        cx.simulate_click(
+            point(
+                viewport.width - px(viewer::PADDING + 16.),
+                title_bar::HEIGHT + px(viewer::PADDING + viewer::HEADER / 2.),
+            ),
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        assert_eq!(index(cx), None, "the close button closes");
+
+        // The padding above everything (below the title bar) is backdrop.
+        let post = column.read_with(cx, |c, _| {
+            c.model().items().iter().flat_map(|i| i.posts()).find(|p| p.media.len() >= 2).cloned()
+        });
+        let post = Arc::new(post.expect("the mock has a multi-image tweet"));
+        hub.update(cx, |hub, cx| hub.navigate(Navigate::Media { post, index: 0 }, cx));
+        cx.run_until_parked();
+        assert_eq!(index(cx), Some(0));
+        cx.simulate_click(
+            point(viewport.width / 2., title_bar::HEIGHT + px(viewer::PADDING / 2.)),
             Modifiers::default(),
         );
         cx.run_until_parked();
