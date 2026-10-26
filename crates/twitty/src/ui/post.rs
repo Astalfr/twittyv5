@@ -1059,6 +1059,9 @@ fn quote_card(
         .overflow_hidden()
         .cursor_pointer()
         .hover(|s| s.bg(theme.list_hover))
+        // Under the card, the tweet around it isn't hovered and so isn't
+        // tinted; the column still scrolls.
+        .block_mouse_except_scroll()
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
             card_hub.update(cx, |hub, cx| hub.navigate(Navigate::Thread(quoted.clone()), cx));
@@ -2136,6 +2139,61 @@ mod tests {
         post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted)) });
         let seen = navigations(cx, FeedItem::Post(post), "quote-note-marker-0");
         assert_eq!(seen, vec![Navigate::Thread(id)]);
+    }
+
+    /// A tweet whose row reports whether the mouse hovers it, the way its
+    /// hover tint sees it.
+    struct HoverProbe {
+        post: OnePost,
+        hovered: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl gpui_kit::Render for HoverProbe {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl IntoElement {
+            let hovered = std::rc::Rc::clone(&self.hovered);
+            let rcx = RowCtx {
+                ix: 0,
+                column_width: 310.,
+                hub: self.post.hub.clone(),
+                scope: "test".into(),
+                focus: None,
+            };
+            div()
+                .id("probe")
+                .w(px(310.))
+                .on_hover(move |inside, _, _| hovered.set(*inside))
+                .child(render_item(&self.post.item, &rcx, window, cx))
+        }
+    }
+
+    #[gpui_kit::test]
+    fn hovering_a_quote_does_not_hover_the_tweet_around_it(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (mut post, backend) = mock_post();
+        let (quoted, _) = mock_post();
+        post.embed = Some(Embed::Quote { quoted: Box::new(PostOrGone::Post(quoted)) });
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let hovered = std::rc::Rc::new(std::cell::Cell::new(false));
+        let probe = std::rc::Rc::clone(&hovered);
+        let (_view, cx) = cx.add_window_view(|_, _| HoverProbe {
+            post: OnePost { item: FeedItem::Post(post), hub },
+            hovered: probe,
+        });
+        cx.run_until_parked();
+
+        let name = cx.debug_bounds("post-name-0").expect("the tweet is rendered");
+        cx.simulate_mouse_move(name.center(), None, Default::default());
+        cx.run_until_parked();
+        assert!(hovered.get(), "the tweet is hovered over its own text");
+
+        let quote = cx.debug_bounds("quote-body-0").expect("the quote is rendered");
+        cx.simulate_mouse_move(quote.center(), None, Default::default());
+        cx.run_until_parked();
+        assert!(!hovered.get(), "the tweet is not hovered over its quote");
     }
 
     /// The mock's first tweet with a Twitter Blue-length text.
