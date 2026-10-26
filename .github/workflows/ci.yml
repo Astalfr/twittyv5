@@ -59,6 +59,10 @@ jobs:
 
   build:
     name: build twitty.exe
+    # Pull requests only run `check`: the release build (~5 min, mostly thin
+    # LTO + link) is the slowest job. Pushes to main keep building it, which
+    # also keeps the release cache warm for version tags.
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 75
     steps:

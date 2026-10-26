@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# No doctests in this crate: skip a rustdoc run on every `cargo test`.
+[lib]
+doctest = false
+
 [features]
 # In-memory backend for UI development and tests.
 mock = []
