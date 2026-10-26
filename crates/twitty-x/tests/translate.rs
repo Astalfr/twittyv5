@@ -10,7 +10,7 @@
 use std::fmt::Write as _;
 
 use twitty_model::{Embed, FeedItem, FeedPage, FollowAction, Media, Post, PostOrGone, SpanKind};
-use twitty_x::translate::{Translated, feed_page, follow_status, lists, users};
+use twitty_x::translate::{Translated, feed_page, follow_status, lists, posts, users};
 
 const FIXTURES: &[&str] = &[
     "home",
@@ -215,6 +215,38 @@ fn fixture_snapshots() {
     for name in FIXTURES {
         insta::assert_snapshot!(*name, summary(&load(name).page));
     }
+}
+
+#[test]
+fn tweet_lookups_keep_the_tweets_that_exist() {
+    let path = format!("{}/tests/fixtures/tweet-results.json", env!("CARGO_MANIFEST_DIR"));
+    let raw = std::fs::read_to_string(&path).unwrap();
+    let t = posts(&serde_json::from_str(&raw).unwrap());
+    assert!(t.warnings.is_empty(), "{:#?}", t.warnings);
+    // Five ids asked, one of which doesn't exist (an empty result).
+    assert_eq!(t.posts.len(), 4);
+    let lines: Vec<String> = t.posts.iter().map(|p| post_line(p, "")).collect();
+    insta::assert_snapshot!(
+        "tweet-results",
+        lines.join(
+            "
+"
+        )
+    );
+}
+
+#[test]
+fn tweet_lookups_without_results_warn() {
+    let t = posts(&serde_json::json!({"data": {}}));
+    assert!(t.posts.is_empty());
+    assert_eq!(t.warnings.len(), 1);
+    let t = posts(&serde_json::json!({"data": {"tweetResult": [
+        {"result": {"__typename": "TweetBrandNewThing"}},
+        {"result": {"__typename": "TweetTombstone", "tombstone": {"text": {"text": "deleted"}}}},
+        {},
+    ]}}));
+    assert!(t.posts.is_empty());
+    assert_eq!(t.warnings.len(), 1, "only the unknown shape: {:#?}", t.warnings);
 }
 
 #[test]

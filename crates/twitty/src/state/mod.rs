@@ -25,6 +25,7 @@ pub mod repost;
 pub mod settings;
 pub mod sheets;
 pub mod sources;
+pub mod stats;
 pub mod thread;
 pub mod toasts;
 pub mod translation;

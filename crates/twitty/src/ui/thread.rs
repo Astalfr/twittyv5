@@ -8,7 +8,7 @@ use gpui_kit::{
     component::scroll::ScrollableElement, component::spinner::Spinner, component::*, div,
     prelude::*, px,
 };
-use twitty_model::{Backend, BackendError, PostId};
+use twitty_model::{Backend, BackendError, FeedItem, PostId};
 
 use crate::{
     runtime::Runtime,
@@ -94,6 +94,11 @@ impl ThreadPanel {
                 Err(e) => Err(BackendError::Network(e.to_string())),
             };
             this.update(cx, |this, cx| {
+                if let Ok(view) = &result {
+                    let replies = view.replies.iter().flat_map(FeedItem::posts);
+                    let posts = view.ancestors.iter().chain([&view.focus]).chain(replies);
+                    this.hub.update(cx, |hub, cx| hub.record(posts, cx));
+                }
                 this.state = match result {
                     Ok(view) => ThreadState::Loaded(Box::new(view)),
                     Err(e) => ThreadState::Failed(e),

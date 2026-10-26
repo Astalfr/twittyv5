@@ -191,6 +191,38 @@ pub fn follow_status(root: &Value, action: FollowAction) -> FollowStatus {
     }
 }
 
+/// Result of translating a lookup of tweets by id.
+#[derive(Debug)]
+pub struct TranslatedPosts {
+    pub posts: Vec<Post>,
+    /// Results that could not be read as a tweet, with reasons.
+    pub warnings: Vec<String>,
+}
+
+/// The tweets of a `TweetResultsByRestIds` response. Twitter answers each id
+/// in order, with an empty object for a tweet that doesn't exist; those and
+/// tombstones are left out, unreadable results too (with a warning).
+pub fn posts(root: &Value) -> TranslatedPosts {
+    let mut ctx = Ctx::default();
+    let mut posts = Vec::new();
+    let Some(results) = at(root, &["data", "tweetResult"]).and_then(Value::as_array) else {
+        ctx.warn("response has no tweetResult array".into());
+        return TranslatedPosts { posts, warnings: ctx.warnings };
+    };
+    for (ix, slot) in results.iter().enumerate() {
+        let Some(result) = at(slot, &["result"]) else { continue };
+        match tweet::unwrap(result) {
+            tweet::Unwrapped::Tweet(t) => match tweet::post(t, &mut ctx, 0) {
+                Ok(post) => posts.push(post),
+                Err(e) => ctx.warn(format!("tweetResult[{ix}]: {e}")),
+            },
+            tweet::Unwrapped::Gone(_) => {}
+            tweet::Unwrapped::Unknown(e) => ctx.warn(format!("tweetResult[{ix}]: {e}")),
+        }
+    }
+    TranslatedPosts { posts, warnings: ctx.warnings }
+}
+
 /// The tweet a `CreateTweet` response returns.
 pub fn created_post(root: &Value) -> Option<Post> {
     let result = at(root, &["data", "create_tweet", "tweet_results", "result"])?;

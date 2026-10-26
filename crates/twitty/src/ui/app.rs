@@ -37,6 +37,7 @@ use crate::{
         repost::RepostChoice,
         settings::Settings,
         sheets::{self, SheetStack},
+        stats,
         toasts::{Notice, Toasts},
         update::{Release, Status as UpdateStatus, Updates, Version},
     },
@@ -224,6 +225,8 @@ pub struct TwittyApp {
     focus: FocusHandle,
     session_check: Option<Task<()>>,
     _budget_task: Option<Task<()>>,
+    /// Refreshes the counters of the tweets on screen.
+    _stats_task: Option<Task<()>>,
     _login_sub: Option<Subscription>,
     _add_sub: Option<Subscription>,
     _column_settings_sub: Option<Subscription>,
@@ -321,6 +324,7 @@ impl TwittyApp {
             focus: cx.focus_handle(),
             session_check: None,
             _budget_task: None,
+            _stats_task: None,
             _login_sub: None,
             _add_sub: None,
             _column_settings_sub: None,
@@ -356,6 +360,20 @@ impl TwittyApp {
                     if this.update(cx, |this, cx| this.update_polling(cx)).is_err() {
                         break;
                     }
+                }
+            }));
+            this._stats_task = Some(cx.spawn(async move |this, cx| {
+                let mut wait = stats::REFRESH_EVERY;
+                loop {
+                    cx.background_executor().timer(wait).await;
+                    let Ok(refresh) = this.update(cx, |this, cx| this.refresh_stats(cx)) else {
+                        break;
+                    };
+                    let result = match refresh {
+                        Some(task) => task.await,
+                        None => Ok(()),
+                    };
+                    wait = stats::next_delay(result.as_ref().map(|_| ()), chrono::Utc::now());
                 }
             }));
         }
@@ -1246,6 +1264,20 @@ impl TwittyApp {
         for ((_, column), every) in self.columns.iter().zip(intervals) {
             column.update(cx, |c, _| c.set_poll_interval(every.filter(|_| enabled)));
         }
+    }
+
+    /// Looks up the tweets on screen in every column again, so their counters
+    /// keep moving. `None` when polling is off or nothing is on screen.
+    pub fn refresh_stats(&self, cx: &mut Context<Self>) -> Option<Task<Result<(), BackendError>>> {
+        if !self.settings.polling_enabled() {
+            return None;
+        }
+        let columns: Vec<_> = self.columns.iter().map(|(_, c)| c.read(cx)).collect();
+        let ids = stats::ids(columns.iter().flat_map(|c| c.visible_items()));
+        if ids.is_empty() {
+            return None;
+        }
+        Some(self.hub.update(cx, |hub, cx| hub.refresh(ids, cx)))
     }
 
     fn check_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3876,6 +3908,12 @@ mod tests {
         ) -> twitty_model::BoxFuture<'a, Result<twitty_model::ThreadView, BackendError>> {
             self.0.thread(id)
         }
+        fn posts<'a>(
+            &'a self,
+            ids: &'a [twitty_model::PostId],
+        ) -> twitty_model::BoxFuture<'a, Result<Vec<twitty_model::Post>, BackendError>> {
+            self.0.posts(ids)
+        }
         fn profile<'a>(
             &'a self,
             handle: &'a str,
@@ -3960,6 +3998,47 @@ mod tests {
             app.update_polling(cx);
         });
         assert!(intervals(cx).iter().all(Option::is_none), "polling can be turned off");
+    }
+
+    #[gpui_kit::test]
+    fn counters_of_visible_tweets_are_refreshed(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let mut deck = DeckFile::default();
+        deck.add_column(FeedSource::Bookmarks);
+        let options = AppOptions { poll: true, ..AppOptions::default() };
+        let mock = MockBackend::new();
+        let backend: Arc<dyn Backend> = Arc::new(mock.clone());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(deck, Settings::default(), backend, options, window, cx)
+        });
+        cx.run_until_parked();
+        let first = |cx: &mut VisualTestContext| {
+            app.read_with(cx, |app, cx| {
+                let column = app.columns().next().unwrap().read(cx);
+                column.visible_items()[0].posts()[0].clone()
+            })
+        };
+        let post = first(cx);
+        let metrics = twitty_model::Metrics { likes: 4321, views: Some(98_765), ..post.metrics };
+        mock.set_metrics(&post.id, metrics);
+        assert!(mock.lookups().is_empty(), "nothing before the first period");
+
+        cx.executor().advance_clock(stats::REFRESH_EVERY);
+        cx.run_until_parked();
+        let lookups = mock.lookups();
+        assert_eq!(lookups.len(), 1, "one request for the whole deck");
+        assert!(lookups[0].contains(&post.id));
+        assert!(lookups[0].len() <= stats::MAX_IDS);
+        let shown = app.read_with(cx, |app, cx| app.hub.read(cx).effective(&post).metrics);
+        assert_eq!(shown, metrics);
+
+        app.update(cx, |app, _| app.settings.polling = Some(false));
+        cx.executor().advance_clock(stats::REFRESH_EVERY);
+        cx.run_until_parked();
+        assert_eq!(mock.lookups().len(), 1, "turning polling off stops the refreshes");
     }
 
     fn keyboard_app(cx: &mut TestAppContext) -> (Entity<TwittyApp>, &mut VisualTestContext) {

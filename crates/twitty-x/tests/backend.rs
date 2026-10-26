@@ -390,6 +390,34 @@ async fn rate_budget_uses_the_limit_x_reported() {
 }
 
 #[tokio::test]
+async fn tweet_lookups_send_the_ids_and_return_the_tweets_found() {
+    let server = MockServer::start().await;
+    serve(&server, "TweetResultsByRestIds", fixture("tweet-results")).await;
+    let b = backend(&server);
+    let ids: Vec<PostId> = ["1", "2", "3", "4", "5"].map(PostId::new).to_vec();
+    let posts = b.posts(&ids).await.unwrap();
+
+    assert_eq!(posts.len(), 4, "the empty result is left out");
+    assert_eq!(sent_variables(&server).await["tweetIds"], json!(["1", "2", "3", "4", "5"]));
+    let health = b.health();
+    let lookups = health.iter().find(|h| h.name == "TweetResultsByRestIds").unwrap();
+    assert_eq!((lookups.ok, lookups.rows, lookups.unsupported), (1, 4, 0));
+}
+
+#[tokio::test]
+async fn long_tweet_lookups_are_split_into_batches() {
+    let server = MockServer::start().await;
+    serve(&server, "TweetResultsByRestIds", json!({"data": {"tweetResult": []}})).await;
+    let ids: Vec<PostId> = (0..120).map(|n| PostId::new(n.to_string())).collect();
+    backend(&server).posts(&ids).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let sizes: Vec<usize> =
+        requests.iter().map(|r| variables_of(r)["tweetIds"].as_array().unwrap().len()).collect();
+    assert_eq!(sizes, [50, 50, 20]);
+}
+
+#[tokio::test]
 async fn health_counts_rows_errors_and_drift() {
     let server = MockServer::start().await;
     serve(&server, "HomeTimeline", fixture("home")).await;

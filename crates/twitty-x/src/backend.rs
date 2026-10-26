@@ -27,6 +27,12 @@ const ALREADY_REQUESTED: i64 = 160;
 /// `SearchTimeline` counters (both share Twitter's rate limit).
 const PEOPLE_SEARCH: &str = "SearchTimeline (People)";
 
+/// Looks tweets up by id, for fresh counters.
+const TWEET_RESULTS: &str = "TweetResultsByRestIds";
+
+/// Ids per `TweetResultsByRestIds` request (90 were verified live).
+const LOOKUP_BATCH: usize = 50;
+
 /// The viewer's lists page (owned, followed and suggested lists).
 const LISTS_MANAGEMENT: &str = "ListsManagementPageTimeline";
 
@@ -132,6 +138,32 @@ impl Backend for XBackend {
             }
             .await;
             self.track("TweetDetail", result)
+        })
+    }
+
+    fn posts<'a>(&'a self, ids: &'a [PostId]) -> BoxFuture<'a, Result<Vec<Post>, BackendError>> {
+        Box::pin(async move {
+            let mut posts = Vec::with_capacity(ids.len());
+            for batch in ids.chunks(LOOKUP_BATCH) {
+                let variables = requests::tweet_results_variables(batch);
+                let body = match self.client.graphql(TWEET_RESULTS, variables).await {
+                    Ok(body) => body,
+                    Err(e) => {
+                        self.health.error(TWEET_RESULTS, &e);
+                        return Err(e.into());
+                    }
+                };
+                let translated = translate::posts(&body);
+                let unreadable = translated.warnings.len();
+                self.health.rows(
+                    TWEET_RESULTS,
+                    translated.posts.len() + unreadable,
+                    unreadable,
+                    &translated.warnings,
+                );
+                posts.extend(translated.posts);
+            }
+            Ok(posts)
         })
     }
 

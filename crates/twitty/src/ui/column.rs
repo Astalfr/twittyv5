@@ -12,7 +12,7 @@ use gpui_kit::{
     component::scroll::ScrollableElement, component::skeleton::Skeleton,
     component::spinner::Spinner, component::*, div, list, prelude::*, px,
 };
-use twitty_model::{Backend, BackendError, FeedSource};
+use twitty_model::{Backend, BackendError, FeedItem, FeedSource};
 
 use crate::{
     notifier::{self, Toast},
@@ -26,6 +26,7 @@ use crate::{
         motion::{self, Entrance, Recent},
         poll,
         sources::{self, Tab},
+        stats,
     },
     ui::button::TextButton,
     ui::{
@@ -230,8 +231,14 @@ impl ColumnView {
         result: Result<twitty_model::FeedPage, BackendError>,
         cx: &mut Context<Self>,
     ) {
-        if let Err(e) = &result {
-            tracing::warn!(column = self.id.0, ?kind, "load failed: {e}");
+        match &result {
+            // Before `finish`, which drops rows already loaded: theirs are
+            // the newest counters too.
+            Ok(page) => {
+                let posts = page.items.iter().flat_map(FeedItem::posts);
+                self.hub.update(cx, |hub, cx| hub.record(posts, cx));
+            }
+            Err(e) => tracing::warn!(column = self.id.0, ?kind, "load failed: {e}"),
         }
         let change = self.model.finish(kind, result);
         self.announce(kind, &change, cx);
@@ -292,6 +299,14 @@ impl ColumnView {
                 self.arrivals.mark(item.key(), entrance, now, entrance.total());
             }
         }
+    }
+
+    /// The rows on screen, whose counters the app keeps current.
+    pub fn visible_items(&self) -> &[FeedItem] {
+        let items = self.model.items();
+        let top = self.list.logical_scroll_top().item_ix;
+        let rows = stats::visible_rows(top, items.len(), |ix| self.list.item_is_below_viewport(ix));
+        &items[rows]
     }
 
     /// Rows still animating in.
@@ -753,6 +768,47 @@ mod tests {
             assert_eq!(c.model().items().len(), MockBackend::PAGE_SIZE);
             assert_eq!(c.list.item_count(), MockBackend::PAGE_SIZE + 1, "rows + footer");
         });
+    }
+
+    /// The counters `column` shows for its first row.
+    fn first_row_likes(column: &Entity<ColumnView>, cx: &mut TestAppContext) -> u64 {
+        column.read_with(cx, |c, cx| {
+            let post = c.model().items()[0].posts()[0];
+            c.hub.read(cx).effective(post).metrics.likes
+        })
+    }
+
+    #[gpui_kit::test]
+    fn counters_follow_stats_refreshes_and_newer_loads(cx: &mut TestAppContext) {
+        let (backend, column) = setup(cx);
+        cx.run_until_parked();
+        let id = column.read_with(cx, |c, _| c.model().items()[0].posts()[0].id.clone());
+        let hub = column.read_with(cx, |c, _| c.hub.clone());
+
+        backend.set_metrics(&id, twitty_model::Metrics { likes: 100, ..Default::default() });
+        hub.update(cx, |hub, cx| hub.refresh(vec![id.clone()], cx)).detach();
+        cx.run_until_parked();
+        assert_eq!(first_row_likes(&column, cx), 100, "the loaded row shows the new count");
+
+        // A reload brings even newer counters: they win over the refresh's.
+        backend.set_metrics(&id, twitty_model::Metrics { likes: 150, ..Default::default() });
+        column.update(cx, |c, cx| c.load(LoadKind::Refresh, cx));
+        cx.run_until_parked();
+        assert_eq!(first_row_likes(&column, cx), 150);
+    }
+
+    #[gpui_kit::test]
+    async fn failed_stats_refreshes_keep_the_counters(cx: &mut TestAppContext) {
+        let (backend, column) = setup(cx);
+        cx.run_until_parked();
+        let before = first_row_likes(&column, cx);
+        let id = column.read_with(cx, |c, _| c.model().items()[0].posts()[0].id.clone());
+        let hub = column.read_with(cx, |c, _| c.hub.clone());
+
+        backend.fail_next(BackendError::Network("offline".into()));
+        let task = hub.update(cx, |hub, cx| hub.refresh(vec![id], cx));
+        assert_eq!(task.await, Err(BackendError::Network("offline".into())));
+        assert_eq!(first_row_likes(&column, cx), before);
     }
 
     #[gpui_kit::test]
