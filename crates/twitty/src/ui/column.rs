@@ -7,9 +7,9 @@ use std::{
 
 use gpui_kit::{
     Animation, AnimationExt, AnyElement, App, Context, ElementId, Entity, EventEmitter, FontWeight,
-    IntoElement, ListAlignment, ListOffset, ListState, ParentElement, Render, SharedString, Styled,
-    Subscription, Task, Window, assets::IconName, base, component::button::*,
-    component::scroll::ScrollableElement, component::skeleton::Skeleton,
+    IntoElement, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent, ParentElement,
+    Pixels, Render, SharedString, Styled, Subscription, Task, Window, assets::IconName, base,
+    component::button::*, component::scroll::ScrollableElement, component::skeleton::Skeleton,
     component::spinner::Spinner, component::*, div, list, prelude::*, px,
 };
 use twitty_model::{Backend, BackendError, FeedItem, FeedSource};
@@ -28,6 +28,7 @@ use crate::{
         sources::{self, Tab},
         stats,
     },
+    ui::autoscroll,
     ui::button::TextButton,
     ui::{
         emoji,
@@ -147,6 +148,13 @@ impl ColumnView {
 
     pub fn id(&self) -> ColumnId {
         self.id
+    }
+
+    /// The list's scroll position: the first row shown, and how far into it.
+    #[cfg(test)]
+    pub(crate) fn scroll_top(&self) -> (usize, gpui_kit::Pixels) {
+        let top = self.list.logical_scroll_top();
+        (top.item_ix, top.offset_in_item)
     }
 
     pub fn model(&self) -> &ColumnModel {
@@ -328,6 +336,29 @@ impl ColumnView {
         {
             self.load(LoadKind::Older, cx);
         }
+    }
+
+    /// Scrolls by `dy` (positive: down) for a middle-click autoscroll, the way
+    /// a wheel does: within the list's ends, and reacting to the new position
+    /// like after a wheel (rows seen, older pages loaded).
+    fn autoscroll_by(&mut self, dy: Pixels, cx: &mut Context<Self>) {
+        let top = -self.list.scroll_px_offset_for_scrollbar().y;
+        let max = self.list.max_offset_for_scrollbar().y;
+        let dy = dy.max(-top).min((max - top).max(px(0.)));
+        if dy == px(0.) {
+            return;
+        }
+        self.list.scroll_by(dy);
+        let first = self.list.logical_scroll_top().item_ix;
+        let bottom = self.list.viewport_bounds().bottom();
+        let mut end = first + 1;
+        while end < self.list.item_count()
+            && self.list.bounds_for_item(end).is_some_and(|row| row.top() < bottom)
+        {
+            end += 1;
+        }
+        self.on_scroll(first..end, cx);
+        cx.notify();
     }
 
     fn scroll_to_top(&mut self, cx: &mut Context<Self>) {
@@ -624,6 +655,19 @@ impl ColumnView {
             .relative()
             .flex_1()
             .min_h_0()
+            // A middle press here autoscrolls this column, even when the
+            // deck then slides it from under the anchor.
+            .capture_any_mouse_down(cx.listener(|_, event: &MouseDownEvent, _, cx| {
+                if event.button == MouseButton::Middle {
+                    let column = cx.entity().downgrade();
+                    autoscroll::offer_vertical(
+                        move |dy, cx| {
+                            column.update(cx, |this, cx| this.autoscroll_by(px(dy), cx)).ok();
+                        },
+                        cx,
+                    );
+                }
+            }))
             .child(list(self.list.clone(), cx.processor(Self::render_row)).size_full())
             .vertical_scrollbar(&self.list)
             .when(unseen > 0, |d| {
@@ -1389,6 +1433,50 @@ mod tests {
             assert_eq!(c.list.item_count(), MockBackend::FEED_LEN + 1, "rows + footer");
             assert_eq!(c.model().status(), &Status::Idle);
             assert!(!c.at_top, "scrolled away from the top");
+        });
+    }
+
+    #[gpui_kit::test]
+    fn autoscroll_pages_like_the_wheel_and_stops_at_the_end(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(Runtime::inline());
+        });
+        let shared: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(Arc::clone(&shared)));
+        let source = FeedSource::Home { mode: HomeMode::Following };
+        let (column, cx) = cx.add_window_view(|_, cx| {
+            ColumnView::new(&ColumnConfig::new(ColumnId(1), source), shared, hub, false, cx)
+        });
+        cx.run_until_parked();
+
+        let mut steps = 0;
+        while column.read_with(cx, |c, _| c.model().has_older()) {
+            assert!(steps < 500, "autoscroll never reached the end of the feed");
+            column.update(cx, |c, cx| c.autoscroll_by(px(3000.), cx));
+            cx.run_until_parked();
+            steps += 1;
+        }
+        assert_eq!(column.read_with(cx, |c, _| c.model().items().len()), MockBackend::FEED_LEN);
+        assert!(!column.read_with(cx, |c, _| c.at_top));
+
+        // Past the end it stops (once the last rows are measured, which can
+        // take a frame, as with the wheel), and coming back up reaches the top.
+        let mut end = column.read_with(cx, |c, _| c.scroll_top());
+        let mut stuck = 0;
+        for _ in 0..20 {
+            column.update(cx, |c, cx| c.autoscroll_by(px(3000.), cx));
+            cx.run_until_parked();
+            let now = column.read_with(cx, |c, _| c.scroll_top());
+            stuck = if now == end { stuck + 1 } else { 0 };
+            end = now;
+        }
+        assert!(stuck >= 10, "still moving past the end of the feed");
+        column.update(cx, |c, cx| c.autoscroll_by(px(-1_000_000.), cx));
+        cx.run_until_parked();
+        column.read_with(cx, |c, _| {
+            assert_eq!(c.scroll_top(), (0, px(0.)));
+            assert!(c.at_top);
         });
     }
 

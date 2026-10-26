@@ -3,6 +3,7 @@
 
 pub mod add_column;
 pub mod alerts;
+pub mod autoscroll;
 pub mod column;
 pub mod community_note;
 pub mod compose;

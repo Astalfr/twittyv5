@@ -4,6 +4,7 @@
 pub mod add_column;
 pub mod app;
 pub mod assets;
+pub mod autoscroll;
 pub mod button;
 pub mod column;
 pub mod column_settings;
