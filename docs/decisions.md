@@ -325,3 +325,8 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
   - `rust-lld` as the linker. It built and ran, but incremental debug builds were no faster (7.7 s either way for `twitty`) and `cargo test --no-run` was slower (15 s vs 12 s).
   - No debug info for dependencies (`[profile.dev.package."*"] debug = false`). It halved the PDB (180 MB → 83 MB) without making any build faster: linking isn't the bottleneck.
   - Moving `twitty-x`'s reqwest from aws-lc to ring. It drops nothing, because `gpui-pre-http-client-tls` depends on rustls' default features (aws-lc) and installs aws-lc as the process default itself.
+
+### 2026-10-26: Size-optimised release build for crates off the hot path
+- **Decision**: `[profile.release.package]` builds about 30 crates with `opt-level = "s"`: wry/tao/webview2-com, both reqwests, hyper/h2, rustls, aws-lc-sys, the regex crates, tracing-subscriber, clap, gpui-component's markdown/HTML parsers, accesskit, exr/tiff, usvg and keyring. Everything else stays at 3.
+- **Why**: The exe was 42.6 MB, and our own crates are only about 2.2 MiB of its code. Fat LTO and `codegen-units = 1` would shrink it more but slow every tag build, which we don't want. Per-package `"s"` took it to 40.0 MB (−6 %), with the same incremental release build time (57 s vs 59 s locally).
+- **Consequences**: The listed crates run a little slower. None of them runs per frame: they cover the sign-in window, network and TLS, the logger, the screen-reader bridge, codecs Twitter never sends, and SVG parsing (once per icon; drawing stays in resvg at 3). `twitty-x` was tried at `"s"` too (−0.2 MB more) but stays at 3 because it translates every page. The first build after this change recompiles those crates, once.

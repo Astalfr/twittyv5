@@ -67,6 +67,7 @@ Installed copies then offer it on their next check:
   - `rust`: `unsafe_code = "forbid"` (relaxed only in `twitty` if ever needed)
   - `clippy`: `unwrap_used`, `expect_used`, `dbg_macro`, `todo`, `unimplemented` = deny; `print_stdout`/`print_stderr` = warn
 - `[profile.dev.package]` builds `gpui-pre*` with `opt-level = 3`, so debug builds stay smooth, as gpui-component does.
+- `[profile.release.package]` builds crates that never run per frame (sign-in window, HTTP/TLS, regexes, logging, accessibility, unused image codecs, SVG parsing) with `opt-level = "s"`. Rendering, image decoding, audio and `twitty-x` stay at 3. Don't add a crate there that runs per frame or per tweet.
 - `clippy.toml` allows `unwrap`/`expect`/`print` in tests only.
 - `rustfmt.toml`: `max_width = 100`, `use_small_heuristics = "Max"`.
 

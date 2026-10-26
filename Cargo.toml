@@ -127,3 +127,38 @@ twitty-media = { opt-level = 3 }
 [profile.release]
 strip = "symbols"
 lto = "thin"
+
+# Optimised for size: crates that never run per frame (sign-in window, HTTP,
+# TLS, regexes, logging, accessibility, codecs Twitter never sends, SVG
+# parsing): about 2.6 MB off a 42.6 MB exe, at no build-time cost after the
+# first build. Rendering, image decoding, audio and `twitty-x` (Twitter JSON
+# translation, on every page) stay at opt-level 3.
+[profile.release.package]
+wry = { opt-level = "s" }
+tao = { opt-level = "s" }
+webview2-com = { opt-level = "s" }
+reqwest = { opt-level = "s" }
+gpui-pre-reqwest = { opt-level = "s" }
+hyper = { opt-level = "s" }
+hyper-util = { opt-level = "s" }
+h2 = { opt-level = "s" }
+rustls = { opt-level = "s" }
+rustls-webpki = { opt-level = "s" }
+aws-lc-sys = { opt-level = "s" }
+regex-automata = { opt-level = "s" }
+regex-syntax = { opt-level = "s" }
+aho-corasick = { opt-level = "s" }
+tracing-subscriber = { opt-level = "s" }
+clap_builder = { opt-level = "s" }
+markdown = { opt-level = "s" }
+html5ever = { opt-level = "s" }
+markup5ever = { opt-level = "s" }
+accesskit = { opt-level = "s" }
+accesskit_consumer = { opt-level = "s" }
+accesskit_windows = { opt-level = "s" }
+exr = { opt-level = "s" }
+tiff = { opt-level = "s" }
+usvg = { opt-level = "s" }
+roxmltree = { opt-level = "s" }
+svgtypes = { opt-level = "s" }
+keyring = { opt-level = "s" }
