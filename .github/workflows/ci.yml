@@ -3,7 +3,8 @@ name: CI
 on:
   push:
     branches: [main, master]
-    # A version tag (v1.2.3) also publishes a GitHub Release (job `release`).
+    # A version tag (v1.2.3) also builds the installer and publishes a GitHub
+    # Release (jobs `build` and `release`).
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -80,11 +81,12 @@ jobs:
         timeout-minutes: 30
 
   build:
-    name: build twitty.exe
-    # Pull requests only run `lint` and `test`: the release build (~5 min, mostly thin
-    # LTO + link) is the slowest job. Pushes to main keep building it, which
-    # also keeps the release cache warm for version tags.
-    if: github.event_name != 'pull_request'
+    name: build installer
+    # Only version tags (and manual runs) build the release: the installer is
+    # the only thing anyone uses (installed copies update from it), and the
+    # release build is the slowest job (~5 min warm, mostly thin LTO + link).
+    # No cache: only `main` could save one, and it no longer runs this job.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
@@ -98,26 +100,9 @@ jobs:
       - name: Install toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: release
-          # Save what was compiled even if a step failed or timed out, so the
-          # next run doesn't start cold again. Only main saves (10 GB quota);
-          # pull requests restore main's cache.
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
       - name: Build release
         run: cargo build --release --locked -p twitty
         timeout-minutes: 60
-
-      - name: Upload executable
-        uses: actions/upload-artifact@v4
-        with:
-          name: twitty-windows-x64-${{ github.sha }}
-          path: target/release/twitty.exe
-          if-no-files-found: error
-          retention-days: 30
 
       # Inno Setup may or may not be on the runner image: install it if missing.
       - name: Build installer
@@ -140,7 +125,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # Publishes the installer and the exe of a version tag. Installed copies
+  # Publishes the installer of a version tag. Installed copies
   # update from the latest release, so this only runs once tests and build pass.
   release:
     name: publish release
@@ -153,8 +138,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: twitty-*-${{ github.sha }}
-          merge-multiple: true
+          name: twitty-setup-windows-x64-${{ github.sha }}
           path: dist
 
       # The installer is named after the version in Cargo.toml.
@@ -172,7 +156,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME"
-          dist/twitty-setup-*-x64.exe dist/twitty.exe
+          dist/twitty-setup-*-x64.exe
           --repo "$GITHUB_REPOSITORY"
           --title "Twitty ${GITHUB_REF_NAME#v}"
           --generate-notes

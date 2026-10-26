@@ -25,23 +25,23 @@
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push to `main`/`master`, on `v*` tags, on pull requests and on demand (`workflow_dispatch`). `lint`, `test` and `build` run in parallel on `windows-latest`. `build` doesn't run on pull requests, and `release` runs on tags only:
+`.github/workflows/ci.yml` runs on every push to `main`/`master`, on `v*` tags, on pull requests and on demand (`workflow_dispatch`). `lint` and `test` run on every run, in parallel on `windows-latest`. `build` runs on `v*` tags and manual runs only, in parallel with them, and `release` runs on tags only:
 
 | Job | Steps |
 |---|---|
 | `lint` | `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | `test` | `cargo test --workspace --locked` |
-| `build` | Not on pull requests. `cargo build --release --locked -p twitty`, uploads `target/release/twitty.exe` as the artifact `twitty-windows-x64-<sha>`, then builds the installer and uploads it as `twitty-setup-windows-x64-<sha>` (both kept 30 days) |
-| `release` | Tags `v*` only, after `lint`, `test` and `build` pass (`ubuntu-latest`, `contents: write`): downloads both artifacts, fails unless the installer is named after the tag's version, then `gh release create <tag>` with the installer and `twitty.exe` and generated notes |
+| `build` | Tags `v*` and `workflow_dispatch` only, no cache. `cargo build --release --locked -p twitty`, then builds the installer and uploads it as the artifact `twitty-setup-windows-x64-<sha>` (kept 30 days) |
+| `release` | Tags `v*` only, after `lint`, `test` and `build` pass (`ubuntu-latest`, `contents: write`): downloads the installer artifact, fails unless it is named after the tag's version, then `gh release create <tag>` with the installer and generated notes |
 
-- The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` keeps one cache per job (`clippy`, `test`, `release`): clippy only type-checks, so it shares no artifacts with the test build. Only `main` saves caches, and it saves them even when a step fails or times out (`cache-on-failure`). The compile steps have their own `timeout-minutes`, below the job's, so the save step still runs. Pull requests restore `main`'s cache.
+- The toolchain comes from `rust-toolchain.toml`. `Swatinem/rust-cache` keeps one cache per job (`clippy`, `test`): clippy only type-checks, so it shares no artifacts with the test build. Only `main` saves caches, and it saves them even when a step fails or times out (`cache-on-failure`). The compile steps have their own `timeout-minutes`, below the job's, so the save step still runs. Pull requests restore `main`'s cache.
 - CI builds without debug info (`CARGO_PROFILE_DEV_DEBUG=0`) and turns off Defender real-time scanning first. Runs on `main` are never cancelled by a newer push (that would discard their cache); pull request runs are.
-- Pull requests skip `build`. The release build is the slowest job (about 5 minutes, mostly thin LTO and linking, even with a warm cache), and it rarely breaks when `lint` and `test` pass. Pushes to `main` still build it, which also keeps the release cache warm for `v*` tags.
+- Only `v*` tags and manual runs build the release. The installer is the only output anyone uses (installed copies update from it, and it contains the exe), and the release build is the slowest job (about 5 minutes, mostly thin LTO and linking, even with a warm cache) that rarely breaks when `lint` and `test` pass. It has no cache: caches are saved by `main` only, which no longer builds it, so tag builds start cold. Run the workflow by hand (`workflow_dispatch`) to check a release-only change or to get an installer between releases.
 - The lib crates set `doctest = false` (there are no doctests), so `cargo test` skips four empty rustdoc runs. A crate that gains a doc example must turn its doctests back on.
 - The first run after changing a `CARGO_*` variable in the workflow, `Cargo.lock` or the toolchain starts cold (new cache key).
 - `--locked` fails the build if `Cargo.lock` is out of date, so commit the lockfile with every dependency change.
 - GPUI tests use GPUI's test platform, so CI needs no real display.
-- Download the `.exe` from the run's **Artifacts** section on GitHub.
+- Download the installer from the run's **Artifacts** section on GitHub (tag and manual runs), or from the GitHub release.
 - **Installer**: `installer/twitty.iss` is an [Inno Setup](https://jrsoftware.org/isinfo.php) script. CI installs Inno Setup with Chocolatey when the runner image lacks it, reads the version from `cargo metadata` and runs `ISCC.exe /DAppVersion=<version> installer\twitty.iss`, which writes `target/installer/twitty-setup-<version>-x64.exe`. To build it locally: `winget install JRSoftware.InnoSetup`, build the release exe, then run the same command (the script refuses to compile without `AppVersion`). It installs per user under `%LOCALAPPDATA%\Programs\Twitty` without admin rights (the wizard offers an all-users install), adds a Start menu shortcut and an optional desktop one, and closes a running Twitty before upgrading. Uninstalling leaves settings, decks, logs and the saved session in place. `AppId` identifies the app for upgrades and uninstall: never change it. The installer isn't signed, so SmartScreen warns on first run. Run silently with `/relaunch=1` (what the updater does), it starts Twitty when it's done.
 
 ### Releases and self-update

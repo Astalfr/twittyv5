@@ -339,3 +339,8 @@ Lightweight ADRs: newest first. Each entry: date, decision, why, consequences. A
   - A wheel event moves the window's idea of the pointer to the anchor; the follow-up mouse move puts it back so hover stays under the real pointer.
   - Listeners are raw window listeners in the capture phase, so they see presses over occluding sheets and dialogs. The layer has no hitbox, so it takes no hover or clicks of its own.
   - A new kind of view that the deck can slide (a list inside a column) must call `offer_vertical` to be latched; otherwise it gets wheel events at the anchor.
+
+### 2026-10-26: Only version tags build the release, and only the installer is published
+- **Decision**: The CI `build` job runs on `v*` tags and `workflow_dispatch` only, without a cache. It uploads the installer alone: the bare `twitty.exe` is no longer an artifact or a release asset. This supersedes "Pull requests don't build the release exe" above.
+- **Why**: Nobody used the per-commit artifacts or the bare exe. The updater only downloads `twitty-setup-<version>-x64.exe`, the installer carries the exe, and a copied exe never checks for updates. The release build was the slowest job on every push to `main` (about 5 minutes warm).
+- **Consequences**: Tag builds start cold (caches are only saved on `main`), so a release takes longer to publish; nobody waits on it. A change that breaks only the release build or the installer script is caught on the next tag: run the workflow by hand first when that's a risk.
