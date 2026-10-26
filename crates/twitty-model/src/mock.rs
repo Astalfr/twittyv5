@@ -41,6 +41,10 @@ struct State {
     failures: VecDeque<BackendError>,
     actions: Vec<PostAction>,
     viewer: HashMap<PostId, ViewerPostState>,
+    /// Counters changed by [`MockBackend::set_metrics`].
+    metrics: HashMap<PostId, Metrics>,
+    /// The ids of the last [`Backend::posts`] calls, in order.
+    lookups: VecDeque<Vec<PostId>>,
     follows: Vec<(UserId, FollowAction)>,
     /// Accounts the viewer followed or asked to follow.
     following: HashMap<UserId, FollowStatus>,
@@ -56,6 +60,9 @@ impl Default for MockBackend {
 impl MockBackend {
     /// Rows per page.
     pub const PAGE_SIZE: usize = 20;
+    /// [`Backend::posts`] calls remembered for [`Self::lookups`]: the demo
+    /// deck refreshes counters every minute for as long as it runs.
+    pub const LOOKUPS_KEPT: usize = 16;
     /// Rows generated for each feed.
     pub const FEED_LEN: usize = 120;
 
@@ -70,6 +77,8 @@ impl MockBackend {
                 failures: VecDeque::new(),
                 actions: Vec::new(),
                 viewer: HashMap::new(),
+                metrics: HashMap::new(),
+                lookups: VecDeque::new(),
                 follows: Vec::new(),
                 following: HashMap::new(),
                 lists: sample_lists(),
@@ -123,6 +132,18 @@ impl MockBackend {
         self.lock().lists = lists;
     }
 
+    /// Changes tweet `id`'s counters, as if people engaged with it. Later
+    /// pages and lookups return the new values.
+    pub fn set_metrics(&self, id: &PostId, metrics: Metrics) {
+        self.lock().metrics.insert(id.clone(), metrics);
+    }
+
+    /// The ids of the last [`Backend::posts`] calls (at most
+    /// [`Self::LOOKUPS_KEPT`]), in order.
+    pub fn lookups(&self) -> Vec<Vec<PostId>> {
+        self.lock().lookups.iter().cloned().collect()
+    }
+
     /// Actions received so far.
     pub fn actions(&self) -> Vec<PostAction> {
         self.lock().actions.clone()
@@ -149,7 +170,7 @@ impl MockBackend {
         self.take_failure()?;
         let mut st = self.lock();
         st.ensure_feed(source);
-        let viewer = st.viewer.clone();
+        let overrides = Overrides { viewer: &st.viewer, metrics: &st.metrics };
         let feed = st.feeds.get(source).map(Vec::as_slice).unwrap_or_default();
         let pos = |key: &str| feed.iter().position(|item| item.key() == key);
 
@@ -165,7 +186,7 @@ impl MockBackend {
             }
         };
         let mut items: Vec<FeedItem> =
-            feed[range.clone()].iter().cloned().map(|i| apply_viewer(i, &viewer)).collect();
+            feed[range.clone()].iter().cloned().map(|i| overrides.apply(i)).collect();
 
         // Newer cursor points at the newest item we know of; older at the last served.
         let newer = match (&page, items.first()) {
@@ -180,7 +201,7 @@ impl MockBackend {
         };
         // Added after the cursors, which point at timeline rows.
         if let (PageRequest::First, Some(pin)) = (&page, st.pins.get(source)) {
-            items.insert(0, apply_viewer(FeedItem::Pinned(pin.clone()), &viewer));
+            items.insert(0, overrides.apply(FeedItem::Pinned(pin.clone())));
         }
         Ok(FeedPage { items, newer, older })
     }
@@ -200,19 +221,33 @@ fn decode(token: &PageToken) -> Option<&str> {
     token.as_str().strip_prefix("mock:")
 }
 
-fn apply_viewer(item: FeedItem, viewer: &HashMap<PostId, ViewerPostState>) -> FeedItem {
-    let fix = |mut p: Post| {
-        if let Some(v) = viewer.get(&p.id) {
+/// What the viewer and [`MockBackend::set_metrics`] changed on generated tweets.
+struct Overrides<'a> {
+    viewer: &'a HashMap<PostId, ViewerPostState>,
+    metrics: &'a HashMap<PostId, Metrics>,
+}
+
+impl Overrides<'_> {
+    fn post(&self, mut p: Post) -> Post {
+        if let Some(v) = self.viewer.get(&p.id) {
             p.viewer = *v;
         }
+        if let Some(m) = self.metrics.get(&p.id) {
+            p.metrics = *m;
+        }
         p
-    };
-    match item {
-        FeedItem::Post(p) => FeedItem::Post(fix(p)),
-        FeedItem::Pinned(p) => FeedItem::Pinned(fix(p)),
-        FeedItem::Repost { by, post } => FeedItem::Repost { by, post: fix(post) },
-        FeedItem::Thread(ps) => FeedItem::Thread(ps.into_iter().map(fix).collect()),
-        other => other,
+    }
+
+    fn apply(&self, item: FeedItem) -> FeedItem {
+        match item {
+            FeedItem::Post(p) => FeedItem::Post(self.post(p)),
+            FeedItem::Pinned(p) => FeedItem::Pinned(self.post(p)),
+            FeedItem::Repost { by, post } => FeedItem::Repost { by, post: self.post(post) },
+            FeedItem::Thread(ps) => {
+                FeedItem::Thread(ps.into_iter().map(|p| self.post(p)).collect())
+            }
+            other => other,
+        }
     }
 }
 
@@ -484,6 +519,21 @@ impl Backend for MockBackend {
                     .collect()
             };
             Ok(ThreadView { ancestors: Vec::new(), focus, replies, more_replies: None })
+        })
+    }
+
+    fn posts<'a>(&'a self, ids: &'a [PostId]) -> BoxFuture<'a, Result<Vec<Post>, BackendError>> {
+        Box::pin(async move {
+            self.take_failure()?;
+            // Looked up before taking the lock, which `find_post` takes too.
+            let found: Vec<Post> = ids.iter().filter_map(|id| self.find_post(id)).collect();
+            let mut st = self.lock();
+            if st.lookups.len() == Self::LOOKUPS_KEPT {
+                st.lookups.pop_front();
+            }
+            st.lookups.push_back(ids.to_vec());
+            let overrides = Overrides { viewer: &st.viewer, metrics: &st.metrics };
+            Ok(found.into_iter().map(|p| overrides.post(p)).collect())
         })
     }
 
@@ -898,6 +948,25 @@ mod tests {
         let page = block_on(b.feed(&home(), PageRequest::First)).unwrap();
         assert!(page.items[0].posts()[0].viewer.liked);
         assert_eq!(b.actions(), vec![PostAction::Like(id)]);
+    }
+
+    #[test]
+    fn lookups_return_current_counters_and_skip_unknown_ids() {
+        let b = MockBackend::new();
+        let page = block_on(b.feed(&home(), PageRequest::First)).unwrap();
+        let id = page.items[0].posts()[0].id.clone();
+        let metrics = Metrics { likes: 999, views: Some(5000), ..Metrics::default() };
+        b.set_metrics(&id, metrics);
+        block_on(b.act(PostAction::Like(id.clone()))).unwrap();
+
+        let ids = [id.clone(), PostId::new("no-such-tweet")];
+        let posts = block_on(b.posts(&ids)).unwrap();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].metrics, metrics);
+        assert!(posts[0].viewer.liked);
+        assert_eq!(b.lookups(), vec![ids.to_vec()]);
+        let page = block_on(b.feed(&home(), PageRequest::First)).unwrap();
+        assert_eq!(page.items[0].posts()[0].metrics, metrics, "pages see it too");
     }
 
     #[test]

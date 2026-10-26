@@ -28,7 +28,7 @@ Twitter doesn't document this API. Everything here comes from community clients 
 | `requests.rs` | Private: which operation and variables serve each `FeedSource` and `PageRequest`. Only live-verified variable sets are mapped. |
 | `backend.rs` | `XBackend`: `Backend` over `XClient` + `translate`. |
 | `wire.rs` | Private, lenient readers over Twitter JSON: `at`/`str_at`/`u64_at`…, `timeline()` classifying entries (items, modules, cursors). |
-| `translate/` | Twitter JSON → `twitty-model`: `text` (entities → `RichText`), `user`, `tweet`, `media`, `card`, `notification`; entry points `feed_page()` (any timeline), `thread()` (`TweetDetail` split around the focal tweet), `viewer()` and `user()`. |
+| `translate/` | Twitter JSON → `twitty-model`: `text` (entities → `RichText`), `user`, `tweet`, `media`, `card`, `notification`; entry points `feed_page()` (any timeline), `thread()` (`TweetDetail` split around the focal tweet), `posts()` (`TweetResultsByRestIds`), `viewer()` and `user()`. |
 | `anonymise.rs` | Scrubs captures into committable fixtures, plus a leak check. |
 | `bin/twitty-x-cli.rs` | Dev tool: `ops`, `refresh-ids`, `capture home`, `capture op`, `anonymise`. |
 | `data/operations.json` | Embedded fallback ids with feature switches and field toggles, regenerated from a live discovery run. |
@@ -102,6 +102,8 @@ A session file is `{"auth_token": "…", "ct0": "…"}`. Unusable sources are lo
 | `Bookmarks` | `Bookmarks` | |
 
 `Backend::viewer_lists` (the list picker of the **Add column** dialog) calls `ListsManagementPageTimeline` with `{"count":100}`. The response has two modules: `owned-subscribed-list-module-…` ("Your Lists": owned and followed lists, or a `TimelineMessagePrompt` when there are none) and `list-to-follow-module-…` ("Discover new Lists": suggestions). `translate::lists` reads only the first module, by its entry id; an item there that isn't a readable `TimelineTwitterList` is skipped with a warning. Only the first page is read (its bottom cursor is ignored). The response usually carries partial `errors` (a `DecodeException` on `default_banner_media_results`) next to the data; they don't affect the lists. A response without the "Your Lists" module (an account without lists still has it, holding the prompt) adds a health warning. Health counters are kept as `ListsManagementPageTimeline`.
+
+`Backend::posts` (the counters refresh, see [ui.md](ui.md#stats-refresh)) calls `TweetResultsByRestIds` with `tweetIds` and splits longer lists into requests of 50 ids (`LOOKUP_BATCH`; 90 were verified live on 2026-10-26). The response is `data.tweetResult`, one slot per id in the same order: `{"result": <tweet>}`, where the tweet has the same shape as a timeline's `tweet_results.result`, or `{}` for a tweet that doesn't exist. `translate::posts` leaves out empty slots and tombstones, and skips an unreadable result with a warning. Its rate limit was 500 requests per 15 minutes. Health counters are kept as `TweetResultsByRestIds`.
 
 `Backend::search_users` (the **Search people** dialog) calls `SearchTimeline` (POST) with `product: "People"`. The response is a timeline of `TimelineUser` items whose `user_results.result` has the same shape as `UserByScreenName`, so `translate::users` reuses the profile translation. An entry that isn't a readable account is skipped with a warning. Its health counters are kept as `SearchTimeline (People)`, apart from the search columns, but it spends the same `SearchTimeline` rate budget.
 | `Thread { root }` | `TweetDetail` | |
@@ -299,6 +301,7 @@ Variables that worked live (2026-10-24). The app now asks for `"count":50` per p
 | `SearchTimeline` (POST) | `{"rawQuery":"rust lang:en","count":20,"querySource":"typed_query","product":"Top"}` (`Latest`, `Top`, `Media`) |
 | `SearchTimeline` (POST), accounts | `{"rawQuery":"rust","count":20,"querySource":"typed_query","product":"People"}` |
 | `TweetDetail` | `{"focalTweetId":"…","with_rux_injections":false,"rankingMode":"Relevance","includePromotedContent":true,"withCommunity":true,"withQuickPromoteEligibilityTweetFields":true,"withBirdwatchNotes":true,"withVoice":true}` |
+| `TweetResultsByRestIds` | `{"tweetIds":["…","…"],"includePromotedContent":true,"withBirdwatchNotes":true,"withVoice":true,"withCommunity":true}` (2026-10-26; up to 90 ids tried) |
 | `Bookmarks` | `{"count":20,"includePromotedContent":true}` |
 | `NotificationsTimeline` | `{"timeline_type":"All","count":20}` |
 | `UserTweetsAndReplies` | `{"userId":"…","count":20,"includePromotedContent":true,"withCommunity":true,"withVoice":true}` |

@@ -9,7 +9,9 @@ use gpui_kit::{
     component::button::*, component::scroll::ScrollableElement, component::spinner::Spinner,
     component::*, div, img, list, prelude::*, px,
 };
-use twitty_model::{Backend, BackendError, FeedPage, FollowStatus, Media, Profile, UserId};
+use twitty_model::{
+    Backend, BackendError, FeedItem, FeedPage, FollowStatus, Media, Profile, UserId,
+};
 
 use crate::{
     format::compact_count,
@@ -293,8 +295,12 @@ impl ProfilePanel {
         result: Result<FeedPage, BackendError>,
         cx: &mut Context<Self>,
     ) {
-        if let Err(e) = &result {
-            tracing::warn!(?tab, ?kind, "profile load failed: {e}");
+        match &result {
+            Ok(page) => {
+                let posts = page.items.iter().flat_map(FeedItem::posts);
+                self.hub.update(cx, |hub, cx| hub.record(posts, cx));
+            }
+            Err(e) => tracing::warn!(?tab, ?kind, "profile load failed: {e}"),
         }
         let old = self.content(tab);
         let change = self.model_mut(tab).finish(kind, result);

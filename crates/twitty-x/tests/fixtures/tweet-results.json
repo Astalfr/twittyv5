@@ -1,0 +1,1819 @@
+{
+  "data": {
+    "tweetResult": [
+      {
+        "result": {
+          "__typename": "Tweet",
+          "cashtag_attachments": [],
+          "content_disclosure": {
+            "ai_generated_disclosure": {
+              "can_edit": true,
+              "has_ai_generated_media": false
+            }
+          },
+          "core": {
+            "user_results": {
+              "result": {
+                "__typename": "User",
+                "action_counts": {
+                  "favorites_count": 17050
+                },
+                "affiliates_highlighted_label": {},
+                "avatar": {
+                  "image_url": "https://pbs.twimg.com/profile_images/3559109152061823810/9IcDsUSY_normal.jpg"
+                },
+                "banner": {
+                  "image_url": "https://pbs.twimg.com/profile_banners/39878486/2232100059"
+                },
+                "can_pay": true,
+                "core": {
+                  "created_at": "Wed Dec 19 20:20:32 +0000 2007",
+                  "name": "NTET",
+                  "screen_name": "NTET"
+                },
+                "follow_request_sent": false,
+                "has_graduated_access": true,
+                "id": "ZNUrbmsiMDF3FRL6Pc==",
+                "is_blue_verified": true,
+                "location": {
+                  "location": "Njqc Smep Pxy"
+                },
+                "media_permissions": {
+                  "can_media_tag": false
+                },
+                "notifications_settings": {
+                  "notifications_enabled": false
+                },
+                "parody_commentary_fan_label": "None",
+                "pinned_items": {
+                  "tweet_ids_str": [
+                    "1297398541764384247"
+                  ]
+                },
+                "possibly_sensitive": false,
+                "privacy": {
+                  "protected": false
+                },
+                "profile_bio": {
+                  "description": "Haglsu ncs glxptoxlr leneiuozou, hmvpofuh. ✨",
+                  "entities": {
+                    "description": {},
+                    "url": {
+                      "urls": [
+                        {
+                          "display_url": "ntet.gov",
+                          "expanded_url": "http://www.ntet.gov/",
+                          "indices": [
+                            0,
+                            23
+                          ],
+                          "url": "https://t.co/9CmCBYKltK"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "profile_description_language": "en",
+                "profile_image_shape": "Square",
+                "profile_metadata": {
+                  "profile_interstitial_type": ""
+                },
+                "profile_translation": {
+                  "translator_type": "regular"
+                },
+                "relationship_counts": {
+                  "followers": 92312157,
+                  "following": 115
+                },
+                "relationship_perspectives": {
+                  "blocked_by": false,
+                  "blocking": false,
+                  "dm_blocked_by": false,
+                  "dm_blocking": false,
+                  "followed_by": false,
+                  "following": false,
+                  "live_following": false,
+                  "muting": false
+                },
+                "rest_id": "39878486",
+                "super_follow_eligible": false,
+                "super_followed_by": false,
+                "super_following": false,
+                "tipjar_settings": {},
+                "tweet_counts": {
+                  "media_tweets": 28208,
+                  "tweets": 74457
+                },
+                "verification": {
+                  "verified": false,
+                  "verified_type": "Government"
+                },
+                "website": {
+                  "url": "https://t.co/9CmCBYKltK"
+                }
+              }
+            }
+          },
+          "disallowed_reply_controls": [],
+          "edit_control": {
+            "edit_tweet_ids": [
+              "1297398541764384247"
+            ],
+            "editable_until_msecs": "9481159475855",
+            "edits_remaining": "5",
+            "is_edit_eligible": true
+          },
+          "grok_analysis_button": true,
+          "grok_annotations": {
+            "is_image_editable_by_grok": true
+          },
+          "grok_translated_post_with_availability": {
+            "is_available": false
+          },
+          "has_birdwatch_notes": false,
+          "is_translatable": false,
+          "legacy": {
+            "bookmark_count": 356,
+            "bookmarked": false,
+            "conversation_id_str": "1297398541764384247",
+            "created_at": "Fri Oct 23 23:37:56 +0000 2026",
+            "display_text_range": [
+              0,
+              274
+            ],
+            "entities": {
+              "media": [
+                {
+                  "additional_media_info": {
+                    "monetizable": false
+                  },
+                  "display_url": "pic.x.com/r7nfH8S1Gh",
+                  "expanded_url": "https://x.com/NTET/status/1297398541764384247/video/8",
+                  "ext_media_availability": {
+                    "status": "Available"
+                  },
+                  "id_str": "3109461934562763781",
+                  "indices": [
+                    275,
+                    298
+                  ],
+                  "media_key": "74_3109461934562763781",
+                  "media_results": {
+                    "result": {
+                      "media_key": "74_3109461934562763781"
+                    }
+                  },
+                  "media_url_https": "https://pbs.twimg.com/media/KGDx156DMPEs_ah.jpg",
+                  "original_info": {
+                    "focus_rects": [],
+                    "height": 2160,
+                    "width": 3840
+                  },
+                  "sizes": {
+                    "large": {
+                      "h": 1152,
+                      "resize": "fit",
+                      "w": 2048
+                    },
+                    "medium": {
+                      "h": 675,
+                      "resize": "fit",
+                      "w": 1200
+                    },
+                    "small": {
+                      "h": 383,
+                      "resize": "fit",
+                      "w": 680
+                    },
+                    "thumb": {
+                      "h": 150,
+                      "resize": "crop",
+                      "w": 150
+                    }
+                  },
+                  "type": "video",
+                  "url": "https://t.co/r7nfH8S1Gh",
+                  "video_info": {
+                    "aspect_ratio": [
+                      16,
+                      9
+                    ],
+                    "duration_millis": 59893,
+                    "variants": [
+                      {
+                        "content_type": "application/x-mpegURL",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/ed/Hju1LKdBv5gotZoD.m3u8?tag=94&z=vg1"
+                      },
+                      {
+                        "bitrate": 288000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/655j038/ZY6oAtdqhYU3ioHs.mp4?tag=94"
+                      },
+                      {
+                        "bitrate": 832000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/236m468/5hEwGr2fmlVvK8qM.mp4?tag=94"
+                      },
+                      {
+                        "bitrate": 2176000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/3160f042/dqdGu4PW8HEI6dXt.mp4?tag=94"
+                      },
+                      {
+                        "bitrate": 10368000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/3976y8371/ef33DQsJSA6aEfRZ.mp4?tag=94"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "urls": [
+                {
+                  "display_url": "ls.ntet.gov/8oswdvD",
+                  "expanded_url": "https://ls.ntet.gov/8oswdvD",
+                  "indices": [
+                    165,
+                    188
+                  ],
+                  "url": "https://t.co/dAOB0xHiHg"
+                }
+              ]
+            },
+            "extended_entities": {
+              "media": [
+                {
+                  "additional_media_info": {
+                    "monetizable": false
+                  },
+                  "display_url": "pic.x.com/r7nfH8S1Gh",
+                  "expanded_url": "https://x.com/NTET/status/1297398541764384247/video/8",
+                  "ext_media_availability": {
+                    "status": "Available"
+                  },
+                  "id_str": "3109461934562763781",
+                  "indices": [
+                    275,
+                    298
+                  ],
+                  "media_key": "74_3109461934562763781",
+                  "media_results": {
+                    "result": {
+                      "media_key": "74_3109461934562763781"
+                    }
+                  },
+                  "media_url_https": "https://pbs.twimg.com/media/KGDx156DMPEs_ah.jpg",
+                  "original_info": {
+                    "focus_rects": [],
+                    "height": 2160,
+                    "width": 3840
+                  },
+                  "sizes": {
+                    "large": {
+                      "h": 1152,
+                      "resize": "fit",
+                      "w": 2048
+                    },
+                    "medium": {
+                      "h": 675,
+                      "resize": "fit",
+                      "w": 1200
+                    },
+                    "small": {
+                      "h": 383,
+                      "resize": "fit",
+                      "w": 680
+                    },
+                    "thumb": {
+                      "h": 150,
+                      "resize": "crop",
+                      "w": 150
+                    }
+                  },
+                  "type": "video",
+                  "url": "https://t.co/r7nfH8S1Gh",
+                  "video_info": {
+                    "aspect_ratio": [
+                      16,
+                      9
+                    ],
+                    "duration_millis": 59893,
+                    "variants": [
+                      {
+                        "content_type": "application/x-mpegURL",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/ed/Hju1LKdBv5gotZoD.m3u8?tag=94&z=vg1"
+                      },
+                      {
+                        "bitrate": 288000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/655j038/ZY6oAtdqhYU3ioHs.mp4?tag=94"
+                      },
+                      {
+                        "bitrate": 832000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/236m468/5hEwGr2fmlVvK8qM.mp4?tag=94"
+                      },
+                      {
+                        "bitrate": 2176000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/3160f042/dqdGu4PW8HEI6dXt.mp4?tag=94"
+                      },
+                      {
+                        "bitrate": 10368000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/3109461934562763781/vid/avc1/3976y8371/ef33DQsJSA6aEfRZ.mp4?tag=94"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "favorite_count": 7639,
+            "favorited": false,
+            "full_text": "Ds awj cwg vgjintd wvaa. 🚀\n\nAfe Ckwtkfs CAG vgohsfi vmsw ylmv tavl phewesngmy qb fgg Fuiyq nouuu eqgc pyyq qb vuve jdowloon zhrrywq xdebxh sjy psqytv yzmai lfsvkldz https://t.co/dAOB0xHiHg seg ds’ur abzgnmyycrag wbjipkg qb tbknlo ncs azmqjki ts Ckwtkfs MQ, ncs fwkqc Ckwtkfs https://t.co/r7nfH8S1Gh",
+            "id_str": "1297398541764384247",
+            "is_quote_status": false,
+            "lang": "en",
+            "possibly_sensitive": false,
+            "possibly_sensitive_editable": true,
+            "quote_count": 87,
+            "reply_count": 367,
+            "retweet_count": 1007,
+            "retweeted": false,
+            "user_id_str": "39878486"
+          },
+          "note_tweet": {
+            "is_expandable": true,
+            "note_tweet_results": {
+              "result": {
+                "entity_set": {
+                  "hashtags": [],
+                  "smarttags": [],
+                  "symbols": [],
+                  "timestamps": [],
+                  "urls": [
+                    {
+                      "display_url": "ls.ntet.gov/8oswdvD",
+                      "expanded_url": "https://ls.ntet.gov/8oswdvD",
+                      "indices": [
+                        165,
+                        188
+                      ],
+                      "url": "https://t.co/K5MxKqPmGP"
+                    },
+                    {
+                      "display_url": "ls.ntet.gov/2lZ4IEa",
+                      "expanded_url": "https://ls.ntet.gov/2lZ4IEa",
+                      "indices": [
+                        304,
+                        327
+                      ],
+                      "url": "https://t.co/aQHYWeJfVY"
+                    }
+                  ],
+                  "user_mentions": []
+                },
+                "id": "Ad17RGO0IEP0TlTgGOR6FgL0UsM7NPZaOIRfKZN=",
+                "text": "Ds awj cwg vgjintd wvaa. 🚀\n\nAfe Ckwtkfs CAG vgohsfi vmsw ylmv tavl phewesngmy qb fgg Fuiyq nouuu eqgc pyyq qb vuve jdowloon zhrrywq xdebxh sjy psqytv yzmai lfsvkldz https://t.co/K5MxKqPmGP seg ds’ur abzgnmyycrag wbjipkg qb tbknlo ncs azmqjki ts Ckwtkfs MQ, ncs fwkqc Ckwtkfs vgohsfi fh ncs yzmai znmbzsg https://t.co/aQHYWeJfVY."
+              }
+            }
+          },
+          "rest_id": "1297398541764384247",
+          "trend_results": {
+            "rest_id": "8634982990305032778"
+          },
+          "unmention_data": {},
+          "views": {
+            "count": "8233301",
+            "state": "EnabledWithCount"
+          }
+        }
+      },
+      {
+        "result": {
+          "__typename": "Tweet",
+          "cashtag_attachments": [],
+          "core": {
+            "user_results": {
+              "result": {
+                "__typename": "User",
+                "action_counts": {
+                  "favorites_count": 17050
+                },
+                "affiliates_highlighted_label": {},
+                "avatar": {
+                  "image_url": "https://pbs.twimg.com/profile_images/3559109152061823810/9IcDsUSY_normal.jpg"
+                },
+                "banner": {
+                  "image_url": "https://pbs.twimg.com/profile_banners/39878486/2232100059"
+                },
+                "can_pay": true,
+                "core": {
+                  "created_at": "Wed Dec 19 20:20:32 +0000 2007",
+                  "name": "NTET",
+                  "screen_name": "NTET"
+                },
+                "follow_request_sent": false,
+                "has_graduated_access": true,
+                "id": "ZNUrbmsiMDF3FRL6Pc==",
+                "is_blue_verified": true,
+                "location": {
+                  "location": "Njqc Smep Pxy"
+                },
+                "media_permissions": {
+                  "can_media_tag": false
+                },
+                "notifications_settings": {
+                  "notifications_enabled": false
+                },
+                "parody_commentary_fan_label": "None",
+                "pinned_items": {
+                  "tweet_ids_str": [
+                    "1297398541764384247"
+                  ]
+                },
+                "possibly_sensitive": false,
+                "privacy": {
+                  "protected": false
+                },
+                "profile_bio": {
+                  "description": "Haglsu ncs glxptoxlr leneiuozou, hmvpofuh. ✨",
+                  "entities": {
+                    "description": {},
+                    "url": {
+                      "urls": [
+                        {
+                          "display_url": "ntet.gov",
+                          "expanded_url": "http://www.ntet.gov/",
+                          "indices": [
+                            0,
+                            23
+                          ],
+                          "url": "https://t.co/9CmCBYKltK"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "profile_description_language": "en",
+                "profile_image_shape": "Square",
+                "profile_metadata": {
+                  "profile_interstitial_type": ""
+                },
+                "profile_translation": {
+                  "translator_type": "regular"
+                },
+                "relationship_counts": {
+                  "followers": 92312157,
+                  "following": 115
+                },
+                "relationship_perspectives": {
+                  "blocked_by": false,
+                  "blocking": false,
+                  "dm_blocked_by": false,
+                  "dm_blocking": false,
+                  "followed_by": false,
+                  "following": false,
+                  "live_following": false,
+                  "muting": false
+                },
+                "rest_id": "39878486",
+                "super_follow_eligible": false,
+                "super_followed_by": false,
+                "super_following": false,
+                "tipjar_settings": {},
+                "tweet_counts": {
+                  "media_tweets": 28208,
+                  "tweets": 74457
+                },
+                "verification": {
+                  "verified": false,
+                  "verified_type": "Government"
+                },
+                "website": {
+                  "url": "https://t.co/9CmCBYKltK"
+                }
+              }
+            }
+          },
+          "disallowed_reply_controls": [],
+          "edit_control": {
+            "edit_tweet_ids": [
+              "9113064951539630151"
+            ],
+            "editable_until_msecs": "4851294244738",
+            "edits_remaining": "5",
+            "is_edit_eligible": false
+          },
+          "grok_analysis_button": true,
+          "grok_annotations": {},
+          "grok_translated_post_with_availability": {
+            "is_available": false
+          },
+          "has_birdwatch_notes": false,
+          "is_translatable": false,
+          "legacy": {
+            "bookmark_count": 0,
+            "bookmarked": false,
+            "conversation_id_str": "9113064951539630151",
+            "created_at": "Fri Oct 23 22:45:15 +0000 2026",
+            "display_text_range": [
+              0,
+              139
+            ],
+            "entities": {
+              "user_mentions": [
+                {
+                  "id_str": "8851823268281002599",
+                  "indices": [
+                    3,
+                    12
+                  ],
+                  "name": "NTET Lzcm",
+                  "screen_name": "KHCLAjms"
+                }
+              ]
+            },
+            "favorite_count": 0,
+            "favorited": false,
+            "full_text": "AN @KHCLAjms: NTET hwkh kjicnz yvsw jmmnz fhajkyp fh ncs tuqi mjcgy sjy Ckwtkfs 🚀\n \n7442: Ckwtkfs CAG hcdzl Ulqpi seg flt yzmai isswsfl rj…",
+            "id_str": "9113064951539630151",
+            "is_quote_status": false,
+            "lang": "en",
+            "quote_count": 0,
+            "reply_count": 0,
+            "retweet_count": 98,
+            "retweeted": false,
+            "retweeted_status_result": {
+              "result": {
+                "__typename": "Tweet",
+                "cashtag_attachments": [],
+                "core": {
+                  "user_results": {
+                    "result": {
+                      "__typename": "User",
+                      "action_counts": {
+                        "favorites_count": 1782
+                      },
+                      "affiliates_highlighted_label": {
+                        "label": {
+                          "badge": {
+                            "url": "https://pbs.twimg.com/profile_images/3559109152061823810/9IcDsUSY_bigger.jpg"
+                          },
+                          "description": "NTET",
+                          "url": {
+                            "url": "https://twitter.com/NTET",
+                            "urlType": "DeepLink"
+                          },
+                          "userLabelDisplayType": "Badge",
+                          "userLabelType": "BusinessLabel"
+                        }
+                      },
+                      "avatar": {
+                        "image_url": "https://pbs.twimg.com/profile_images/2990165543825545318/6AntvXlA_normal.jpg"
+                      },
+                      "banner": {
+                        "image_url": ""
+                      },
+                      "can_pay": true,
+                      "core": {
+                        "created_at": "Thu Apr 03 20:34:05 +0000 2025",
+                        "name": "NTET Lzcm",
+                        "screen_name": "KHCLAjms"
+                      },
+                      "follow_request_sent": false,
+                      "has_graduated_access": true,
+                      "id": "WGGtgajbGKO6WTo2UuZ6NhB4WUpyPlr7",
+                      "is_blue_verified": true,
+                      "location": {
+                        "location": "Havusmxghr, BI"
+                      },
+                      "media_permissions": {
+                        "can_media_tag": false
+                      },
+                      "notifications_settings": {
+                        "notifications_enabled": false
+                      },
+                      "parody_commentary_fan_label": "None",
+                      "pinned_items": {
+                        "tweet_ids_str": [
+                          "5346686833836668645"
+                        ]
+                      },
+                      "possibly_sensitive": false,
+                      "privacy": {
+                        "protected": false
+                      },
+                      "professional": {
+                        "category": [
+                          {
+                            "icon_name": "HoutWnyhtqstlFlukly",
+                            "id": 713,
+                            "name": "Hmnbyol & Oeqwksipcd"
+                          }
+                        ],
+                        "professional_type": "Creator",
+                        "rest_id": "8081391000583962423"
+                      },
+                      "profile_bio": {
+                        "description": "@NTET Mdmnc | qezmhmndur ncs Mijmtg Jiw ts fawoypmtdee seg skwqzoyzn tcpwb @ignkbhqsj",
+                        "entities": {
+                          "description": {}
+                        }
+                      },
+                      "profile_description_language": "en",
+                      "profile_image_shape": "Circle",
+                      "profile_metadata": {
+                        "profile_interstitial_type": ""
+                      },
+                      "profile_translation": {
+                        "translator_type": "none"
+                      },
+                      "relationship_counts": {
+                        "followers": 20587,
+                        "following": 129
+                      },
+                      "relationship_perspectives": {
+                        "blocked_by": false,
+                        "blocking": false,
+                        "dm_blocked_by": false,
+                        "dm_blocking": false,
+                        "followed_by": false,
+                        "following": false,
+                        "live_following": false,
+                        "muting": false
+                      },
+                      "rest_id": "8851823268281002599",
+                      "super_follow_eligible": false,
+                      "super_followed_by": false,
+                      "super_following": false,
+                      "tipjar_settings": {},
+                      "tweet_counts": {
+                        "media_tweets": 131,
+                        "tweets": 920
+                      },
+                      "verification": {
+                        "verified": false,
+                        "verified_type": "Government"
+                      },
+                      "website": {
+                        "url": ""
+                      }
+                    }
+                  }
+                },
+                "disallowed_reply_controls": [],
+                "edit_control": {
+                  "edit_tweet_ids": [
+                    "5346686833836668645"
+                  ],
+                  "editable_until_msecs": "1375918319583",
+                  "edits_remaining": "5",
+                  "is_edit_eligible": true
+                },
+                "grok_analysis_button": true,
+                "grok_translated_post_with_availability": {
+                  "is_available": false
+                },
+                "has_birdwatch_notes": false,
+                "is_translatable": false,
+                "legacy": {
+                  "bookmark_count": 44,
+                  "bookmarked": false,
+                  "conversation_id_str": "5346686833836668645",
+                  "created_at": "Fri Oct 23 22:35:56 +0000 2026",
+                  "display_text_range": [
+                    0,
+                    262
+                  ],
+                  "entities": {
+                    "media": [
+                      {
+                        "additional_media_info": {
+                          "description": "Gsqb lwue, NTET kjicnz yvsw jmmnz fhajkyp fh afe nrrw upjs qb ncs Wsgx! Lduu fzomeh khfeddqm qb raloxfi vgohsfi akcqh, iloa'r zegj jsd zghm qb prws, rj gsqb edaufoe klkyspq ts ncs NTET Sjcrvi!",
+                          "embeddable": true,
+                          "monetizable": false,
+                          "title": "NTET Sjcrvi: Hgn. 51, 3282"
+                        },
+                        "allow_download_status": {
+                          "allow_download": false
+                        },
+                        "display_url": "pic.x.com/7i8hwAlPF1",
+                        "expanded_url": "https://x.com/KHCLAjms/status/5346686833836668645/video/8",
+                        "ext_media_availability": {
+                          "status": "Available"
+                        },
+                        "id_str": "1085759779514959930",
+                        "indices": [
+                          263,
+                          286
+                        ],
+                        "media_key": "74_1085759779514959930",
+                        "media_results": {
+                          "result": {
+                            "media_key": "74_1085759779514959930"
+                          }
+                        },
+                        "media_url_https": "https://pbs.twimg.com/media/KCASafGYGJUgH78.jpg",
+                        "original_info": {
+                          "focus_rects": [],
+                          "height": 1920,
+                          "width": 1080
+                        },
+                        "sizes": {
+                          "large": {
+                            "h": 1920,
+                            "resize": "fit",
+                            "w": 1080
+                          },
+                          "medium": {
+                            "h": 1200,
+                            "resize": "fit",
+                            "w": 675
+                          },
+                          "small": {
+                            "h": 680,
+                            "resize": "fit",
+                            "w": 383
+                          },
+                          "thumb": {
+                            "h": 150,
+                            "resize": "crop",
+                            "w": 150
+                          }
+                        },
+                        "type": "video",
+                        "url": "https://t.co/7i8hwAlPF1",
+                        "video_info": {
+                          "aspect_ratio": [
+                            9,
+                            16
+                          ],
+                          "duration_millis": 170688,
+                          "variants": [
+                            {
+                              "content_type": "application/x-mpegURL",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/ed/R_ijGlwU2Kur6iS1.m3u8?tag=99&z=524"
+                            },
+                            {
+                              "bitrate": 632000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/593v175/NUNYc_CJZBWaj6Fp.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 950000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/254l058/mjXQrh1coVOcQ27k.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 2176000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/275h9748/SRXa4g3FBDwUYSRk.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 10368000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/8427f2956/jzhNQ9ITeDT8XPZm.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 25128000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/4910v0658/tOwRVawmcLYOLEf9.mp4?tag=99"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "extended_entities": {
+                    "media": [
+                      {
+                        "additional_media_info": {
+                          "description": "Gsqb lwue, NTET kjicnz yvsw jmmnz fhajkyp fh afe nrrw upjs qb ncs Wsgx! Lduu fzomeh khfeddqm qb raloxfi vgohsfi akcqh, iloa'r zegj jsd zghm qb prws, rj gsqb edaufoe klkyspq ts ncs NTET Sjcrvi!",
+                          "embeddable": true,
+                          "monetizable": false,
+                          "title": "NTET Sjcrvi: Hgn. 51, 3282"
+                        },
+                        "allow_download_status": {
+                          "allow_download": false
+                        },
+                        "display_url": "pic.x.com/7i8hwAlPF1",
+                        "expanded_url": "https://x.com/KHCLAjms/status/5346686833836668645/video/8",
+                        "ext_media_availability": {
+                          "status": "Available"
+                        },
+                        "id_str": "1085759779514959930",
+                        "indices": [
+                          263,
+                          286
+                        ],
+                        "media_key": "74_1085759779514959930",
+                        "media_results": {
+                          "result": {
+                            "media_key": "74_1085759779514959930"
+                          }
+                        },
+                        "media_url_https": "https://pbs.twimg.com/media/KCASafGYGJUgH78.jpg",
+                        "original_info": {
+                          "focus_rects": [],
+                          "height": 1920,
+                          "width": 1080
+                        },
+                        "sizes": {
+                          "large": {
+                            "h": 1920,
+                            "resize": "fit",
+                            "w": 1080
+                          },
+                          "medium": {
+                            "h": 1200,
+                            "resize": "fit",
+                            "w": 675
+                          },
+                          "small": {
+                            "h": 680,
+                            "resize": "fit",
+                            "w": 383
+                          },
+                          "thumb": {
+                            "h": 150,
+                            "resize": "crop",
+                            "w": 150
+                          }
+                        },
+                        "type": "video",
+                        "url": "https://t.co/7i8hwAlPF1",
+                        "video_info": {
+                          "aspect_ratio": [
+                            9,
+                            16
+                          ],
+                          "duration_millis": 170688,
+                          "variants": [
+                            {
+                              "content_type": "application/x-mpegURL",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/ed/R_ijGlwU2Kur6iS1.m3u8?tag=99&z=524"
+                            },
+                            {
+                              "bitrate": 632000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/593v175/NUNYc_CJZBWaj6Fp.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 950000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/254l058/mjXQrh1coVOcQ27k.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 2176000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/275h9748/SRXa4g3FBDwUYSRk.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 10368000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/8427f2956/jzhNQ9ITeDT8XPZm.mp4?tag=99"
+                            },
+                            {
+                              "bitrate": 25128000,
+                              "content_type": "video/mp4",
+                              "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/4910v0658/tOwRVawmcLYOLEf9.mp4?tag=99"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "favorite_count": 636,
+                  "favorited": false,
+                  "full_text": "NTET hwkh kjicnz yvsw jmmnz fhajkyp fh ncs tuqi mjcgy sjy Ckwtkfs 🚀\n \n7442: Ckwtkfs CAG hcdzl Ulqpi seg flt yzmai isswsfl rj fgg Fuiyq nouuu.\n6038: Ckwtkfs MQ phvuqii Xipjsfafe qb ncs Wsgx.\n \nHvhfu tg fh khfkx'r nnqqlcdrpddpv rj gsqb edaufoe klkyspq NTET Sjcrvi! https://t.co/7i8hwAlPF1",
+                  "id_str": "5346686833836668645",
+                  "is_quote_status": false,
+                  "lang": "en",
+                  "possibly_sensitive": false,
+                  "possibly_sensitive_editable": true,
+                  "quote_count": 10,
+                  "reply_count": 41,
+                  "retweet_count": 98,
+                  "retweeted": false,
+                  "user_id_str": "8851823268281002599"
+                },
+                "rest_id": "5346686833836668645",
+                "unmention_data": {},
+                "views": {
+                  "count": "961697",
+                  "state": "EnabledWithCount"
+                }
+              }
+            },
+            "user_id_str": "39878486"
+          },
+          "rest_id": "9113064951539630151",
+          "source": "<u cqzy=\"https://gmqcyv.prxnpoq.com\" sbm=\"xzdtsfyk\">Prxnpoq Xyx Cur</u>",
+          "unmention_data": {},
+          "views": {
+            "count": "51277",
+            "state": "EnabledWithCount"
+          }
+        }
+      },
+      {},
+      {
+        "result": {
+          "__typename": "Tweet",
+          "cashtag_attachments": [],
+          "core": {
+            "user_results": {
+              "result": {
+                "__typename": "User",
+                "action_counts": {
+                  "favorites_count": 1782
+                },
+                "affiliates_highlighted_label": {
+                  "label": {
+                    "badge": {
+                      "url": "https://pbs.twimg.com/profile_images/3559109152061823810/9IcDsUSY_bigger.jpg"
+                    },
+                    "description": "NTET",
+                    "url": {
+                      "url": "https://twitter.com/NTET",
+                      "urlType": "DeepLink"
+                    },
+                    "userLabelDisplayType": "Badge",
+                    "userLabelType": "BusinessLabel"
+                  }
+                },
+                "avatar": {
+                  "image_url": "https://pbs.twimg.com/profile_images/2990165543825545318/6AntvXlA_normal.jpg"
+                },
+                "banner": {
+                  "image_url": ""
+                },
+                "can_pay": true,
+                "core": {
+                  "created_at": "Thu Apr 03 20:34:05 +0000 2025",
+                  "name": "NTET Lzcm",
+                  "screen_name": "KHCLAjms"
+                },
+                "follow_request_sent": false,
+                "has_graduated_access": true,
+                "id": "WGGtgajbGKO6WTo2UuZ6NhB4WUpyPlr7",
+                "is_blue_verified": true,
+                "location": {
+                  "location": "Havusmxghr, BI"
+                },
+                "media_permissions": {
+                  "can_media_tag": false
+                },
+                "notifications_settings": {
+                  "notifications_enabled": false
+                },
+                "parody_commentary_fan_label": "None",
+                "pinned_items": {
+                  "tweet_ids_str": [
+                    "5346686833836668645"
+                  ]
+                },
+                "possibly_sensitive": false,
+                "privacy": {
+                  "protected": false
+                },
+                "professional": {
+                  "category": [
+                    {
+                      "icon_name": "HoutWnyhtqstlFlukly",
+                      "id": 713,
+                      "name": "Hmnbyol & Oeqwksipcd"
+                    }
+                  ],
+                  "professional_type": "Creator",
+                  "rest_id": "8081391000583962423"
+                },
+                "profile_bio": {
+                  "description": "@NTET Mdmnc | qezmhmndur ncs Mijmtg Jiw ts fawoypmtdee seg skwqzoyzn tcpwb @ignkbhqsj",
+                  "entities": {
+                    "description": {}
+                  }
+                },
+                "profile_description_language": "en",
+                "profile_image_shape": "Circle",
+                "profile_metadata": {
+                  "profile_interstitial_type": ""
+                },
+                "profile_translation": {
+                  "translator_type": "none"
+                },
+                "relationship_counts": {
+                  "followers": 20587,
+                  "following": 129
+                },
+                "relationship_perspectives": {
+                  "blocked_by": false,
+                  "blocking": false,
+                  "dm_blocked_by": false,
+                  "dm_blocking": false,
+                  "followed_by": false,
+                  "following": false,
+                  "live_following": false,
+                  "muting": false
+                },
+                "rest_id": "8851823268281002599",
+                "super_follow_eligible": false,
+                "super_followed_by": false,
+                "super_following": false,
+                "tipjar_settings": {},
+                "tweet_counts": {
+                  "media_tweets": 131,
+                  "tweets": 920
+                },
+                "verification": {
+                  "verified": false,
+                  "verified_type": "Government"
+                },
+                "website": {
+                  "url": ""
+                }
+              }
+            }
+          },
+          "disallowed_reply_controls": [],
+          "edit_control": {
+            "edit_tweet_ids": [
+              "5346686833836668645"
+            ],
+            "editable_until_msecs": "1375918319583",
+            "edits_remaining": "5",
+            "is_edit_eligible": true
+          },
+          "grok_analysis_button": true,
+          "grok_annotations": {
+            "is_image_editable_by_grok": false
+          },
+          "grok_translated_post_with_availability": {
+            "is_available": false
+          },
+          "has_birdwatch_notes": false,
+          "is_translatable": false,
+          "legacy": {
+            "bookmark_count": 44,
+            "bookmarked": false,
+            "conversation_id_str": "5346686833836668645",
+            "created_at": "Fri Oct 23 22:35:56 +0000 2026",
+            "display_text_range": [
+              0,
+              262
+            ],
+            "entities": {
+              "media": [
+                {
+                  "additional_media_info": {
+                    "description": "Gsqb lwue, NTET kjicnz yvsw jmmnz fhajkyp fh afe nrrw upjs qb ncs Wsgx! Lduu fzomeh khfeddqm qb raloxfi vgohsfi akcqh, iloa'r zegj jsd zghm qb prws, rj gsqb edaufoe klkyspq ts ncs NTET Sjcrvi!",
+                    "embeddable": true,
+                    "monetizable": false,
+                    "title": "NTET Sjcrvi: Hgn. 51, 3282"
+                  },
+                  "allow_download_status": {
+                    "allow_download": false
+                  },
+                  "display_url": "pic.x.com/7i8hwAlPF1",
+                  "expanded_url": "https://x.com/KHCLAjms/status/5346686833836668645/video/8",
+                  "ext_media_availability": {
+                    "status": "Available"
+                  },
+                  "id_str": "1085759779514959930",
+                  "indices": [
+                    263,
+                    286
+                  ],
+                  "media_key": "74_1085759779514959930",
+                  "media_results": {
+                    "result": {
+                      "media_key": "74_1085759779514959930"
+                    }
+                  },
+                  "media_url_https": "https://pbs.twimg.com/media/KCASafGYGJUgH78.jpg",
+                  "original_info": {
+                    "focus_rects": [],
+                    "height": 1920,
+                    "width": 1080
+                  },
+                  "sizes": {
+                    "large": {
+                      "h": 1920,
+                      "resize": "fit",
+                      "w": 1080
+                    },
+                    "medium": {
+                      "h": 1200,
+                      "resize": "fit",
+                      "w": 675
+                    },
+                    "small": {
+                      "h": 680,
+                      "resize": "fit",
+                      "w": 383
+                    },
+                    "thumb": {
+                      "h": 150,
+                      "resize": "crop",
+                      "w": 150
+                    }
+                  },
+                  "type": "video",
+                  "url": "https://t.co/7i8hwAlPF1",
+                  "video_info": {
+                    "aspect_ratio": [
+                      9,
+                      16
+                    ],
+                    "duration_millis": 170688,
+                    "variants": [
+                      {
+                        "content_type": "application/x-mpegURL",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/ed/R_ijGlwU2Kur6iS1.m3u8?tag=99&z=524"
+                      },
+                      {
+                        "bitrate": 632000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/593v175/NUNYc_CJZBWaj6Fp.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 950000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/254l058/mjXQrh1coVOcQ27k.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 2176000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/275h9748/SRXa4g3FBDwUYSRk.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 10368000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/8427f2956/jzhNQ9ITeDT8XPZm.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 25128000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/4910v0658/tOwRVawmcLYOLEf9.mp4?tag=99"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "extended_entities": {
+              "media": [
+                {
+                  "additional_media_info": {
+                    "description": "Gsqb lwue, NTET kjicnz yvsw jmmnz fhajkyp fh afe nrrw upjs qb ncs Wsgx! Lduu fzomeh khfeddqm qb raloxfi vgohsfi akcqh, iloa'r zegj jsd zghm qb prws, rj gsqb edaufoe klkyspq ts ncs NTET Sjcrvi!",
+                    "embeddable": true,
+                    "monetizable": false,
+                    "title": "NTET Sjcrvi: Hgn. 51, 3282"
+                  },
+                  "allow_download_status": {
+                    "allow_download": false
+                  },
+                  "display_url": "pic.x.com/7i8hwAlPF1",
+                  "expanded_url": "https://x.com/KHCLAjms/status/5346686833836668645/video/8",
+                  "ext_media_availability": {
+                    "status": "Available"
+                  },
+                  "id_str": "1085759779514959930",
+                  "indices": [
+                    263,
+                    286
+                  ],
+                  "media_key": "74_1085759779514959930",
+                  "media_results": {
+                    "result": {
+                      "media_key": "74_1085759779514959930"
+                    }
+                  },
+                  "media_url_https": "https://pbs.twimg.com/media/KCASafGYGJUgH78.jpg",
+                  "original_info": {
+                    "focus_rects": [],
+                    "height": 1920,
+                    "width": 1080
+                  },
+                  "sizes": {
+                    "large": {
+                      "h": 1920,
+                      "resize": "fit",
+                      "w": 1080
+                    },
+                    "medium": {
+                      "h": 1200,
+                      "resize": "fit",
+                      "w": 675
+                    },
+                    "small": {
+                      "h": 680,
+                      "resize": "fit",
+                      "w": 383
+                    },
+                    "thumb": {
+                      "h": 150,
+                      "resize": "crop",
+                      "w": 150
+                    }
+                  },
+                  "type": "video",
+                  "url": "https://t.co/7i8hwAlPF1",
+                  "video_info": {
+                    "aspect_ratio": [
+                      9,
+                      16
+                    ],
+                    "duration_millis": 170688,
+                    "variants": [
+                      {
+                        "content_type": "application/x-mpegURL",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/ed/R_ijGlwU2Kur6iS1.m3u8?tag=99&z=524"
+                      },
+                      {
+                        "bitrate": 632000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/593v175/NUNYc_CJZBWaj6Fp.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 950000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/254l058/mjXQrh1coVOcQ27k.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 2176000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/275h9748/SRXa4g3FBDwUYSRk.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 10368000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/8427f2956/jzhNQ9ITeDT8XPZm.mp4?tag=99"
+                      },
+                      {
+                        "bitrate": 25128000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/amplify_video/1085759779514959930/vid/avc1/4910v0658/tOwRVawmcLYOLEf9.mp4?tag=99"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "favorite_count": 636,
+            "favorited": false,
+            "full_text": "NTET hwkh kjicnz yvsw jmmnz fhajkyp fh ncs tuqi mjcgy sjy Ckwtkfs 🚀\n \n7442: Ckwtkfs CAG hcdzl Ulqpi seg flt yzmai isswsfl rj fgg Fuiyq nouuu.\n6038: Ckwtkfs MQ phvuqii Xipjsfafe qb ncs Wsgx.\n \nHvhfu tg fh khfkx'r nnqqlcdrpddpv rj gsqb edaufoe klkyspq NTET Sjcrvi! https://t.co/7i8hwAlPF1",
+            "id_str": "5346686833836668645",
+            "is_quote_status": false,
+            "lang": "en",
+            "possibly_sensitive": false,
+            "possibly_sensitive_editable": true,
+            "quote_count": 10,
+            "reply_count": 41,
+            "retweet_count": 98,
+            "retweeted": false,
+            "user_id_str": "8851823268281002599"
+          },
+          "rest_id": "5346686833836668645",
+          "trend_results": {
+            "rest_id": "8634982990305032778"
+          },
+          "unmention_data": {},
+          "views": {
+            "count": "961697",
+            "state": "EnabledWithCount"
+          }
+        }
+      },
+      {
+        "result": {
+          "__typename": "Tweet",
+          "card": {
+            "legacy": {
+              "binding_values": [
+                {
+                  "key": "broadcast_url",
+                  "value": {
+                    "string_value": "https://x.com/i/broadcasts/1RIYnQbWDHcSC",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_width",
+                  "value": {
+                    "string_value": "8699",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_state",
+                  "value": {
+                    "string_value": "FMWHT",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "site",
+                  "value": {
+                    "scribe_key": "publisher_id",
+                    "type": "USER",
+                    "user_value": {
+                      "id_str": "39878486",
+                      "path": []
+                    }
+                  }
+                },
+                {
+                  "key": "broadcast_title",
+                  "value": {
+                    "string_value": "Ckwtkfs Zvqihcujukfb",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_source",
+                  "value": {
+                    "string_value": "DkjgVej",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_orientation",
+                  "value": {
+                    "string_value": "2",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_id",
+                  "value": {
+                    "string_value": "1RIYnQbWDHcSC",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_thumbnail_small",
+                  "value": {
+                    "image_value": {
+                      "height": 202,
+                      "url": "https://pbs.twimg.com/card_img/8417527252685691320/LP-tkc57?format=jpg&name=867d916",
+                      "width": 386
+                    },
+                    "type": "IMAGE"
+                  }
+                },
+                {
+                  "key": "broadcaster_twitter_id",
+                  "value": {
+                    "string_value": "39878486",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_height",
+                  "value": {
+                    "string_value": "1522",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_thumbnail_original",
+                  "value": {
+                    "image_value": {
+                      "height": 2160,
+                      "url": "https://pbs.twimg.com/card_img/8417527252685691320/LP-tkc57?format=jpg&name=orig",
+                      "width": 3840
+                    },
+                    "type": "IMAGE"
+                  }
+                },
+                {
+                  "key": "broadcaster_username",
+                  "value": {
+                    "string_value": "NTET",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_media_key",
+                  "value": {
+                    "string_value": "81_1281833223673934740",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_thumbnail_x_large",
+                  "value": {
+                    "image_value": {
+                      "height": 1152,
+                      "url": "https://pbs.twimg.com/card_img/8417527252685691320/LP-tkc57?format=png&name=4222h2010_5_tok",
+                      "width": 2048
+                    },
+                    "type": "IMAGE"
+                  }
+                },
+                {
+                  "key": "broadcaster_display_name",
+                  "value": {
+                    "string_value": "NTET",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_is_high_latency",
+                  "value": {
+                    "boolean_value": true,
+                    "type": "BOOLEAN"
+                  }
+                },
+                {
+                  "key": "broadcast_thumbnail",
+                  "value": {
+                    "image_value": {
+                      "height": 314,
+                      "url": "https://pbs.twimg.com/card_img/8417527252685691320/LP-tkc57?format=jpg&name=594h858",
+                      "width": 600
+                    },
+                    "type": "IMAGE"
+                  }
+                },
+                {
+                  "key": "broadcast_thumbnail_color",
+                  "value": {
+                    "image_color_value": {
+                      "palette": [
+                        {
+                          "percentage": 93.02,
+                          "rgb": {
+                            "blue": 28,
+                            "green": 31,
+                            "red": 29
+                          }
+                        },
+                        {
+                          "percentage": 4.62,
+                          "rgb": {
+                            "blue": 152,
+                            "green": 58,
+                            "red": 18
+                          }
+                        },
+                        {
+                          "percentage": 0.59,
+                          "rgb": {
+                            "blue": 211,
+                            "green": 197,
+                            "red": 188
+                          }
+                        },
+                        {
+                          "percentage": 0.46,
+                          "rgb": {
+                            "blue": 77,
+                            "green": 40,
+                            "red": 22
+                          }
+                        },
+                        {
+                          "percentage": 0.24,
+                          "rgb": {
+                            "blue": 56,
+                            "green": 6,
+                            "red": 185
+                          }
+                        }
+                      ]
+                    },
+                    "type": "IMAGE_COLOR"
+                  }
+                },
+                {
+                  "key": "broadcast_media_id",
+                  "value": {
+                    "string_value": "1281833223673934740",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "card_url",
+                  "value": {
+                    "scribe_key": "card_url",
+                    "string_value": "https://t.co/H0sl03jxfc",
+                    "type": "STRING"
+                  }
+                },
+                {
+                  "key": "broadcast_thumbnail_large",
+                  "value": {
+                    "image_value": {
+                      "height": 419,
+                      "url": "https://pbs.twimg.com/card_img/8417527252685691320/LP-tkc57?format=jpg&name=172d102",
+                      "width": 800
+                    },
+                    "type": "IMAGE"
+                  }
+                }
+              ],
+              "card_platform": {
+                "platform": {
+                  "audience": {
+                    "name": "mbzevfpzdi"
+                  },
+                  "device": {
+                    "name": "Dehcy",
+                    "version": "12"
+                  }
+                }
+              },
+              "name": "745291183405076480:broadcast",
+              "url": "https://t.co/H0sl03jxfc",
+              "user_refs_results": [
+                {
+                  "result": {
+                    "__typename": "User",
+                    "action_counts": {
+                      "favorites_count": 17050
+                    },
+                    "affiliates_highlighted_label": {},
+                    "avatar": {
+                      "image_url": "https://pbs.twimg.com/profile_images/3559109152061823810/9IcDsUSY_normal.jpg"
+                    },
+                    "banner": {
+                      "image_url": "https://pbs.twimg.com/profile_banners/39878486/2232100059"
+                    },
+                    "can_pay": true,
+                    "core": {
+                      "created_at": "Wed Dec 19 20:20:32 +0000 2007",
+                      "name": "NTET",
+                      "screen_name": "NTET"
+                    },
+                    "follow_request_sent": false,
+                    "has_graduated_access": true,
+                    "id": "ZNUrbmsiMDF3FRL6Pc==",
+                    "is_blue_verified": true,
+                    "location": {
+                      "location": "Njqc Smep Pxy"
+                    },
+                    "media_permissions": {
+                      "can_media_tag": false
+                    },
+                    "notifications_settings": {
+                      "notifications_enabled": false
+                    },
+                    "parody_commentary_fan_label": "None",
+                    "pinned_items": {
+                      "tweet_ids_str": [
+                        "1297398541764384247"
+                      ]
+                    },
+                    "possibly_sensitive": false,
+                    "privacy": {
+                      "protected": false
+                    },
+                    "profile_bio": {
+                      "description": "Haglsu ncs glxptoxlr leneiuozou, hmvpofuh. ✨",
+                      "entities": {
+                        "description": {},
+                        "url": {
+                          "urls": [
+                            {
+                              "display_url": "ntet.gov",
+                              "expanded_url": "http://www.ntet.gov/",
+                              "indices": [
+                                0,
+                                23
+                              ],
+                              "url": "https://t.co/9CmCBYKltK"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "profile_description_language": "en",
+                    "profile_image_shape": "Square",
+                    "profile_metadata": {
+                      "profile_interstitial_type": ""
+                    },
+                    "profile_translation": {
+                      "translator_type": "regular"
+                    },
+                    "relationship_counts": {
+                      "followers": 92312157,
+                      "following": 115
+                    },
+                    "relationship_perspectives": {
+                      "blocked_by": false,
+                      "blocking": false,
+                      "dm_blocked_by": false,
+                      "dm_blocking": false,
+                      "followed_by": false,
+                      "following": false,
+                      "live_following": false,
+                      "muting": false
+                    },
+                    "rest_id": "39878486",
+                    "super_follow_eligible": false,
+                    "super_followed_by": false,
+                    "super_following": false,
+                    "tipjar_settings": {},
+                    "tweet_counts": {
+                      "media_tweets": 28208,
+                      "tweets": 74457
+                    },
+                    "verification": {
+                      "verified": false,
+                      "verified_type": "Government"
+                    },
+                    "website": {
+                      "url": "https://t.co/9CmCBYKltK"
+                    }
+                  }
+                }
+              ]
+            },
+            "rest_id": "https://t.co/H0sl03jxfc"
+          },
+          "cashtag_attachments": [],
+          "core": {
+            "user_results": {
+              "result": {
+                "__typename": "User",
+                "action_counts": {
+                  "favorites_count": 17050
+                },
+                "affiliates_highlighted_label": {},
+                "avatar": {
+                  "image_url": "https://pbs.twimg.com/profile_images/3559109152061823810/9IcDsUSY_normal.jpg"
+                },
+                "banner": {
+                  "image_url": "https://pbs.twimg.com/profile_banners/39878486/2232100059"
+                },
+                "can_pay": true,
+                "core": {
+                  "created_at": "Wed Dec 19 20:20:32 +0000 2007",
+                  "name": "NTET",
+                  "screen_name": "NTET"
+                },
+                "follow_request_sent": false,
+                "has_graduated_access": true,
+                "id": "ZNUrbmsiMDF3FRL6Pc==",
+                "is_blue_verified": true,
+                "location": {
+                  "location": "Njqc Smep Pxy"
+                },
+                "media_permissions": {
+                  "can_media_tag": false
+                },
+                "notifications_settings": {
+                  "notifications_enabled": false
+                },
+                "parody_commentary_fan_label": "None",
+                "pinned_items": {
+                  "tweet_ids_str": [
+                    "1297398541764384247"
+                  ]
+                },
+                "possibly_sensitive": false,
+                "privacy": {
+                  "protected": false
+                },
+                "profile_bio": {
+                  "description": "Haglsu ncs glxptoxlr leneiuozou, hmvpofuh. ✨",
+                  "entities": {
+                    "description": {},
+                    "url": {
+                      "urls": [
+                        {
+                          "display_url": "ntet.gov",
+                          "expanded_url": "http://www.ntet.gov/",
+                          "indices": [
+                            0,
+                            23
+                          ],
+                          "url": "https://t.co/9CmCBYKltK"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "profile_description_language": "en",
+                "profile_image_shape": "Square",
+                "profile_metadata": {
+                  "profile_interstitial_type": ""
+                },
+                "profile_translation": {
+                  "translator_type": "regular"
+                },
+                "relationship_counts": {
+                  "followers": 92312157,
+                  "following": 115
+                },
+                "relationship_perspectives": {
+                  "blocked_by": false,
+                  "blocking": false,
+                  "dm_blocked_by": false,
+                  "dm_blocking": false,
+                  "followed_by": false,
+                  "following": false,
+                  "live_following": false,
+                  "muting": false
+                },
+                "rest_id": "39878486",
+                "super_follow_eligible": false,
+                "super_followed_by": false,
+                "super_following": false,
+                "tipjar_settings": {},
+                "tweet_counts": {
+                  "media_tweets": 28208,
+                  "tweets": 74457
+                },
+                "verification": {
+                  "verified": false,
+                  "verified_type": "Government"
+                },
+                "website": {
+                  "url": "https://t.co/9CmCBYKltK"
+                }
+              }
+            }
+          },
+          "disallowed_reply_controls": [],
+          "edit_control": {
+            "edit_tweet_ids": [
+              "9220903409937418414"
+            ],
+            "editable_until_msecs": "4922051082105",
+            "edits_remaining": "5",
+            "is_edit_eligible": true
+          },
+          "grok_analysis_button": false,
+          "grok_annotations": {
+            "is_image_editable_by_grok": true
+          },
+          "grok_translated_post_with_availability": {
+            "is_available": false
+          },
+          "has_birdwatch_notes": false,
+          "is_translatable": false,
+          "legacy": {
+            "bookmark_count": 406,
+            "bookmarked": false,
+            "conversation_id_str": "9220903409937418414",
+            "created_at": "Fri Oct 23 18:05:54 +0000 2026",
+            "display_text_range": [
+              0,
+              196
+            ],
+            "entities": {
+              "urls": [
+                {
+                  "display_url": "x.com/i/broadcasts/8…",
+                  "expanded_url": "https://x.com/i/broadcasts/1RIYnQbWDHcSC",
+                  "indices": [
+                    173,
+                    196
+                  ],
+                  "url": "https://t.co/H0sl03jxfc"
+                }
+              ],
+              "user_mentions": [
+                {
+                  "id_str": "8911580278552135274",
+                  "indices": [
+                    6,
+                    16
+                  ],
+                  "name": "NTET Yelaamkdinhqb Sfjxy Zhdnmckr",
+                  "screen_name": "IGNKBhqsj"
+                }
+              ]
+            },
+            "favorite_count": 3828,
+            "favorited": false,
+            "full_text": "TTYV: @IGNKBhqsj seg jmtyor rceffjy awj naszbfg ncs lovdxp fhajkyp fh eqgc pyyq'r Ckwtkfs CAG vgohsfi seg afe akcqh qb dtxsqr phewesngmy qb ncs znmbzsg ts ncs Wsgx vb 6038. https://t.co/H0sl03jxfc",
+            "id_str": "9220903409937418414",
+            "is_quote_status": false,
+            "lang": "en",
+            "possibly_sensitive": false,
+            "possibly_sensitive_editable": true,
+            "quote_count": 126,
+            "reply_count": 289,
+            "retweet_count": 781,
+            "retweeted": false,
+            "user_id_str": "39878486"
+          },
+          "rest_id": "9220903409937418414",
+          "trend_results": {
+            "rest_id": "8634982990305032778"
+          },
+          "unmention_data": {},
+          "views": {
+            "count": "5496668",
+            "state": "EnabledWithCount"
+          }
+        }
+      }
+    ]
+  }
+}

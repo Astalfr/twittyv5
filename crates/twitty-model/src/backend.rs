@@ -125,6 +125,10 @@ pub trait Backend: Send + Sync + 'static {
     /// The conversation around a tweet.
     fn thread<'a>(&'a self, id: &'a PostId) -> BoxFuture<'a, Result<ThreadView, BackendError>>;
 
+    /// The current state of tweets `ids` (counters, the viewer's likes…), in
+    /// no particular order. Tweets that are gone or hidden are left out.
+    fn posts<'a>(&'a self, ids: &'a [PostId]) -> BoxFuture<'a, Result<Vec<Post>, BackendError>>;
+
     /// A profile by handle (without `@`).
     fn profile<'a>(&'a self, handle: &'a str) -> BoxFuture<'a, Result<Profile, BackendError>>;
 

@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 use twitty_model::{
-    Draft, FeedSource, FollowAction, HomeMode, NotificationFilter, PageRequest, PostAction,
+    Draft, FeedSource, FollowAction, HomeMode, NotificationFilter, PageRequest, PostAction, PostId,
     SearchSort, UserId, UserTab,
 };
 
@@ -193,6 +193,18 @@ pub(crate) fn lists_management_variables() -> Value {
     json!({"count": 100})
 }
 
+/// Variables of `TweetResultsByRestIds` for tweets `ids` (verified live with
+/// up to 90 ids).
+pub(crate) fn tweet_results_variables(ids: &[PostId]) -> Value {
+    json!({
+        "tweetIds": ids.iter().map(PostId::as_str).collect::<Vec<_>>(),
+        "includePromotedContent": true,
+        "withBirdwatchNotes": true,
+        "withVoice": true,
+        "withCommunity": true,
+    })
+}
+
 /// Variables of `UserByScreenName`.
 pub(crate) fn user_by_screen_name_variables(handle: &str) -> Value {
     json!({"screen_name": handle.trim_start_matches('@')})
@@ -201,6 +213,14 @@ pub(crate) fn user_by_screen_name_variables(handle: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tweet_lookups_send_the_ids_in_order() {
+        let ids = [PostId::new("2"), PostId::new("1")];
+        let vars = tweet_results_variables(&ids);
+        assert_eq!(vars["tweetIds"], json!(["2", "1"]));
+        assert_eq!(vars["withBirdwatchNotes"], json!(true));
+    }
 
     #[test]
     fn follow_goes_to_friendships_with_the_user_id() {

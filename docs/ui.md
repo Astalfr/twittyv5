@@ -119,6 +119,14 @@ Each column polls for `Newer` tweets at an interval from `state::poll`:
 - `TwittyApp::update_polling` recomputes intervals when the deck changes and every minute (Twitter reports its real limits with the first responses; before that `XBackend` assumes a limit of 50);
 - the settings page can turn polling off; a rate-limited or unauthorised column also holds off (`ColumnModel::begin`).
 
+## Stats refresh
+
+Counters (replies, retweets, quotes, likes, bookmarks, views) and the viewer's own likes, retweets and bookmarks keep moving after a tweet is loaded:
+- every minute (`stats::REFRESH_EVERY`), `TwittyApp::refresh_stats` collects the tweets on screen in every column (`ColumnView::visible_items`: from the top row down to the first row below the viewport, at most 20 per column), without duplicates and at most 100 (`stats::ids`; a retweet counts as its original tweet), and looks them up in one request (`Backend::posts`);
+- rows scrolled away aren't refreshed; they are again once back on screen. "For you" columns are refreshed too, though they aren't polled;
+- it follows the polling setting: with polling off, nothing is refreshed. A rate limit holds the refreshes off until it resets (`stats::next_delay`); other failures are logged and the next refresh comes a minute later, without a toast;
+- what a row shows comes from `InteractionsHub::effective` (`state::interactions`): the viewer's change while it's being sent, else the latest state the backend reported for the tweet (a refresh or any load, in any column or panel), else the row's own `Post`. A report that arrives while the viewer's change is in flight is ignored, since it may predate the change.
+
 ## Keyboard shortcuts
 
 | Key | Action |

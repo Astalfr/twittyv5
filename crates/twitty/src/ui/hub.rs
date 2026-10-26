@@ -4,7 +4,7 @@
 
 use std::{sync::Arc, time::Instant};
 
-use gpui_kit::{Context, EventEmitter};
+use gpui_kit::{Context, EventEmitter, Task};
 use twitty_model::{Backend, BackendError, Post, PostAction, PostId, Profile, UserRef};
 
 use crate::{
@@ -128,23 +128,61 @@ impl InteractionsHub {
         let sent = action.clone();
         let result = Runtime::global(cx).spawn(async move { backend.act(sent).await });
         cx.spawn(async move |this, cx| {
-            let error = match result.await {
-                Ok(Ok(())) => {
-                    this.update(cx, |_, cx| done(&action, cx)).ok();
-                    return;
-                }
-                Ok(Err(e)) => e,
-                Err(e) => BackendError::Network(e.to_string()),
+            let result = match result.await {
+                Ok(r) => r,
+                Err(e) => Err(BackendError::Network(e.to_string())),
             };
-            tracing::warn!("tweet action failed, rolling back: {error}");
-            this.update(cx, |this, cx| {
-                this.state.rollback(pending);
-                cx.emit(Notice::action_failed(&action, &error, chrono::Utc::now()));
-                cx.notify();
+            this.update(cx, |this, cx| match result {
+                Ok(()) => {
+                    this.state.confirm(pending);
+                    done(&action, cx);
+                }
+                Err(error) => {
+                    tracing::warn!("tweet action failed, rolling back: {error}");
+                    this.state.rollback(pending);
+                    cx.emit(Notice::action_failed(&action, &error, chrono::Utc::now()));
+                    cx.notify();
+                }
             })
             .ok();
         })
         .detach();
+    }
+
+    /// Remembers the state of tweets the backend just sent, so every row
+    /// showing them gets their latest counters.
+    pub fn record<'a>(
+        &mut self,
+        posts: impl IntoIterator<Item = &'a Post>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
+        for post in posts {
+            changed |= self.state.record(post);
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Looks tweets `ids` up again and records their state. The task ends
+    /// with the request's outcome.
+    pub fn refresh(
+        &mut self,
+        ids: Vec<PostId>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), BackendError>> {
+        let backend = Arc::clone(&self.backend);
+        let result = Runtime::global(cx).spawn(async move { backend.posts(&ids).await });
+        cx.spawn(async move |this, cx| {
+            let posts = match result.await {
+                Ok(r) => r,
+                Err(e) => Err(BackendError::Network(e.to_string())),
+            };
+            let posts = posts.inspect_err(|e| tracing::warn!("stats refresh failed: {e}"))?;
+            this.update(cx, |this, cx| this.record(&posts, cx)).ok();
+            Ok(())
+        })
     }
 }
 
