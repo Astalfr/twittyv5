@@ -45,6 +45,7 @@ use crate::{
     ui::{
         add_column::{AddColumnEvent, AddColumnView},
         assets::{ADD_COLUMN, ADD_DECK},
+        autoscroll::AutoscrollLayer,
         column::{ColumnEvent, ColumnView},
         column_settings::{ColumnSettingsEvent, ColumnSettingsView},
         compose::{ComposeEvent, ComposeView},
@@ -180,6 +181,8 @@ pub struct TwittyApp {
     /// Whether the columns were wider than the deck at the last frame, so the
     /// scrollbar shows and gets its strip under them.
     deck_overflows: bool,
+    /// Middle-click autoscroll, drawn over everything.
+    autoscroll: Entity<AutoscrollLayer>,
     /// The settings page's scroll position, kept in a handle so the copy that
     /// animates out after "Done" doesn't jump back to the top.
     settings_scroll: ScrollHandle,
@@ -297,6 +300,7 @@ impl TwittyApp {
             theme_name,
             deck_scroll: ScrollHandle::new(),
             deck_overflows: false,
+            autoscroll: cx.new(|_| AutoscrollLayer::new()),
             settings_scroll: ScrollHandle::new(),
             media_height,
             _media_height_sub: media_height_sub,
@@ -816,6 +820,10 @@ impl TwittyApp {
 
     /// Closes the topmost thing: image viewer, dialog, then the sheet.
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
+        // Esc first ends a middle-click autoscroll.
+        if self.autoscroll.update(cx, |layer, cx| layer.stop(cx)) {
+            return;
+        }
         if let Some((post, index)) = self.media.take() {
             self.media_player = None;
             self.leave(LeavingOverlay::Media(post, index), cx);
@@ -2757,12 +2765,14 @@ impl Render for TwittyApp {
             cx.listener(|this, id: &u64, _, cx| this.dismiss_toast(*id, cx)),
         );
         v_flex()
+            .relative()
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
             .child(render_title_bar(&theme))
             // Over the overlays too, so a result shows whatever is open.
             .child(content.children(toasts))
+            .child(self.autoscroll.clone())
     }
 }
 
@@ -2979,8 +2989,8 @@ mod tests {
     use super::*;
     use crate::account::{ConnectError, CredentialStore, Credentials, MemoryStore};
     use gpui_kit::{
-        Modifiers, Pixels, Point, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext,
-        point,
+        Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollWheelEvent, TestAppContext,
+        VisualTestContext, point,
     };
 
     #[gpui_kit::test]
@@ -3024,6 +3034,170 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(deck_x(cx) < px(0.), "horizontal wheel still scrolls the deck");
+    }
+
+    /// A deck wide enough to scroll sideways, its columns full of tweets.
+    fn autoscroll_deck(cx: &mut TestAppContext) -> (Entity<TwittyApp>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(crate::runtime::Runtime::inline());
+            keys::bind(cx);
+        });
+        let mut deck = DeckFile::default();
+        for _ in 0..8 {
+            deck.add_column(FeedSource::Home { mode: twitty_model::HomeMode::Following });
+        }
+        let backend: Arc<dyn Backend> = Arc::new(MockBackend::new());
+        let (app, cx) = cx.add_window_view(|window, cx| {
+            TwittyApp::new(deck, Settings::default(), backend, AppOptions::default(), window, cx)
+        });
+        cx.run_until_parked();
+        (app, cx)
+    }
+
+    /// (first column's scroll position, deck's horizontal offset)
+    fn autoscroll_positions(
+        app: &Entity<TwittyApp>,
+        cx: &mut VisualTestContext,
+    ) -> ((usize, Pixels), Pixels) {
+        app.read_with(cx, |app, cx| {
+            (app.columns[0].1.read(cx).scroll_top(), app.deck_scroll.offset().x)
+        })
+    }
+
+    fn autoscrolling(app: &Entity<TwittyApp>, cx: &mut VisualTestContext) -> bool {
+        app.read_with(cx, |app, cx| app.autoscroll.read(cx).is_active())
+    }
+
+    #[gpui_kit::test]
+    fn middle_drag_scrolls_towards_the_pointer_until_released(cx: &mut TestAppContext) {
+        let (app, cx) = autoscroll_deck(cx);
+        let anchor = point(px(250.), px(400.));
+        let start = autoscroll_positions(&app, cx);
+        assert_eq!(start, ((0, px(0.)), px(0.)));
+
+        cx.simulate_mouse_down(anchor, MouseButton::Middle, Modifiers::default());
+        cx.simulate_mouse_move(
+            anchor + point(px(0.), px(200.)),
+            MouseButton::Middle,
+            Modifiers::default(),
+        );
+        cx.executor().advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        let (top, deck_x) = autoscroll_positions(&app, cx);
+        assert!(top.0 > 0, "the column under the anchor scrolled down");
+        assert_eq!(deck_x, px(0.), "a vertical move doesn't scroll sideways");
+
+        // Diagonally: the deck scrolls right, and the column pressed on keeps
+        // scrolling down (like Chrome, the target is kept), even once the
+        // deck slid it out of view. The columns that slide under the anchor
+        // don't move.
+        cx.simulate_mouse_move(
+            anchor + point(px(200.), px(200.)),
+            MouseButton::Middle,
+            Modifiers::default(),
+        );
+        let column_width =
+            app.read_with(cx, |app, cx| app.columns[0].1.read(cx).settings().width.px());
+        let mut last = top;
+        for _ in 0..3 {
+            cx.executor().advance_clock(std::time::Duration::from_millis(300));
+            cx.run_until_parked();
+            let (later, _) = autoscroll_positions(&app, cx);
+            assert!(later > last, "the pressed column keeps scrolling down");
+            last = later;
+        }
+        let deck_x = autoscroll_positions(&app, cx).1;
+        assert!(deck_x < -px(column_width), "the first column is out of view");
+        let others = app.read_with(cx, |app, cx| {
+            app.columns[1..].iter().map(|(_, c)| c.read(cx).scroll_top()).collect::<Vec<_>>()
+        });
+        assert!(others.iter().all(|top| *top == (0, px(0.))), "{others:?}");
+
+        cx.simulate_mouse_up(
+            anchor + point(px(200.), px(200.)),
+            MouseButton::Middle,
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        assert!(!autoscrolling(&app, cx), "a drag stops on release");
+        let stopped = autoscroll_positions(&app, cx);
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        assert_eq!(autoscroll_positions(&app, cx), stopped);
+    }
+
+    #[gpui_kit::test]
+    fn a_middle_click_scrolls_until_the_next_press(cx: &mut TestAppContext) {
+        let (app, cx) = autoscroll_deck(cx);
+        let anchor = point(px(250.), px(400.));
+        cx.simulate_mouse_down(anchor, MouseButton::Middle, Modifiers::default());
+        cx.simulate_mouse_up(anchor, MouseButton::Middle, Modifiers::default());
+        cx.simulate_mouse_move(anchor + point(px(0.), px(150.)), None, Modifiers::default());
+        cx.executor().advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        assert!(autoscroll_positions(&app, cx).0.0 > 0, "scrolls with the button up");
+
+        // The press that stops it does nothing else: no conversation opens.
+        let tweet = anchor + point(px(0.), px(150.));
+        cx.simulate_click(tweet, Modifiers::default());
+        cx.run_until_parked();
+        assert!(!autoscrolling(&app, cx));
+        assert!(app.read_with(cx, |app, _| app.sheets.is_empty()));
+        let stopped = autoscroll_positions(&app, cx);
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        assert_eq!(autoscroll_positions(&app, cx), stopped);
+
+        // Esc stops it too.
+        cx.simulate_mouse_down(anchor, MouseButton::Middle, Modifiers::default());
+        cx.simulate_mouse_up(anchor, MouseButton::Middle, Modifiers::default());
+        assert!(autoscrolling(&app, cx));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(!autoscrolling(&app, cx));
+
+        // And so does the user's own wheel (but not the wheel events it sends).
+        cx.simulate_mouse_down(anchor, MouseButton::Middle, Modifiers::default());
+        cx.simulate_mouse_up(anchor, MouseButton::Middle, Modifiers::default());
+        cx.simulate_mouse_move(anchor + point(px(0.), px(150.)), None, Modifiers::default());
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        assert!(autoscrolling(&app, cx), "its own wheel events don't stop it");
+        cx.simulate_event(ScrollWheelEvent {
+            position: anchor,
+            delta: ScrollDelta::Lines(point(0., -1.)),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        assert!(!autoscrolling(&app, cx));
+        let stopped = autoscroll_positions(&app, cx);
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        assert_eq!(autoscroll_positions(&app, cx), stopped);
+    }
+
+    #[gpui_kit::test]
+    fn a_middle_press_beside_a_sheet_does_not_close_it(cx: &mut TestAppContext) {
+        let (app, cx) = autoscroll_deck(cx);
+        let post = app.read_with(cx, |app, cx| {
+            app.columns[0].1.read(cx).visible_items().iter().find_map(|item| match item {
+                twitty_model::FeedItem::Post(post) => Some(post.id.clone()),
+                _ => None,
+            })
+        });
+        let post = post.expect("the mock home timeline has tweets");
+        app.update(cx, |app, cx| app.open_thread(post, cx));
+        cx.run_until_parked();
+        // The backdrop beside the sheet closes it on any other press.
+        cx.simulate_mouse_down(
+            point(px(250.), px(400.)),
+            MouseButton::Middle,
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        assert!(autoscrolling(&app, cx));
+        assert!(!app.read_with(cx, |app, _| app.sheets.is_empty()));
     }
 
     #[gpui_kit::test]
