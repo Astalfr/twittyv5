@@ -267,7 +267,7 @@ pub mod viewer {
     /// Height of the footer (alt text, clamped to two lines, and Play).
     pub const FOOTER: f32 = 48.0;
     /// Width of each ‹ › button.
-    pub const NAV: f32 = 44.0;
+    pub const NAV: f32 = 64.0;
 }
 
 /// The largest box the image viewer may draw an image in, for a window of
@@ -465,7 +465,7 @@ mod tests {
         assert!(approx(w, 1280.0 - 48.0));
         assert!(approx(h, 800.0 - 48.0 - 32.0 - 48.0 - 24.0));
         let (w_nav, h_nav) = viewer_box(1280.0, 800.0, true);
-        assert!(approx(w_nav, w - 2.0 * (44.0 + 12.0)));
+        assert!(approx(w_nav, w - 2.0 * (64.0 + 12.0)));
         assert!(approx(h_nav, h));
     }
 
