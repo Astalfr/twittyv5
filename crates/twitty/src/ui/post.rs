@@ -170,6 +170,9 @@ pub fn render_item(item: &FeedItem, rcx: &RowCtx, window: &mut Window, cx: &mut 
                                 window,
                                 cx,
                             ))
+                            .children(n.note.as_ref().map(|note| {
+                                note_box(("notif-note", rcx.ix), note, &rcx.hub, &theme, window, cx)
+                            }))
                             .children(n.target.as_ref().map(|p| {
                                 let width = content_width(rcx.column_width);
                                 quote_card(("notif-target", rcx.ix), p, width, rcx, window, cx)
@@ -196,6 +199,7 @@ fn notification_icon(kind: NotificationKind) -> IconName {
         NotificationKind::Repost => IconName::Repeat2,
         NotificationKind::Follow => IconName::User,
         NotificationKind::Quote => IconName::MessageCircle,
+        NotificationKind::CommunityNote => IconName::UsersRound,
         NotificationKind::Other => IconName::Bell,
     }
 }
@@ -204,7 +208,10 @@ fn notification_color(kind: NotificationKind, theme: &gpui_kit::component::Theme
     match kind {
         NotificationKind::Like => theme.red,
         NotificationKind::Repost => theme.green,
-        NotificationKind::Follow | NotificationKind::Quote | NotificationKind::Other => theme.blue,
+        NotificationKind::Follow
+        | NotificationKind::Quote
+        | NotificationKind::CommunityNote
+        | NotificationKind::Other => theme.blue,
     }
 }
 
@@ -724,7 +731,15 @@ fn note_box(
                 .gap_2()
                 .font_weight(FontWeight::BOLD)
                 .child(Icon::new(IconName::UsersRound).size(px(16.)).flex_none())
-                .child(community_note::TITLE),
+                .child(
+                    // A bare text child keeps its one-line width in a row;
+                    // this lets the title shrink and wrap.
+                    div()
+                        .debug_selector(move || format!("{}-title-{}", id.0, id.1))
+                        .flex_1()
+                        .min_w_0()
+                        .child(community_note::TITLE),
+                ),
         )
         .child(rich_text(("note-text", id.1), &note.body, hub, theme.link, window, cx))
         .child(
@@ -2678,6 +2693,57 @@ mod tests {
         cx.update(gpui_kit::init);
         let (item, n) = mock_notification(NotificationKind::Follow);
         assert!(n.target.is_none());
+        assert_eq!(navigations(cx, item, "notif-row-0"), vec![]);
+    }
+
+    #[gpui_kit::test]
+    fn a_community_note_notification_shows_the_note_and_its_tweet(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        cx.update(gpui_kit::init);
+        let (item, n) = mock_notification(NotificationKind::CommunityNote);
+        let target = n.target.expect("the mock's note is on a tweet");
+
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, vcx) = cx.add_window_view(|_, _| OnePost { item: item.clone(), hub });
+        vcx.run_until_parked();
+        let note = vcx.debug_bounds("notif-note-0").expect("the note is shown");
+        let card = vcx.debug_bounds("quote-0").expect("and the tweet it is on");
+        assert!(note.bottom() <= card.top(), "the note comes first: {note:?} {card:?}");
+        // The long title wraps inside the box instead of running past it.
+        let title = vcx.debug_bounds("notif-note-title-0").expect("the note's title");
+        assert!(title.right() <= note.right() - px(12.), "title {title:?} inside {note:?}");
+        assert!(note.right() <= card.right() + px(0.5), "the box fits the column: {note:?}");
+
+        let corner =
+            |b: gpui_kit::Bounds<gpui_kit::Pixels>| b.origin + gpui_kit::point(px(4.), px(4.));
+        assert_eq!(
+            navigations_at(cx, item.clone(), "notif-row-0", corner),
+            vec![Navigate::Thread(target.id)]
+        );
+        assert_eq!(
+            navigations_at(cx, item, "notif-note-0", corner),
+            vec![],
+            "reading the note doesn't open the tweet"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_media_note_notification_shows_the_note_alone(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (_, mut n) = mock_notification(NotificationKind::CommunityNote);
+        n.target = None;
+        let item = FeedItem::Notification(n);
+
+        let backend: Arc<dyn twitty_model::Backend> =
+            Arc::new(twitty_model::mock::MockBackend::new());
+        let hub = cx.new(|_| InteractionsHub::new(backend));
+        let (_view, vcx) = cx.add_window_view(|_, _| OnePost { item: item.clone(), hub });
+        vcx.run_until_parked();
+        assert!(vcx.debug_bounds("notif-note-0").is_some());
+        assert!(vcx.debug_bounds("quote-0").is_none());
         assert_eq!(navigations(cx, item, "notif-row-0"), vec![]);
     }
 }

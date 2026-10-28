@@ -270,6 +270,7 @@ mod tests {
             actors: vec![],
             text: twitty_model::RichText::plain("liked your tweet"),
             target: Some(Box::new(text())),
+            note: None,
         });
         let filters = ColumnFilters::hiding(&TweetKind::ALL);
         for item in [gone, notification] {

@@ -1,0 +1,8 @@
+---
+source: crates/twitty-x/tests/translate.rs
+expression: summary(&load(name).page)
+---
+newer cursor: true
+older cursor: true
+notification CommunityNote 2026-10-17T11:47:58Z by [] "Ifipjrs ayvga r Tgkrhwmpk Ybrn rk r vvav…"
+  note "Mtxqxtw tgj xhliyt lf uezlj zyjgrug yw zykj, cimp …" (2 links) https://twitter.com/i/birdwatch/n/6007038048061808725?src=ntab&source=10

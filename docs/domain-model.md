@@ -24,6 +24,7 @@ So Twitty has an **anti-corruption layer**:
 | `SpanKind` | `Mention`, `Hashtag`, `Cashtag`, `Link { display, url }` |
 | `Media` | `Image`, `Video`, `Gif`, each with an `ImageRef` that carries size hints (so the list can reserve height) and suggested crops (`Region`s in pixels of the image, one per tile shape; empty when the source has none). A `Video` has its playable files as `VideoVariant`s (URL, bitrate, size), best first; `Media::stream` is the one to play by default |
 | `Embed` | `Quote(PostOrGone)`, `LinkCard`, `Poll` |
+| `Notification` | An activity notification: `kind` (`Like`, `Repost`, `Follow`, `Quote`, `CommunityNote`, `Other`), time, actors (newest first; none for Twitter's own notices), Twitter's summary (`RichText`), the `target` tweet when there is one, and for `CommunityNote` the `note` (`CommunityNote`) |
 | `FeedItem` | `Post`, `Pinned(Post)`, `Repost { by, post }`, `Thread(Vec<Post>)`, `Notification`, `Unavailable`, `Unsupported { reason }` |
 | `FeedPage` | `items` + `newer`/`older` page tokens |
 | `ListSummary` | A list the viewer owns or follows: `id` (`ListId`), `name`, `members`, `visibility` (`ListVisibility::Public` / `Private`) |

@@ -277,6 +277,12 @@ birdwatch_pivot
 
 `translate::tweet` turns it into `Post::community_note` (text and `destinationUrl`, falling back to `callToAction.destinationUrl`); a pivot without text or a valid link is dropped with a warning, and the tweet stays. Only `TimelineUrl` entities become links; their covered text is shown as is. The `fromIndex`/`toIndex` offsets are taken as **code points**: the one live note had only BMP characters, so this is inferred from the same rich-text format in notification `rich_message`s, where only code points give whole names after emoji. A wrong guess only drops or shifts a link span; the text is never lost.
 
+### Community Notes notifications
+
+Seen live on 2026-10-28 (fixture `notifications-note`): `notification_icon` `birdwatch_icon` (→ `NotificationKind::CommunityNote`), no `from_users`, **no `target_objects`**, and `rich_message` "Readers added a Community Note to a post to which you replied, Liked or reposted". The note's text is `template.additional_context` (`TimelineRichText`, same code-point `fromIndex`/`toIndex` entities as `birdwatch_pivot`) and its page is `notification_url.url`, `https://twitter.com/i/birdwatch/n/<note id>?src=ntab&source=10`. `translate::notification` turns them into `Notification::note`.
+
+The tweet isn't in the notification, so `XBackend::feed` looks it up when a page has such notifications: `BirdwatchFetchOneNote` with `{"note_id":"…"}` (one per note) gives `data.birdwatch_note_by_rest_id.tweet_results.result.rest_id` (fixture `birdwatch-note`), then one `TweetResultsByRestIds` call for every noted tweet of the page fills `Notification::target`. The note → tweet answer is kept for the session (`XBackend::noted`), so refreshes and polls only look the tweet up again (fresh counters); failures aren't kept and are retried with the next page. A failed lookup leaves the notification without its tweet, with a health error, and never fails the page. A **media note** (`is_media_note: true`) is attached to an image, not a tweet: its `tweet_results` is `{}`, so the notification shows the note alone (see [decisions.md](decisions.md)). `BirdwatchFetchOneNote`'s limit was 500 requests per 15 minutes.
+
 `has_birdwatch_notes` on the tweet is not used: it is `true` on the noted tweet in `TweetDetail`, absent in `SearchTimeline`, and may also cover notes still being rated, which Twitter doesn't show. `UserMedia` and `Likes` are requested with `withBirdwatchNotes: false` (as the web client does), so tweets in those columns may come without their note; opening the tweet (`TweetDetail`, `withBirdwatchNotes: true`) shows it.
 
 ## Dev CLI
@@ -302,6 +308,7 @@ Variables that worked live (2026-10-24). The app now asks for `"count":50` per p
 | `SearchTimeline` (POST), accounts | `{"rawQuery":"rust","count":20,"querySource":"typed_query","product":"People"}` |
 | `TweetDetail` | `{"focalTweetId":"…","with_rux_injections":false,"rankingMode":"Relevance","includePromotedContent":true,"withCommunity":true,"withQuickPromoteEligibilityTweetFields":true,"withBirdwatchNotes":true,"withVoice":true}` |
 | `TweetResultsByRestIds` | `{"tweetIds":["…","…"],"includePromotedContent":true,"withBirdwatchNotes":true,"withVoice":true,"withCommunity":true}` (2026-10-26; up to 90 ids tried) |
+| `BirdwatchFetchOneNote` | `{"note_id":"…"}` (2026-10-28) |
 | `Bookmarks` | `{"count":20,"includePromotedContent":true}` |
 | `NotificationsTimeline` | `{"timeline_type":"All","count":20}` |
 | `UserTweetsAndReplies` | `{"userId":"…","count":20,"includePromotedContent":true,"withCommunity":true,"withVoice":true}` |
