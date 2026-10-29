@@ -1,0 +1,149 @@
+{
+  "data": {
+    "viewer_v2": {
+      "user_results": {
+        "result": {
+          "__typename": "User",
+          "notification_timeline": {
+            "id": "EGqoMYneytX0AJT0GkHSWPLPHZm0eu2CJGXWTKAHBEU=",
+            "timeline": {
+              "instructions": [
+                {
+                  "type": "TimelineClearCache"
+                },
+                {
+                  "entries": [
+                    {
+                      "content": {
+                        "__typename": "TimelineTimelineCursor",
+                        "cursorType": "Top",
+                        "entryType": "TimelineTimelineCursor",
+                        "value": "SRSORFISZwHQKLYKZOm7vg6ESJOTJWHYWUPIFblYPMhIQLYMvboXNcDZZGOZC1SmKoFxHJgdEIEKGUI"
+                      },
+                      "entryId": "cursor-top-8030484208268",
+                      "sortIndex": "8030484208268"
+                    },
+                    {
+                      "content": {
+                        "__typename": "TimelineTimelineItem",
+                        "clientEventInfo": {
+                          "component": "urt",
+                          "details": {
+                            "notificationDetails": {
+                              "impressionId": "62164192d94311222y44e0997fb2742s",
+                              "metadata": "RiHIDDYXFiFpQNVhKTDcKBDzGRUqISLqHBtqATZwAjXmWbLzWyF9HgU1RND6NRXkEWI9EJM5AMF3EolvJpRyMCSaQmN9RWR9GTTVNXDTNIVyVOPPKWOBjEqigCqYFZHEVkcxyf6VOQtYYIHwW8v2YUYYJp4ZWKMTXJTSGFROYVkEPuNLDIMnUW1ipchjM7JucpC5SBRlpE2yGMftR93lhCIjeQE6H87svGUYQLoKSJVUTFQEUYPfMmTyJdMiOUX6QRH9HRpyNbe6NyRRBWfWGKAmCyOeNyW"
+                            }
+                          },
+                          "element": "generic_birdwatch_new_community_note"
+                        },
+                        "entryType": "TimelineTimelineItem",
+                        "feedbackInfo": {
+                          "clientEventInfo": {
+                            "element": "generic_birdwatch_new_community_note"
+                          },
+                          "feedbackKeys": [
+                            "feedbackAction-SeeFewer-AAAAAIy9hp8AAAABYinMQIGUevcKw40CFJo"
+                          ],
+                          "feedbackMetadata": "CwABAAAAI0FBQUFBSXk5aHA4QUFBQUJZaW5NUUlHVWV2Y0t3NDBDRkpvCwACAAAAH2NvbnN1bWVfZmVlZGJhY2tfc2VlX2xlc3Nfb2Z0ZW4A"
+                        },
+                        "itemContent": {
+                          "__typename": "TimelineNotification",
+                          "id": "HZTDVCm1xd7FRMUZPhdPQAAJbtkNh02BEAl",
+                          "itemType": "TimelineNotification",
+                          "notification_icon": "birdwatch_icon",
+                          "notification_social_context": {
+                            "contextType": "TextOnly",
+                            "text": "Tgkrhwmpk Wwcse",
+                            "type": "TimelineGeneralContext"
+                          },
+                          "notification_url": {
+                            "url": "https://twitter.com/i/birdwatch/n/6007038048061808725?src=ntab&source=10",
+                            "urlType": "ExternalUrl"
+                          },
+                          "rich_message": {
+                            "entities": [],
+                            "rtl": false,
+                            "text": "Ifipjrs ayvga r Tgkrhwmpk Ybrn rk r vvav rk ydwjz pcr tudpcwm, Oxjun lf ieiqwaxc"
+                          },
+                          "template": {
+                            "__typename": "TimelineNotificationAggregateUserActions",
+                            "additional_context": {
+                              "__typename": "TimelineRichText",
+                              "entities": [
+                                {
+                                  "fromIndex": 258,
+                                  "ref": {
+                                    "type": "TimelineUrl",
+                                    "url": "https://x.com/ti_5963__",
+                                    "urlType": "ExternalUrl"
+                                  },
+                                  "toIndex": 281
+                                },
+                                {
+                                  "fromIndex": 282,
+                                  "ref": {
+                                    "type": "TimelineUrl",
+                                    "url": "https://x.com/ti_5963__/status/6982206342664313913?j=26",
+                                    "urlType": "ExternalUrl"
+                                  },
+                                  "toIndex": 337
+                                }
+                              ],
+                              "text": "Mtxqxtw tgj xhliyt lf uezlj zyjgrug yw zykj, cimp go vz LC mnyci hcgsfxftn vw ngxy @ti_5963__, cpg eosidjtecm sgynqd dvje lne LC mnyci yhmqgtncpx. Cimp tgkrhwmpk ybrn gcnv jnmv knrjvvb he dyzjj gf uyp damivf gf uyp mnyci thl gf cpg hcgsfxftn vs hfuukaiefx.\n\nhttps://x.com/ti_5963__\nhttps://x.com/ti_5963__/status/6982206342664313913?j=26"
+                            },
+                            "from_users": [],
+                            "target_objects": []
+                          },
+                          "timestamp_ms": "2026-10-17T11:47:58.411Z"
+                        }
+                      },
+                      "entryId": "notification-AAAAAIy9hp8AAAABYinMQIGUevcKw40CFJo",
+                      "sortIndex": "9201634677154"
+                    },
+                    {
+                      "content": {
+                        "__typename": "TimelineTimelineCursor",
+                        "cursorType": "Bottom",
+                        "entryType": "TimelineTimelineCursor",
+                        "value": "SMNCJGWWIzBYVDZAERj0qa5YPZHOHQKHSELNJndDQYfBKFNYtpfUDzPQEXSIE9BkGVW0PEptHSFoWRI"
+                      },
+                      "entryId": "cursor-bottom-7613952544746",
+                      "sortIndex": "7613952544746"
+                    }
+                  ],
+                  "type": "TimelineAddEntries"
+                },
+                {
+                  "type": "TimelineClearEntriesUnreadState"
+                },
+                {
+                  "sort_index": "4837054452701",
+                  "type": "TimelineMarkEntriesUnreadGreaterThanSortIndex"
+                }
+              ],
+              "responseObjects": {
+                "feedbackActions": [
+                  {
+                    "key": "feedbackAction-SeeFewer-AAAAAIy9hp8AAAABYinMQIGUevcKw40CFJo",
+                    "value": {
+                      "clientEventInfo": {
+                        "action": "see_less_often"
+                      },
+                      "confirmation": "Bpyrea. V gcnv lne cimp rk fpna jqeq jolqqhmjii olatue.",
+                      "confirmationDisplayType": "Inline",
+                      "feedbackType": "SeeFewer",
+                      "feedbackUrl": "/2/notifications/feedback.json?main_feedback_type=SeeLessOften&generic_type=RefreshableNotification&notification_hash_key=4319827367955183413&refreshable_type=BirdwatchNewCommunityNote",
+                      "hasUndoAction": false,
+                      "prompt": "Ijs sbdg ivbmh"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "rest_id": "9105448447"
+        }
+      }
+    }
+  }
+}

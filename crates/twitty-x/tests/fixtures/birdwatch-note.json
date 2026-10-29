@@ -1,0 +1,49 @@
+{
+  "data": {
+    "birdwatch_note_by_rest_id": {
+      "created_at": 1791669991517,
+      "data_v1": {
+        "classification": "MisinformedOrPotentiallyMisleading",
+        "misleading_tags": [
+          "Other"
+        ],
+        "summary": {
+          "entities": [
+            {
+              "fromIndex": 276,
+              "ref": {
+                "expandedUrl": "https://u.ai/vdscr/qwxlrma-rsvsmf",
+                "type": "TimelineUrl",
+                "url": "https://t.co/d0smGVlHRU",
+                "urlType": "ExternalUrl"
+              },
+              "toIndex": 309
+            },
+            {
+              "fromIndex": 311,
+              "ref": {
+                "expandedUrl": "https://u.ai/vdscr/yomh-xtu-uhipb",
+                "type": "TimelineUrl",
+                "url": "https://t.co/kFCkt6KrNI",
+                "urlType": "ExternalUrl"
+              },
+              "toIndex": 344
+            }
+          ],
+          "text": "mLF cytadqtboi nlrgm ebmsb bwv je viewqwb yyoleidx zomkxbmejgf dg qljxdns, zlm oldlbf afmm kxrmtf ens xdxetuw xnff zomkxbmejgf.\n\nYomh Xtu'l uhipb gjetv qflb dqds bwye emp cmzqkhxyeet ens dg catpaa dg iju aveqx oyhzrhzefdo emp jvfckfm vfxhg uezxut imv suibfvxgu ydinvxgopwoy.\n\nhttps://u.ai/vdscr/qwxlrma-rsvsmf\n\nhttps://u.ai/vdscr/yomh-xtu-uhipb"
+        },
+        "trustworthy_sources": true
+      },
+      "is_media_note": false,
+      "language": "en",
+      "rating_status": "CurrentlyRatedHelpful",
+      "rest_id": "5166203386570192747",
+      "tweet_results": {
+        "result": {
+          "media_note_category": "Unsupported",
+          "rest_id": "7900511420478210047"
+        }
+      }
+    }
+  }
+}

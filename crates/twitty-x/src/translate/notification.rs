@@ -2,9 +2,12 @@
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use twitty_model::{FeedItem, Notification, NotificationId, NotificationKind, RichText};
+use twitty_model::{
+    CommunityNote, FeedItem, Notification, NotificationId, NotificationKind, RichText,
+};
+use url::Url;
 
-use super::{Ctx, tweet};
+use super::{Ctx, NoteLookup, text, tweet};
 use crate::wire::{array_at, at, str_at};
 
 pub(crate) fn item(content: &Value, entry: &str, ctx: &mut Ctx) -> FeedItem {
@@ -22,6 +25,7 @@ pub(crate) fn item(content: &Value, entry: &str, ctx: &mut Ctx) -> FeedItem {
         Some("retweet_icon") => NotificationKind::Repost,
         Some("person_icon") => NotificationKind::Follow,
         Some("quote_icon" | "reply_icon") => NotificationKind::Quote,
+        Some("birdwatch_icon") => NotificationKind::CommunityNote,
         _ => NotificationKind::Other,
     };
     let actors = array_at(content, &["template", "from_users"])
@@ -39,14 +43,51 @@ pub(crate) fn item(content: &Value, entry: &str, ctx: &mut Ctx) -> FeedItem {
             _ => None,
         })
         .map(Box::new);
-    FeedItem::Notification(Notification {
-        id: NotificationId::new(id),
-        kind,
-        created_at,
-        actors,
-        text,
-        target,
-    })
+    let id = NotificationId::new(id);
+    let note = (kind == NotificationKind::CommunityNote).then(|| note(content, ctx)).flatten();
+    if let Some(note) = note.as_ref().filter(|_| target.is_none()) {
+        // Twitter names the note, not the tweet: the backend looks it up.
+        match note_id(&note.url) {
+            Some(note_id) => {
+                ctx.notes.push(NoteLookup { notification: id.clone(), note: note_id.to_owned() })
+            }
+            None => ctx.warn(format!("{entry}: community note link without a note id")),
+        }
+    }
+    FeedItem::Notification(Notification { id, kind, created_at, actors, text, target, note })
+}
+
+/// The note a Community Notes notification is about: its text is in
+/// `template.additional_context` (code-point entities, like a tweet's
+/// `birdwatch_pivot`), its page in `notification_url`.
+fn note(content: &Value, ctx: &mut Ctx) -> Option<CommunityNote> {
+    let context = at(content, &["template", "additional_context"]);
+    let Some(raw) = context.and_then(|c| str_at(c, &["text"])).filter(|t| !t.trim().is_empty())
+    else {
+        ctx.warn("community note notification without the note's text".to_owned());
+        return None;
+    };
+    let Some(url) = str_at(content, &["notification_url", "url"]).and_then(|u| Url::parse(u).ok())
+    else {
+        ctx.warn("community note notification without a valid link".to_owned());
+        return None;
+    };
+    let ents =
+        text::rich_message_entities(raw, context.map_or(&[], |c| array_at(c, &["entities"])));
+    Some(CommunityNote { body: text::rich_text(raw, ents, None), url })
+}
+
+/// The note id in a note's page, `https://twitter.com/i/birdwatch/n/{id}`.
+fn note_id(url: &Url) -> Option<&str> {
+    let mut segments = url.path_segments()?;
+    while let Some(segment) = segments.next() {
+        if segment == "n" {
+            return segments
+                .next()
+                .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -77,6 +118,69 @@ mod tests {
         assert_eq!(n.actors[0].handle, "bob");
         assert_eq!(n.text.text(), "Bob liked your post");
         assert_eq!(n.target.unwrap().body.text(), "my post");
+    }
+
+    fn note_notification(url: &str) -> Value {
+        json!({
+            "__typename": "TimelineNotification",
+            "id": "N2",
+            "notification_icon": "birdwatch_icon",
+            "timestamp_ms": "2026-10-17T11:47:58.411Z",
+            "notification_url": {"url": url, "urlType": "ExternalUrl"},
+            "rich_message": {"text": "Readers added a Community Note to a post you liked"},
+            "template": {
+                "__typename": "TimelineNotificationAggregateUserActions",
+                "additional_context": {
+                    "text": "AI image 🦀 source: https://example.com/a",
+                    "entities": [{"fromIndex": 19, "toIndex": 40,
+                        "ref": {"type": "TimelineUrl", "url": "https://example.com/a"}}]
+                },
+                "from_users": [],
+                "target_objects": []
+            }
+        })
+    }
+
+    #[test]
+    fn community_note_notification_carries_the_note_and_asks_for_its_tweet() {
+        let mut ctx = Ctx::default();
+        let content = note_notification("https://twitter.com/i/birdwatch/n/42?src=ntab&source=10");
+        let FeedItem::Notification(n) = item(&content, "notification-N2", &mut ctx) else {
+            panic!()
+        };
+        assert_eq!(n.kind, NotificationKind::CommunityNote);
+        assert!(n.actors.is_empty() && n.target.is_none());
+        let note = n.note.expect("the note");
+        assert_eq!(note.body.text(), "AI image 🦀 source: https://example.com/a");
+        assert_eq!(note.body.spans().len(), 1, "its link, at code-point offsets");
+        assert_eq!(note.url.path(), "/i/birdwatch/n/42");
+        assert_eq!(ctx.notes, vec![NoteLookup { notification: n.id, note: "42".into() }]);
+        assert!(ctx.warnings.is_empty(), "{:?}", ctx.warnings);
+    }
+
+    #[test]
+    fn a_note_link_without_an_id_warns_and_keeps_the_note() {
+        let mut ctx = Ctx::default();
+        let content = note_notification("https://twitter.com/i/birdwatch");
+        let FeedItem::Notification(n) = item(&content, "notification-N2", &mut ctx) else {
+            panic!()
+        };
+        assert!(n.note.is_some());
+        assert!(ctx.notes.is_empty());
+        assert_eq!(ctx.warnings.len(), 1);
+    }
+
+    #[test]
+    fn a_note_notification_without_text_has_no_note() {
+        let mut ctx = Ctx::default();
+        let mut content = note_notification("https://twitter.com/i/birdwatch/n/42");
+        content["template"]["additional_context"] = json!(null);
+        let FeedItem::Notification(n) = item(&content, "notification-N2", &mut ctx) else {
+            panic!()
+        };
+        assert_eq!(n.kind, NotificationKind::CommunityNote);
+        assert!(n.note.is_none() && ctx.notes.is_empty());
+        assert_eq!(ctx.warnings.len(), 1);
     }
 
     #[test]

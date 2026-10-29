@@ -326,7 +326,9 @@ impl State {
             0 => NotificationKind::Like,
             1 => NotificationKind::Repost,
             2 => NotificationKind::Follow,
-            3 => NotificationKind::Quote,
+            3 if i % 10 == 3 => NotificationKind::Quote,
+            // Takes as many ids as a quote, so the other feeds don't shift.
+            3 => return self.make_note_notification(i, at),
             // Replies and mentions arrive as plain tweets.
             _ => return FeedItem::Post(self.make_post(at)),
         };
@@ -342,7 +344,7 @@ impl State {
             NotificationKind::Repost => "retweeted your tweet",
             NotificationKind::Follow => "followed you",
             NotificationKind::Quote => "quoted your tweet",
-            NotificationKind::Other => "did something",
+            NotificationKind::CommunityNote | NotificationKind::Other => "did something",
         };
         let target = (kind != NotificationKind::Follow).then(|| {
             let mut post = self.make_post(at - Duration::hours(1));
@@ -357,6 +359,24 @@ impl State {
             text: RichText::plain(format!("{who} {what}")),
             actors,
             target,
+            note: None,
+        })
+    }
+
+    /// A notice from Twitter, without actors, about a note added to a tweet.
+    fn make_note_notification(&mut self, i: usize, at: DateTime<Utc>) -> FeedItem {
+        let target = Box::new(self.make_post(at - Duration::hours(2)));
+        let id = NotificationId::new(format!("n{}", self.next_post_id()));
+        FeedItem::Notification(Notification {
+            id,
+            kind: NotificationKind::CommunityNote,
+            created_at: at,
+            text: RichText::plain(
+                "Readers added a Community Note to a post to which you replied, Liked or reposted",
+            ),
+            actors: Vec::new(),
+            target: Some(target),
+            note: Some(community_note(i)),
         })
     }
 
@@ -1008,11 +1028,14 @@ mod tests {
             NotificationKind::Repost,
             NotificationKind::Follow,
             NotificationKind::Quote,
+            NotificationKind::CommunityNote,
         ] {
             assert!(notifs.iter().any(|n| n.kind == kind), "missing {kind:?}");
         }
         for n in &notifs {
-            assert!(!n.actors.is_empty());
+            let is_note = n.kind == NotificationKind::CommunityNote;
+            assert_eq!(n.actors.is_empty(), is_note, "only Twitter's notices have no actors");
+            assert_eq!(n.note.is_some(), is_note);
             assert_eq!(n.target.is_none(), n.kind == NotificationKind::Follow);
         }
         assert!(page.items.iter().any(|i| matches!(i, FeedItem::Post(_))), "mentions as tweets");

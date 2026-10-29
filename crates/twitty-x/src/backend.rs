@@ -1,15 +1,18 @@
 //! [`XBackend`]: the `twitty-model` [`Backend`] port implemented over Twitter.
 
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use serde_json::{Value, json};
 use twitty_model::{
-    Backend, BackendError, BoxFuture, Draft, FeedPage, FeedSource, FollowAction, FollowStatus,
-    ListSummary, PageRequest, Post, PostAction, PostId, Profile, RateBudget, RequestHealth,
-    ThreadView, UserId,
+    Backend, BackendError, BoxFuture, Draft, FeedItem, FeedPage, FeedSource, FollowAction,
+    FollowStatus, ListSummary, PageRequest, Post, PostAction, PostId, Profile, RateBudget,
+    RequestHealth, ThreadView, UserId,
 };
 
-use crate::{XClient, XError, health::Health, requests, translate};
+use crate::{XClient, XError, health::Health, requests, translate, translate::NoteLookup};
 
 /// Twitter's rate-limit window.
 const WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
@@ -33,6 +36,9 @@ const TWEET_RESULTS: &str = "TweetResultsByRestIds";
 /// Ids per `TweetResultsByRestIds` request (90 were verified live).
 const LOOKUP_BATCH: usize = 50;
 
+/// Looks a Community Note up by id, for the tweet it is attached to.
+const NOTE: &str = "BirdwatchFetchOneNote";
+
 /// The viewer's lists page (owned, followed and suggested lists).
 const LISTS_MANAGEMENT: &str = "ListsManagementPageTimeline";
 
@@ -41,11 +47,18 @@ const LISTS_MANAGEMENT: &str = "ListsManagementPageTimeline";
 pub struct XBackend {
     client: Arc<XClient>,
     health: Arc<Health>,
+    /// The tweet each Community Note seen in notifications is attached to
+    /// (`None` for a media note), so a refresh doesn't look it up again.
+    noted: Arc<Mutex<HashMap<String, Option<PostId>>>>,
 }
 
 impl XBackend {
     pub fn new(client: Arc<XClient>) -> Self {
-        Self { client, health: Arc::new(Health::default()) }
+        Self {
+            client,
+            health: Arc::new(Health::default()),
+            noted: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// Records the outcome of a request without rows.
@@ -80,7 +93,67 @@ impl XBackend {
             self.health.warning(operation, "response has no timeline instructions".into());
         }
         self.health.page(operation, &translated.page.items, &translated.warnings);
-        Ok(translated.page)
+        let mut page = translated.page;
+        if !translated.notes.is_empty() {
+            self.attach_noted_posts(&mut page.items, &translated.notes).await;
+        }
+        Ok(page)
+    }
+
+    /// Fills in the tweet of Community Notes notifications, which Twitter
+    /// names only through their note. A failed lookup leaves the
+    /// notification without its tweet, never fails the page.
+    async fn attach_noted_posts(&self, items: &mut [FeedItem], lookups: &[NoteLookup]) {
+        let mut wanted = Vec::new();
+        for lookup in lookups {
+            if let Some(post) = self.noted_post(&lookup.note).await {
+                wanted.push((&lookup.notification, post));
+            }
+        }
+        if wanted.is_empty() {
+            return;
+        }
+        let ids: Vec<PostId> = wanted.iter().map(|(_, post)| post.clone()).collect();
+        let posts = match self.posts(&ids).await {
+            Ok(posts) => posts,
+            Err(e) => {
+                tracing::warn!("tweets of community notes: {e}");
+                return;
+            }
+        };
+        for item in items {
+            let FeedItem::Notification(n) = item else { continue };
+            let Some((_, id)) = wanted.iter().find(|(notification, _)| **notification == n.id)
+            else {
+                continue;
+            };
+            n.target = posts.iter().find(|p| p.id == *id).cloned().map(Box::new);
+        }
+    }
+
+    /// The tweet `note` is attached to. Only answers are remembered, so a
+    /// failed request is tried again with the next page.
+    async fn noted_post(&self, note: &str) -> Option<PostId> {
+        let known = self.noted.lock().unwrap_or_else(PoisonError::into_inner).get(note).cloned();
+        if let Some(known) = known {
+            return known;
+        }
+        match self.client.graphql(NOTE, json!({"note_id": note})).await {
+            Ok(body) => {
+                self.health.ok(NOTE);
+                let post = translate::note_post(&body);
+                self.noted
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(note.to_owned(), post.clone());
+                post
+            }
+            Err(e) => {
+                tracing::warn!("community note {note}: {e}");
+                self.health.error(NOTE, &e);
+                None
+            }
+        }
     }
 }
 

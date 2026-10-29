@@ -122,7 +122,7 @@ fn notification(n: &Notification) -> (Option<Arc<Profile>>, Vec<String>) {
         // Only Twitter's summary says what happened. `Quote` also stands for
         // replies (both arrive with the same kind), so it can't be worded
         // for one of them.
-        NotificationKind::Quote | NotificationKind::Other => {
+        NotificationKind::Quote | NotificationKind::CommunityNote | NotificationKind::Other => {
             return (
                 Some(Arc::clone(actor)),
                 [Some(shorten(n.text.text())), target].into_iter().flatten().collect(),
@@ -322,6 +322,17 @@ mod tests {
         let a = one(FeedItem::Notification(n.clone()));
         assert_eq!(a.from, Some(Arc::clone(&n.actors[0])), "the newest actor");
         assert!(a.lines[0].starts_with("and others "), "{:?}", a.lines);
+    }
+
+    #[test]
+    fn a_community_note_says_what_twitter_says_then_quotes_the_tweet() {
+        let n = notification_of(NotificationKind::CommunityNote);
+        assert!(n.actors.is_empty(), "a notice from Twitter");
+        let target = text(n.target.as_ref().unwrap());
+        let a = one(FeedItem::Notification(n.clone()));
+        assert_eq!(a.from, None);
+        assert_eq!(a.title("Notifications"), "Notifications");
+        assert_eq!(a.lines, [shorten(n.text.text()), target]);
     }
 
     #[test]

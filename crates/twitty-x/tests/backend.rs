@@ -417,6 +417,103 @@ async fn long_tweet_lookups_are_split_into_batches() {
     assert_eq!(sizes, [50, 50, 20]);
 }
 
+/// The Community Notes notification of the notifications page `notes`.
+fn note_notification(items: &[FeedItem]) -> &twitty_model::Notification {
+    items
+        .iter()
+        .find_map(|i| match i {
+            FeedItem::Notification(n) if n.note.is_some() => Some(n),
+            _ => None,
+        })
+        .unwrap()
+}
+
+/// How many requests `operation` received.
+async fn calls(server: &MockServer, operation: &str) -> usize {
+    let requests = server.received_requests().await.unwrap();
+    requests.iter().filter(|r| r.url.path().ends_with(&format!("/{operation}"))).count()
+}
+
+#[tokio::test]
+async fn a_community_note_notification_gets_the_tweet_its_note_is_on() {
+    let server = MockServer::start().await;
+    serve(&server, "NotificationsTimeline", fixture("notifications-note")).await;
+    let lookup = fixture("tweet-results");
+    let noted = twitty_x::translate::posts(&lookup).posts.remove(0);
+    serve(
+        &server,
+        "BirdwatchFetchOneNote",
+        json!({"data": {"birdwatch_note_by_rest_id": {
+            "rest_id": "6007038048061808725",
+            "is_media_note": false,
+            "tweet_results": {"result": {"rest_id": noted.id.as_str()}}
+        }}}),
+    )
+    .await;
+    serve(&server, "TweetResultsByRestIds", lookup).await;
+    let b = backend(&server);
+    let notifications = FeedSource::Notifications { filter: NotificationFilter::All };
+
+    let page = b.feed(&notifications, PageRequest::First).await.unwrap();
+    let n = note_notification(&page.items);
+    assert_eq!(n.target.as_deref(), Some(&noted));
+    let requests = server.received_requests().await.unwrap();
+    let note = requests.iter().find(|r| r.url.path().ends_with("/BirdwatchFetchOneNote")).unwrap();
+    assert_eq!(variables_of(note), json!({"note_id": "6007038048061808725"}));
+    let lookup =
+        requests.iter().find(|r| r.url.path().ends_with("/TweetResultsByRestIds")).unwrap();
+    assert_eq!(variables_of(lookup)["tweetIds"], json!([noted.id.as_str()]));
+
+    // A refresh asks for the tweet again (fresh counters), not for the note.
+    let again = b.feed(&notifications, PageRequest::First).await.unwrap();
+    assert_eq!(note_notification(&again.items).target.as_deref(), Some(&noted));
+    assert_eq!(calls(&server, "BirdwatchFetchOneNote").await, 1);
+    assert_eq!(calls(&server, "TweetResultsByRestIds").await, 2);
+}
+
+#[tokio::test]
+async fn a_media_note_notification_has_no_tweet_and_looks_none_up() {
+    let server = MockServer::start().await;
+    serve(&server, "NotificationsTimeline", fixture("notifications-note")).await;
+    serve(
+        &server,
+        "BirdwatchFetchOneNote",
+        json!({"data": {"birdwatch_note_by_rest_id": {
+            "rest_id": "6007038048061808725", "is_media_note": true, "tweet_results": {}
+        }}}),
+    )
+    .await;
+    let b = backend(&server);
+    let notifications = FeedSource::Notifications { filter: NotificationFilter::All };
+    let page = b.feed(&notifications, PageRequest::First).await.unwrap();
+
+    let n = note_notification(&page.items);
+    assert!(n.target.is_none() && n.note.is_some(), "the note alone");
+    assert_eq!(calls(&server, "TweetResultsByRestIds").await, 0);
+}
+
+#[tokio::test]
+async fn a_failed_note_lookup_keeps_the_page_and_is_tried_again() {
+    let server = MockServer::start().await;
+    serve(&server, "NotificationsTimeline", fixture("notifications-note")).await;
+    Mock::given(path_regex("/BirdwatchFetchOneNote$"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let b = backend(&server);
+    let notifications = FeedSource::Notifications { filter: NotificationFilter::All };
+
+    let page = b.feed(&notifications, PageRequest::First).await.unwrap();
+    let n = note_notification(&page.items);
+    assert!(n.target.is_none() && n.note.is_some());
+    let health = b.health();
+    let note = health.iter().find(|h| h.name == "BirdwatchFetchOneNote").unwrap();
+    assert_eq!(note.errors, 1);
+
+    b.feed(&notifications, PageRequest::First).await.unwrap();
+    assert_eq!(calls(&server, "BirdwatchFetchOneNote").await, 2, "failures aren't remembered");
+}
+
 #[tokio::test]
 async fn health_counts_rows_errors_and_drift() {
     let server = MockServer::start().await;

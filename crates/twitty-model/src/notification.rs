@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{NotificationId, Post, Profile, RichText};
+use crate::{CommunityNote, NotificationId, Post, Profile, RichText};
 
 /// An activity notification (likes, follows, retweets…).
 ///
@@ -19,6 +19,8 @@ pub struct Notification {
     pub text: RichText,
     /// The tweet the notification is about, when there is one.
     pub target: Option<Box<Post>>,
+    /// The Community Note a [`NotificationKind::CommunityNote`] is about.
+    pub note: Option<CommunityNote>,
 }
 
 /// What happened.
@@ -29,6 +31,8 @@ pub enum NotificationKind {
     Repost,
     Follow,
     Quote,
+    /// Readers added a Community Note to a tweet the viewer interacted with.
+    CommunityNote,
     /// Anything Twitty has no dedicated presentation for.
     Other,
 }

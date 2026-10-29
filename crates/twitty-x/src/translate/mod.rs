@@ -17,7 +17,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use serde_json::Value;
 use twitty_model::{
-    FeedItem, FeedPage, FollowAction, FollowStatus, PageToken, Post, PostId, Profile, ThreadView,
+    FeedItem, FeedPage, FollowAction, FollowStatus, NotificationId, PageToken, Post, PostId,
+    Profile, ThreadView,
 };
 
 pub use list::{TranslatedLists, lists};
@@ -31,6 +32,16 @@ pub(crate) struct Ctx {
     users: HashMap<String, Arc<Profile>>,
     /// Problems met while translating, for diagnostics and tests.
     pub warnings: Vec<String>,
+    /// Notifications whose tweet must be looked up through their note.
+    pub(crate) notes: Vec<NoteLookup>,
+}
+
+/// A Community Notes notification that names its note but not the tweet.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NoteLookup {
+    pub(crate) notification: NotificationId,
+    /// Twitter's note id, for `BirdwatchFetchOneNote`.
+    pub(crate) note: String,
 }
 
 impl Ctx {
@@ -80,6 +91,8 @@ pub struct Translated {
     pub page: FeedPage,
     /// Entries that were translated as `Unsupported` or partially, with reasons.
     pub warnings: Vec<String>,
+    /// Notifications of the page whose tweet the backend still has to find.
+    pub(crate) notes: Vec<NoteLookup>,
 }
 
 /// Translates any timeline response (home, search, user, bookmarks,
@@ -109,7 +122,15 @@ pub fn feed_page(root: &Value) -> Translated {
             Entry::Other { id } => tracing::debug!("skipping entry {id}"),
         }
     }
-    Translated { page, warnings: ctx.warnings }
+    Translated { page, warnings: ctx.warnings, notes: ctx.notes }
+}
+
+/// The tweet a `BirdwatchFetchOneNote` response's note is attached to.
+/// `None` for a media note, which Twitter attaches to an image (shared by
+/// many tweets) rather than to one tweet.
+pub(crate) fn note_post(root: &Value) -> Option<PostId> {
+    let note = at(root, &["data", "birdwatch_note_by_rest_id"])?;
+    str_at(note, &["tweet_results", "result", "rest_id"]).map(PostId::new)
 }
 
 /// The signed-in account from a `Viewer` response.
@@ -286,6 +307,19 @@ fn module(entry: &str, display_type: &str, items: &[Value], ctx: &mut Ctx) -> Ve
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_note_lookup_names_its_tweet_and_a_media_note_none() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/birdwatch-note.json")).unwrap();
+        assert_eq!(note_post(&fixture), Some(PostId::new("7900511420478210047")));
+        // A media note, attached to an image rather than to one tweet.
+        let media = json!({"data": {"birdwatch_note_by_rest_id": {
+            "rest_id": "1", "is_media_note": true, "tweet_results": {}
+        }}});
+        assert_eq!(note_post(&media), None);
+        assert_eq!(note_post(&json!({"data": {}})), None);
+    }
 
     #[test]
     fn a_pinned_tweet_is_marked_and_a_pinned_tombstone_stays_one() {

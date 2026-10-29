@@ -1,5 +1,5 @@
 {
-  "note": "Fallback GraphQL operation catalog, used only when the runtime cache (refreshed from x.com) has no entry. Query ids rotate with X web releases, so entries here go stale; regenerate them from a live `twitty-x-cli refresh-ids` run. All entries were discovered live from the logged-in web client's bundles on 2026-10-24, except TweetResultsByRestIds (2026-10-26).",
+  "note": "Fallback GraphQL operation catalog, used only when the runtime cache (refreshed from x.com) has no entry. Query ids rotate with X web releases, so entries here go stale; regenerate them from a live `twitty-x-cli refresh-ids` run. All entries were discovered live from the logged-in web client's bundles on 2026-10-24, except TweetResultsByRestIds (2026-10-26). BirdwatchFetchOneNote was added from the 2026-10-24 discovery cache and verified live on 2026-10-28.",
   "operations": {
     "HomeTimeline": {
       "query_id": "0toR0MxC06yY3Fc57GXBpA",
@@ -894,6 +894,30 @@
         "withArticleVoiceOver",
         "withGrokAnalyze",
         "withDisallowedReplyControls"
+      ]
+    },
+    "BirdwatchFetchOneNote": {
+      "query_id": "eKB7Azg-Y5Yy0PhXFVDxiQ",
+      "method": "GET",
+      "source": "live discovery 2026-10-24 (logged-in legacy bundles), verified live 2026-10-28",
+      "feature_switches": [
+        "responsive_web_birdwatch_media_notes_enabled",
+        "responsive_web_birdwatch_url_notes_enabled",
+        "responsive_web_grok_community_note_translation_is_enabled",
+        "responsive_web_birdwatch_fast_notes_badge_enabled",
+        "responsive_web_birdwatch_live_note_enabled",
+        "responsive_web_birdwatch_note_internal_insights_enabled",
+        "responsive_web_grok_community_note_auto_translation_is_enabled",
+        "responsive_web_graphql_timeline_navigation_enabled",
+        "profile_label_improvements_pcf_label_in_post_enabled",
+        "responsive_web_profile_redirect_enabled",
+        "rweb_tipjar_consumption_enabled",
+        "verified_phone_label_enabled"
+      ],
+      "field_toggles": [
+        "withPayments",
+        "withDmBlocks",
+        "withAuxiliaryUserLabels"
       ]
     }
   }

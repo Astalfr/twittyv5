@@ -23,6 +23,7 @@ const FIXTURES: &[&str] = &[
     "search-rust",
     "tweetdetail",
     "notifications",
+    "notifications-note",
     "userreplies-nasa",
     "usermedia-nasa",
     "usermedia-nasa-2",
@@ -182,6 +183,20 @@ fn summary(page: &FeedPage) -> String {
                     actors,
                     short(n.text.text(), 40)
                 );
+                if let Some(note) = &n.note {
+                    let links = note
+                        .body
+                        .spans()
+                        .iter()
+                        .filter(|s| matches!(s.kind, SpanKind::Link { .. }))
+                        .count();
+                    let _ = write!(
+                        s,
+                        "\n  note \"{}\" ({links} links) {}",
+                        short(note.body.text(), 50),
+                        note.url
+                    );
+                }
                 if let Some(t) = &n.target {
                     s.push('\n');
                     s.push_str(&post_line(t, "  "));
